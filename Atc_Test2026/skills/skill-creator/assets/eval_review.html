@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skill Evaluation Review</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 20px;
+            color: #333;
+        }
+        h1, h2, h3 {
+            color: #2c3e50;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .score {
+            font-size: 24px;
+            font-weight: bold;
+            color: #3498db;
+        }
+        .criteria {
+            margin-top: 15px;
+        }
+        .criterion {
+            margin-bottom: 10px;
+        }
+        .criterion-name {
+            font-weight: bold;
+        }
+        .criterion-score {
+            float: right;
+            color: #27ae60;
+        }
+        .feedback {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-left: 4px solid #3498db;
+        }
+        .error {
+            color: #e74c3c;
+        }
+        .success {
+            color: #27ae60;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Skill Evaluation Review</h1>
+        
+        <div class="section">
+            <h2>Skill Information</h2>
+            <p><strong>Skill Name:</strong> <span id="skill-name">Skill Creator</span></p>
+            <p><strong>Evaluation Date:</strong> <span id="eval-date">2026-03-25</span></p>
+        </div>
+        
+        <div class="section">
+            <h2>Overall Score</h2>
+            <p class="score" id="overall-score">0.0/10</p>
+        </div>
+        
+        <div class="section">
+            <h2>Criteria Scores</h2>
+            <div class="criteria" id="criteria-scores">
+                <!-- Criteria will be inserted here -->
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>Feedback</h2>
+            <div class="feedback" id="feedback">
+                <!-- Feedback will be inserted here -->
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Sample data
+        const evalData = {
+            skill_name: "Skill Creator",
+            evaluation_date: "2026-03-25",
+            overall_score: 9.5,
+            criteria: [
+                { name: "Functionality", score: 9.0 },
+                { name: "Reliability", score: 9.5 },
+                { name: "Performance", score: 9.0 },
+                { name: "User Experience", score: 9.5 },
+                { name: "Code Quality", score: 9.0 }
+            ],
+            feedback: "The Skill Creator skill demonstrates excellent functionality and reliability. It provides a comprehensive set of tools for creating and managing skills, with a user-friendly interface and well-structured code. Minor improvements could be made to performance optimization and documentation."
+        };
+        
+        // Populate the review
+        document.getElementById('skill-name').textContent = evalData.skill_name;
+        document.getElementById('eval-date').textContent = evalData.evaluation_date;
+        document.getElementById('overall-score').textContent = evalData.overall_score + "/10";
+        
+        const criteriaContainer = document.getElementById('criteria-scores');
+        evalData.criteria.forEach(criterion => {
+            const criterionDiv = document.createElement('div');
+            criterionDiv.className = 'criterion';
+            criterionDiv.innerHTML = `
+                <span class="criterion-name">${criterion.name}:</span>
+                <span class="criterion-score">${criterion.score}/10</span>
+            `;
+            criteriaContainer.appendChild(criterionDiv);
+        });
+        
+        document.getElementById('feedback').textContent = evalData.feedback;
+    </script>
+</body>
+</html>

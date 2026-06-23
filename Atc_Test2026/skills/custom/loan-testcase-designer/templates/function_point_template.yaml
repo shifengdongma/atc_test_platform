@@ -1,0 +1,492 @@
+# ============================================================
+# 需求功能点模板 (Requirement Function Point Template)
+# ============================================================
+#
+# 定位：需求清单 (REQ) → 【功能点 (FP)】 → 测试用例 (TC)
+#
+# 设计原则：
+#   1. 原子性 —— 每个 FP 对应一个可独立验证的行为
+#   2. 可测性 —— 每个 FP 可直接推导出测试用例（正向+负向+边界）
+#   3. 可追溯 —— FP 向上关联 REQ，向下关联 TC
+#   4. MECE   —— 同一 REQ 下的 FP 互不重叠、完全穷尽
+#
+# 命名规范：
+#   FP-{模块缩写}-{REQ序号}.{FP序号}
+#   例: FP-EAL-005.1  (Extra Available Limit 模块, 来自 REQ-005, 第1个功能点)
+# ============================================================
+
+metadata:
+  project: "DBP-Loan"
+  version: "LOAN_v7.0.22"
+  jira: "SPDBP-82486"
+  feature: "Overpayment as Available to Spend"
+  generated_at: "2026-02-28T18:00:00Z"
+  source_requirements: "V7.0.22_requirements.md"
+  total_function_points: 0       # 自动统计
+  author: "QA Platform"
+
+# ============================================================
+# 模块列表 (按业务域 MECE 划分)
+# ============================================================
+modules:
+
+  - id: "module-eal"
+    name: "Extra Available Limit"
+    description: "Overpayment 对子产品可用额度的影响"
+    source_reqs: ["REQ-005", "REQ-001"]
+
+    function_points:
+
+      # ── 功能点完整示例 ──────────────────────────────
+      - id: "FP-EAL-005.1"
+        title: "1-tenor MCCIC 的 Extra Available Limit 等于 Overpayment Amount"
+        type: "calculation"          # 见下方枚举
+        priority: "P0"
+
+        # 向上追溯：来自哪条需求，引用原文片段
+        source:
+          req_ids: ["REQ-005"]
+          original_text: >
+            Extra Available Limit: Product 813, Sub-product 102,
+            Variant ONE_TERM = Overpayment Amount.
+          section: "3.2.1 Extra Available Limit"
+          doc_type: "PRD"              # PRD / TD / PRD+TD
+
+        # 功能点描述：做什么 + 怎么做（原子级）
+        description: >
+          当用户有 Overpayment 时，102 ONE_TERM 的 Extra Available Limit
+          等于该用户的 Overpayment Amount。
+
+        # 业务规则：该功能点涉及的具体规则
+        business_rules:
+          - rule_id: "BR-EAL-01"
+            description: "Extra Available Limit = Overpayment Amount (仅 102 ONE_TERM 和 106)"
+            formula: "Extra_Available_Limit = Overpayment_Amount"
+          - rule_id: "BR-EAL-02"
+            description: "Sub Product Actual Available Limit = min(Product AAL, Sub Product AL) + Extra Available Limit"
+            formula: "SPAAL = min(PAAL, SPAL) + EAL"
+
+        # 输入/输出：明确参数和约束
+        inputs:
+          - name: "Overpayment Amount"
+            type: "decimal"
+            constraints: ">= 0"
+            example: "$100"
+          - name: "Sub-product"
+            type: "enum"
+            constraints: "102 ONE_TERM | 106"
+            example: "102 ONE_TERM"
+
+        outputs:
+          - name: "Extra Available Limit"
+            type: "decimal"
+            description: "等于 Overpayment Amount"
+            example: "$100"
+          - name: "Sub Product Actual Available Limit"
+            type: "decimal"
+            description: "min(PAAL, SPAL) + EAL"
+            example: "$600"
+
+        # 前置条件
+        preconditions:
+          - "用户账户状态为 Active"
+          - "用户存在 Overpayment 余额"
+          - "产品为 813"
+
+        # 边界与异常提示：指导测试用例设计
+        test_hints:
+          positive:
+            - "Overpayment=$100, Available Limit=$500 → SPAAL=$600"
+            - "多笔 Overpayment 累加后计算"
+          negative:
+            - "Overpayment=$0 → EAL=0"
+            - "Sub-product 102 MULTI_TERM → EAL=0"
+            - "Sub-product 104/103/107 → EAL=0"
+          boundary:
+            - "Overpayment=0.01 (最小正值)"
+            - "Overpayment 等于 Total Credit Limit"
+            - "Available Limit=0 时仅靠 Overpayment"
+
+        # 关联信息
+        dependencies: []             # 依赖其他 FP
+        affects: ["FP-DSB-006.1"]   # 影响其他 FP
+        api_path: ""                 # 涉及的 API（如有）
+        tags: ["extra-limit", "calculation", "102-one-term", "106"]
+
+      # ── 另一个功能点示例 ────────────────────────────
+      - id: "FP-EAL-005.2"
+        title: "非白名单子产品不享受 Extra Available Limit"
+        type: "constraint"
+        priority: "P0"
+
+        source:
+          req_ids: ["REQ-005", "REQ-021"]
+          original_text: >
+            Sub-Product 104, 103, 107 and 102 multi-tenor being unable
+            to use overpayment as a disbursement source.
+          section: "3.2.1 Extra Available Limit"
+          doc_type: "PRD"
+
+        description: >
+          102 MULTI_TERM、104 Cash Loan、103 Balance Transfer、
+          107 Split Payment 的 Extra Available Limit 始终为 0。
+
+        business_rules:
+          - rule_id: "BR-EAL-03"
+            description: "白名单外子产品 Extra Available Limit = 0"
+
+        inputs:
+          - name: "Sub-product + Variant"
+            type: "enum"
+            constraints: "102 MULTI_TERM | 104 | 103 | 107"
+
+        outputs:
+          - name: "Extra Available Limit"
+            type: "decimal"
+            description: "固定为 0"
+
+        preconditions:
+          - "用户有 Overpayment 余额"
+
+        test_hints:
+          positive:
+            - "逐一验证 104, 103, 107, 102 MULTI_TERM 的 EAL=0"
+          negative:
+            - "白名单子产品 (102 ONE_TERM, 106) 的 EAL > 0"
+          boundary:
+            - "Overpayment 金额极大时，非白名单子产品仍为 0"
+
+        dependencies: ["FP-EAL-005.1"]
+        affects: []
+        api_path: ""
+        tags: ["extra-limit", "constraint", "whitelist"]
+
+# ============================================================
+# 功能点类型枚举 (type 字段可选值)
+# ============================================================
+# calculation  - 计算/公式类（有明确公式的）
+# workflow     - 流程/状态流转类（涉及多步骤状态变化）
+# constraint   - 约束/规则类（限制条件、白名单、开关）
+# data_record  - 数据记录类（写表、记日志、流水）
+# api_behavior - 接口行为类（API 入参出参、错误码）
+# display      - 展示/UI 类（字段展示、格式化）
+# config       - 配置类（开关、参数配置）
+# integration  - 集成/交互类（跨系统调用）
+
+# ============================================================
+# 全局关联层：解决单个 FP 分析丢失关联性的问题
+# ============================================================
+#
+# 设计理念：
+#   FP 是「点」，下面三个结构描述「线」和「面」。
+#   - data_flows    = 一条数据从头到尾经过哪些 FP（线）
+#   - invariants    = 跨 FP 始终成立的全局约束（面）
+#   - lifecycle_scenarios = 端到端业务路径，把多个 FP 串起来（线→面）
+#
+#   AI 生成测试用例时：
+#     1. 先按单个 FP 的 test_hints 生成原子用例
+#     2. 再按 lifecycle_scenarios 生成集成/E2E 用例
+#     3. 最后按 invariants 生成跨 FP 校验用例
+# ============================================================
+
+# ────────────────────────────────────────────────────────────
+# 一、数据流 (Data Flows)
+# ────────────────────────────────────────────────────────────
+# 追踪一个关键数据实体在整个需求中的流转路径
+# 作用：确保每个 FP 的输入/输出与上下游一致，不会断链
+data_flows:
+
+  - id: "DF-001"
+    entity: "Overpayment Amount"
+    description: "Overpayment 金额从可用额度计算到流水记录的完整流转"
+    # 每一跳描述：在哪个 FP、以什么身份出现、值如何变化
+    flow_path:
+      - fp_id: "FP-EAL-005.1"
+        role: "input"                     # input / output / transform / check
+        field: "Overpayment Amount"
+        description: "作为 Extra Available Limit 的计算来源"
+        value_example: "$100"
+
+      - fp_id: "FP-DSB-006.1"
+        role: "check"
+        field: "Sub Product Actual Available Limit"
+        description: "放款前检查时校验包含 EAL 的可用额度"
+        value_example: "$600 (500+100)"
+
+      - fp_id: "FP-EMK-007.1"
+        role: "transform"
+        field: "Earmarked Overpayment"
+        description: "Checkout 时冻结为 Earmarked Overpayment"
+        value_example: "$100 → Earmarked"
+        state_change: "Available Overpayment: $100 → $0, Earmarked Overpayment: $0 → $100"
+
+      - fp_id: "FP-EMK-009.1"
+        role: "transform"
+        field: "Earmarked Overpayment"
+        description: "订单前退款时按优先级解冻"
+        value_example: "先解冻 Earmarked Limit，再解冻 Earmarked Overpayment"
+        state_change: "退款 $50: Earmarked Limit $500→$450, Earmarked Overpayment 不变"
+
+      - fp_id: "FP-LOAN-010.1"
+        role: "transform"
+        field: "Direct Repay Amount"
+        description: "订单确认时用 Earmarked Overpayment 直接还款"
+        value_example: "Earmarked Overpayment $100 → 直接还款 $100"
+        state_change: "Loan O/S: $550→$450, Earmarked Overpayment: $100→$0"
+
+      - fp_id: "FP-OPF-020.1"
+        role: "output"
+        field: "overpayment_flow_tab record"
+        description: "每次变动写入流水表"
+        value_example: "tran_type=Transaction/Clearing/Refund"
+
+    # 该数据流产生的集成测试点
+    integration_test_hints:
+      - "验证 Earmarked Overpayment 在 Checkout→Confirm 全链路中的数值一致性"
+      - "验证退款后 Earmarked Overpayment 的值在下游贷款创建中正确引用"
+      - "验证每次 Overpayment 变动都有对应的 flow_tab 记录"
+
+  - id: "DF-002"
+    entity: "Available Limit"
+    description: "可用额度在交易生命周期中的变化链"
+    flow_path:
+      - fp_id: "FP-EAL-005.1"
+        role: "input"
+        field: "Product Available Limit"
+        description: "初始可用额度"
+        value_example: "$500"
+
+      - fp_id: "FP-EMK-007.1"
+        role: "transform"
+        field: "Earmarked Limit"
+        description: "Checkout 冻结 → Product Available Limit 下降"
+        state_change: "PAL: $500→$0, Earmarked Limit: $0→$500"
+
+      - fp_id: "FP-LOAN-010.1"
+        role: "transform"
+        field: "Used Limit"
+        description: "贷款创建 → Earmarked 转为 Used"
+        state_change: "Earmarked: $450→$0, Used: $0→$450, PAL=500-450-0-0=$50"
+
+    integration_test_hints:
+      - "端到端验证 PAL = Total - Used - Frozen - Earmarked 在每个阶段都成立"
+      - "验证 Available Limit 与 Earmarked Limit 之间的转换无丢失"
+
+# ────────────────────────────────────────────────────────────
+# 二、全局不变量 (Invariants)
+# ────────────────────────────────────────────────────────────
+# 跨 FP 的全局约束，在任何操作前后都必须成立
+# 作用：用于生成「校验类」测试用例——在每个关键步骤后验证不变量
+invariants:
+
+  - id: "INV-001"
+    title: "额度守恒"
+    formula: "Product Available Limit = Total Credit Limit - Used Limit - Frozen Limit - Earmarked Limit"
+    description: "无论何种操作，可用额度公式始终成立"
+    check_after_fps:
+      - "FP-EMK-007.1"    # Checkout 冻结后
+      - "FP-EMK-009.1"    # 退款解冻后
+      - "FP-LOAN-010.1"   # 贷款创建后
+    severity: "P0"
+    test_hint: "在每个生命周期阶段结束后查询 PAL，验证公式成立"
+
+  - id: "INV-002"
+    title: "Overpayment 守恒"
+    formula: "Available Overpayment + Earmarked Overpayment = Total Overpayment (accounting for consumed)"
+    description: "Overpayment 总量在冻结/解冻过程中守恒，仅在直接还款时消耗"
+    check_after_fps:
+      - "FP-EMK-007.1"    # 冻结后
+      - "FP-EMK-009.1"    # 解冻后
+      - "FP-LOAN-010.1"   # 直接还款后（此时 consumed）
+    severity: "P0"
+    test_hint: "每次 Overpayment 状态变化后验证总量等式"
+
+  - id: "INV-003"
+    title: "Extra Available Limit 一致性"
+    formula: "Extra Available Limit = Available Overpayment (for whitelisted sub-products only)"
+    description: "EAL 始终等于可用（未冻结）的 Overpayment，白名单外为 0"
+    check_after_fps:
+      - "FP-EAL-005.1"    # 计算后
+      - "FP-EMK-007.1"    # 冻结后（EAL 应变 0）
+      - "FP-EMK-009.1"    # 部分解冻后（EAL 可能恢复）
+    severity: "P0"
+    test_hint: "冻结后 EAL=0, 解冻后 EAL=释放的 Available Overpayment"
+
+  - id: "INV-004"
+    title: "贷款金额等式"
+    formula: "Loan Amount = Earmarked Limit + Earmarked Overpayment (at order confirm)"
+    description: "贷款金额必须等于冻结的 Limit + 冻结的 Overpayment"
+    check_after_fps:
+      - "FP-LOAN-010.1"
+    severity: "P0"
+    test_hint: "贷款创建后验证 Loan Amount = EL + EO"
+
+  - id: "INV-005"
+    title: "流水完整性"
+    formula: "count(overpayment_flow_tab records) = count(overpayment state changes)"
+    description: "Overpayment 每次状态变化都必须有对应的流水记录"
+    check_after_fps:
+      - "FP-OPF-020.1"
+    severity: "P1"
+    test_hint: "端到端执行后，验证 flow_tab 记录条数与状态变化次数一致"
+
+# ────────────────────────────────────────────────────────────
+# 三、生命周期场景 (Lifecycle Scenarios)
+# ────────────────────────────────────────────────────────────
+# 端到端的业务路径，串联多个 FP，产出集成/E2E 测试用例
+# 作用：确保 FP 之间的「接缝」被覆盖，不会出现上游输出≠下游输入的问题
+lifecycle_scenarios:
+
+  - id: "LS-001"
+    title: "Happy Path: 购买→冻结→确认→还款→结清"
+    description: "完整生命周期，无退款"
+    priority: "P0"
+    # 按时间顺序列出经过的 FP 和关键状态
+    steps:
+      - order: 1
+        fp_id: "FP-EAL-005.1"
+        action: "计算 Extra Available Limit"
+        state_snapshot:
+          Available_Limit: "$500"
+          Overpayment: "$100"
+          Extra_Available_Limit: "$100"
+          SPAAL_102_ONE_TERM: "$600"
+
+      - order: 2
+        fp_id: "FP-DSB-006.1"
+        action: "放款前检查 $600"
+        state_snapshot:
+          check_result: "PASS ($600 <= $600)"
+
+      - order: 3
+        fp_id: "FP-EMK-007.1"
+        action: "Checkout 冻结"
+        state_snapshot:
+          Earmarked_Limit: "$500"
+          Earmarked_Overpayment: "$100"
+          Available_Limit: "$0"
+          Extra_Available_Limit: "$0"
+
+      - order: 4
+        fp_id: "FP-LOAN-010.1"
+        action: "订单确认 → 创建贷款 → Overpayment 直接还款"
+        state_snapshot:
+          Loan_Amount: "$600"
+          Direct_Repay: "$100"
+          Loan_OS: "$500"
+          Used_Limit: "$500"
+          Earmarked_Overpayment: "$0"
+
+      - order: 5
+        fp_id: "FP-OPF-020.1"
+        action: "验证流水记录完整"
+        state_snapshot:
+          flow_records: "Transaction + Clearing"
+
+    # 检查点：每两个相邻 FP 之间的接缝验证
+    seam_checks:
+      - between: ["FP-EAL-005.1", "FP-DSB-006.1"]
+        check: "SPAAL 在 Pre-check 中被正确引用"
+      - between: ["FP-EMK-007.1", "FP-LOAN-010.1"]
+        check: "Earmarked Limit + Earmarked Overpayment = Loan Amount"
+      - between: ["FP-LOAN-010.1", "FP-OPF-020.1"]
+        check: "直接还款事件有对应 flow_tab 记录"
+
+    # 该场景需要验证的不变量
+    invariant_checks: ["INV-001", "INV-002", "INV-003", "INV-004", "INV-005"]
+
+  - id: "LS-002"
+    title: "含订单前退款的生命周期"
+    description: "购买→冻结→部分退款→确认→还款"
+    priority: "P0"
+    steps:
+      - order: 1
+        fp_id: "FP-EAL-005.1"
+        action: "计算 Extra Available Limit"
+        state_snapshot:
+          Available_Limit: "$500"
+          Overpayment: "$100"
+          SPAAL: "$600"
+
+      - order: 2
+        fp_id: "FP-EMK-007.1"
+        action: "Checkout 冻结 $600"
+        state_snapshot:
+          Earmarked_Limit: "$500"
+          Earmarked_Overpayment: "$100"
+
+      - order: 3
+        fp_id: "FP-EMK-009.1"
+        action: "订单前退款 $50 (优先解冻 Earmarked Limit)"
+        state_snapshot:
+          Earmarked_Limit: "$450"
+          Earmarked_Overpayment: "$100"
+          Available_Limit: "$50"
+
+      - order: 4
+        fp_id: "FP-LOAN-010.1"
+        action: "确认 → 贷款 $550 → 直接还款 $100"
+        state_snapshot:
+          Loan_Amount: "$550"
+          Loan_OS: "$450"
+
+    seam_checks:
+      - between: ["FP-EMK-007.1", "FP-EMK-009.1"]
+        check: "退款优先级：先 Earmarked Limit，再 Earmarked Overpayment"
+      - between: ["FP-EMK-009.1", "FP-LOAN-010.1"]
+        check: "退款后的 Earmarked 总量 = 新的 Loan Amount"
+
+    invariant_checks: ["INV-001", "INV-002", "INV-004"]
+
+  - id: "LS-003"
+    title: "含订单后退款 + 日还款的生命周期"
+    description: "购买→确认→贷款→订单后退款→Overpayment回充→日还款"
+    priority: "P0"
+    steps:
+      - order: 1
+        fp_id: "FP-LOAN-010.1"
+        action: "贷款已创建，Loan O/S=$450"
+        state_snapshot:
+          Loan_OS: "$450"
+          Overpayment: "$0"
+
+      - order: 2
+        fp_id: "FP-LOAN-011.1"
+        action: "订单后退款 $80 → 回到 Overpayment"
+        state_snapshot:
+          Overpayment: "$80"
+          Extra_Available_Limit: "$80"
+          Loan_OS: "$450"
+
+      - order: 3
+        fp_id: "FP-OPF-020.1"
+        action: "日还款定时任务用 Overpayment $80 还款"
+        state_snapshot:
+          Loan_OS: "$370"
+          Overpayment: "$0"
+          Extra_Available_Limit: "$0"
+
+    seam_checks:
+      - between: ["FP-LOAN-011.1", "FP-OPF-020.1"]
+        check: "退款回充的 Overpayment 被日还款正确消耗"
+      - between: ["FP-LOAN-011.1", "FP-EAL-005.1"]
+        check: "退款后 EAL 恢复到 Available Overpayment 金额"
+
+    invariant_checks: ["INV-002", "INV-003", "INV-005"]
+
+# ============================================================
+# 统计摘要 (自动生成)
+# ============================================================
+summary:
+  by_module: {}     # { module_id: count }
+  by_type: {}       # { type: count }
+  by_priority: {}   # { P0: x, P1: y, ... }
+  coverage:
+    total_reqs: 0
+    covered_reqs: 0
+    uncovered_reqs: []
+  # 关联性统计
+  data_flows_count: 0
+  invariants_count: 0
+  lifecycle_scenarios_count: 0
+  seam_checks_count: 0           # 接缝检查总数

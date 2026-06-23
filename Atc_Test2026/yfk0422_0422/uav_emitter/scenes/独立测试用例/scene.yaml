@@ -1,0 +1,25 @@
+# ============================================
+# 场景配置: 独立测试设计
+# ============================================
+
+name: "独立测试用例"
+description: "根据测试实际情况编辑执行"
+
+# UAV 配置列表
+# 每个 UAV 对应一个 JSON 数据文件
+uavs:
+  - file: "1.json"
+    enabled: false        # 是否发射（默认 true）
+    # delay_ms: 0          # 延迟发射（毫秒）
+    
+  - file: "2.json"
+    enabled: false
+  
+  - file: "3.json"
+    enabled: true
+    # delay_ms: 500
+
+# 场景参数（可选，用于文档说明）
+params:
+  formation_type: "parallel"
+  distance: 50

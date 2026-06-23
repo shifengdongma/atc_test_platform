@@ -1,0 +1,193 @@
+# ==============================================================================
+# DBP 借贷用例设计师 — 测试用例 YAML 格式模版
+# Schema version: case_model_v1.0
+#
+# 字段说明：
+#   precondition / steps / expected  支持 字符串 或 列表两种写法
+#     - 列表写法：每项作为一个步骤，自动拼接为 "1、... 2、..." 格式
+#     - 字符串写法：直接使用，适合已含编号的长文本
+#   req_source   支持 字符串 或 列表（多个需求，自动以 ", " 连接）
+#   fp_source    支持 字符串 或 列表（多个功能点，自动以 ", " 连接）
+#   tags         列表，可包含: AI-GEN / MANUAL / FundLoss / accept / 基线 等
+#
+# XMind 节点层级映射：
+#   Root   → project.name (N条用例)
+#   L1     → 项目分析 / modules[].name
+#   L2     → 项目分析子节点 / function_points[].title
+#   L3     → case.id: case.title
+#   L4     → 前置条件
+#   L5     → 测试步骤
+#   L6     → 预期结果
+#   L7     → 用例等级
+#   L8     → Case ID
+#   L9     → 需求来源
+#   L10    → 功能点来源
+#   (标签由 tags 字段驱动，渲染为 XMind label，不占层级)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 项目元数据
+# ------------------------------------------------------------------------------
+project:
+  name: "Overpayment Available to Spend"   # 项目/特性名称，对应 XMind 根节点
+  version: "LOAN_v7.0.22_20260403"         # 版本号
+  jira: "SPDBP-XXXXX"                      # JIRA 单号
+  total_cases: 4                           # 总用例数（生成完成后填写实际值）
+
+# ------------------------------------------------------------------------------
+# 项目分析区（对应 XMind Tab-1 "项目分析" 节点）
+# ------------------------------------------------------------------------------
+project_analysis:
+  background: >-
+    随着业务增长，需要支持 Overpayment 金额作为 Available to Spend，
+    引入 Extra Available Limit (EAL) 计算逻辑。EAL 根据用户子产品类型不同分别计算，
+    放款前须校验 EAL 是否充足，还款后自动更新 Overpayment 金额。
+
+  prd:
+    - label: "【BE】"
+      url: "https://confluence/display/SPDB/V7.0.22+Overpayment..."
+
+  design:
+    - label: "【放款】"
+      url: "https://confluence/display/SPDB/..."
+    - label: "【还款】"
+      url: "https://confluence/display/SPDB/..."
+
+  test_plan: "https://confluence/display/SPDB/..."
+
+  key_changes:
+    - "Extra Available Limit 新增计算逻辑"
+    - "放款流程增加 EAL 校验"
+    - "还款触发 Overpayment 更新"
+
+  test_focus: "EAL 计算精度、放款与还款联动、多子产品隔离"
+
+  test_strategy:
+    - "验证范围：EAL 计算、放款校验、还款更新、余额变更"
+    - "不验证模块：用户注册、基础产品配置"
+
+  test_preparation: "需准备多子产品测试账号，预计回归周期 2 天"
+
+# ------------------------------------------------------------------------------
+# 业务场景模块列表（Tab-1 节点，按业务场景而非技术功能域划分）
+# ------------------------------------------------------------------------------
+modules:
+
+  # ── 模块 1：Extra Available Limit ──────────────────────────────────────────
+  - name: "Extra Available Limit"
+    total_cases: 2                         # 本模块用例数
+    function_points:
+
+      # [基线] 前缀：E2E 生命周期场景，强制 P0
+      - title: "[基线] EAL 完整生命周期: 开户→Overpayment存入→EAL查询→放款校验"
+        cases:
+          - id: "TC-EAL-000-基线"
+            title: "EAL 端到端完整生命周期验证"
+            precondition:
+              - "用户持有 102 ONE_TERM 子产品，账户状态正常"
+              - "账户初始 Overpayment=$0"
+            steps:
+              - "存入 Overpayment=$100"
+              - "查询 102 ONE_TERM EAL"
+              - "发起放款 $100 触发 EAL 校验"
+            expected:
+              - "EAL=$100，等于 Overpayment Amount"
+              - "放款校验通过"
+              - "放款后 Overpayment 扣减，EAL 同步更新"
+            priority: "P0"
+            case_id: "SPBC_CHECK_E0000001"
+            req_source:
+              - "REQ-005【Extra Available Limit (newly created): Product 813...】"
+              - "REQ-006【Drawdown checks EAL before disbursement...】"
+            fp_source:
+              - "FP-EAL-005.1"
+              - "FP-EAL-006.1"
+            tags:
+              - "AI-GEN"
+              - "FundLoss"
+
+      # 普通功能点：正向 + 边界
+      - title: "102 ONE_TERM Extra Available Limit 等于 Overpayment Amount"
+        cases:
+          - id: "TC-EAL-005.1-正向"
+            title: "Overpayment=$100 时 102 ONE_TERM EAL=$100"
+            precondition:
+              - "用户持有 102 ONE_TERM 子产品"
+              - "账户状态正常"
+            steps:
+              - "设置用户 Overpayment=$100"
+              - "查询 102 ONE_TERM Extra Available Limit"
+            expected:
+              - "EAL=$100"
+              - "等于 Overpayment Amount"
+            priority: "P0"
+            case_id: "SPBC_CHECK_E0510001"
+            req_source: "REQ-005【Extra Available Limit (newly created): Product 813, Sub-product 102, Variant ONE_TERM = 100...】"
+            fp_source: "FP-EAL-005.1"
+            tags:
+              - "AI-GEN"
+              - "FundLoss"
+              - "accept"
+
+          - id: "TC-EAL-005.1-边界"
+            title: "Overpayment 极大值时 EAL 精度验证"
+            precondition:
+              - "用户持有 102 ONE_TERM 子产品"
+              - "账户状态正常"
+            steps:
+              - "设置用户 Overpayment=999999999.99"
+              - "查询 102 ONE_TERM EAL"
+            expected:
+              - "EAL=999999999.99"
+              - "精度不丢失"
+            priority: "P2"
+            case_id: "SPBC_CHECK_E0510003"
+            req_source: "REQ-005【Extra Available Limit (newly created): Product 813, Sub-product 102, Variant ONE_TERM = 100...】"
+            fp_source: "FP-EAL-005.1"
+            tags:
+              - "AI-GEN"
+              - "FundLoss"
+
+  # ── 模块 2：Repayment ───────────────────────────────────────────────────────
+  - name: "Repayment"
+    total_cases: 2
+    function_points:
+
+      - title: "还款触发 Overpayment 金额更新"
+        cases:
+          - id: "TC-RPY-010.1-正向"
+            title: "正常还款后 Overpayment 增加"
+            precondition:
+              - "用户有活跃贷款"
+              - "还款金额超过应还金额"
+            steps:
+              - "用户发起还款 $200"
+              - "查询 Overpayment 金额"
+            expected:
+              - "Overpayment 金额增加 $200"
+            priority: "P0"
+            case_id: "SPBC_REPAY_R0100001"
+            req_source: "REQ-010【Repayment triggers overpayment update...】"
+            fp_source: "FP-RPY-010.1"
+            tags:
+              - "AI-GEN"
+              - "FundLoss"
+              - "accept"
+
+          - id: "TC-RPY-010.1-幂等"
+            title: "重复还款请求不产生重复 Overpayment"
+            precondition:
+              - "用户有活跃贷款"
+            steps:
+              - "发送相同还款请求 2 次"
+              - "查询 Overpayment 金额"
+            expected:
+              - "Overpayment 仅增加一次"
+              - "第二次请求返回幂等响应"
+            priority: "P1"
+            case_id: "SPBC_REPAY_R0100002"
+            req_source: "REQ-010【Repayment triggers overpayment update...】"
+            fp_source: "FP-RPY-010.1"
+            tags:
+              - "AI-GEN"
+              - "FundLoss"

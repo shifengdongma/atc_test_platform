@@ -1,0 +1,820 @@
+<?xml version="1.0" ?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.4.1">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="07_无人机管理场景" enabled="true">
+      <stringProp name="TestPlan.comments">
+【环境配置】
+环境名称: SIT测试环境
+协议: https
+主机: dkkgsit-test.testdolphin.com
+端口: 443
+基础路径: /la-atc-biz-backend
+描述: 系统集成测试环境，用于接口功能验证
+【场景说明】
+覆盖无人机的注册、查询、修改、状态变更等操作
+【覆盖接口】
+1. GET /aircraftModel/page - 查询航空器型号参数
+2. POST /flight/record/search - 航空器飞行记录查询
+3. GET /uav-runtime-data/page - 查询无人机飞行记录
+4. PUT /uav/7425744594714624 - 更新航空器信息
+5. DELETE /uav/7425744594714625 - 删除
+6. POST /uav/alert/search - 分页查询无人机告警信息
+7. POST /uav/batch/import - 导入航空器
+8. PUT /uav/config - 无人机配置
+9. POST /uav/create - 新增航空器信息
+10. GET /uav/detail/7425744594714624 - 查询详情
+11. GET /uav/getByIdentifyCode - 根据识别码查看详情
+12. POST /uav/search - 分页查询
+【使用说明】
+1. 修改用户定义变量中的 jwt-token 为有效的认证令牌
+2. 可通过命令行参数覆盖环境变量，如: jmeter -Jhost=xxx -Jjwt-token=xxx
+3. 执行前确保测试环境可访问
+【生成时间】
+2026-04-22 20:38:40
+</stringProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="User Defined Variables" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="protocol" elementType="Argument">
+            <stringProp name="Argument.name">protocol</stringProp>
+            <stringProp name="Argument.value">${__P(protocol,https)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="host" elementType="Argument">
+            <stringProp name="Argument.name">host</stringProp>
+            <stringProp name="Argument.value">${__P(host,dkkgsit-test.testdolphin.com)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="port" elementType="Argument">
+            <stringProp name="Argument.name">port</stringProp>
+            <stringProp name="Argument.value">${__P(port,443)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="basePath" elementType="Argument">
+            <stringProp name="Argument.name">basePath</stringProp>
+            <stringProp name="Argument.value">${__P(basePath,/la-atc-biz-backend)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="jwt-token" elementType="Argument">
+            <stringProp name="Argument.name">jwt-token</stringProp>
+            <stringProp name="Argument.value">${__P(jwt-token,eyJhbGciOiJSUzI1NiJ9.eyJhdXRoVXNlckRldGFpbHMiOiJ7XCJ1c2VyXCI6IHtcImNvZGVcIjogXCJhdGNBZG1pblwifX0iLCJzdWIiOiJhdGNBZG1pbiIsImRlZmF1bHRHcmFudFNjb3BlIjoiIiwiYW1yIjoibWZhIiwiaXNzIjoiaHR0cDovL2Rldi5jdHNwLmtlZGFjb20uY29tL2Nsb3VkLXJiYWMiLCJhdXRoVGltZSI6MTc3NjIzNjc0NTIxNywiYWNjZXNzVG9rZW4iOiJtakNBK2Q1QklsVmp6OXczTDgyRTBrakxXbmZPeWN0WnVMMWxWcm5nd2hiUE9CclJNWUJqWE81MTVNSTZIV2lidXkzb2poQUY4R3BFTWNHcXpYcTNBUXlkYU5USlNKcXhodWNsQ0hxSU5RYz0iLCJub25jZSI6bnVsbCwiYXVkIjoibGEtYXRjLWJpei1iYWNrZW5kIiwiYWNyIjoidXJuOm1hY2U6aW5jb21tb246aWFwOnNpbHZlciIsImF6cCI6IiIsInRlbmFudElkIjpudWxsLCJleHAiOjE3NzYyMzY3NDUsImlhdCI6MTc3NjE1MDM0NX0.XeDsbrfj0MiuaJuLKOV_ASjFAViE7kA9BVJ0Y8w47RsrLzUnnJGcl6f3OIP20MMyopa4tVxsfoviPgM_yyg8rw)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+    </TestPlan>
+    <hashTree/>
+    <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="07_无人机管理场景" enabled="true">
+      <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+      <intProp name="ThreadGroup.num_threads">1</intProp>
+      <intProp name="ThreadGroup.ramp_time">1</intProp>
+      <longProp name="ThreadGroup.delay">0</longProp>
+      <longProp name="ThreadGroup.duration">0</longProp>
+      <boolProp name="ThreadGroup.scheduler">false</boolProp>
+      <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="LoopController" enabled="true">
+        <boolProp name="LoopController.continue_forever">false</boolProp>
+        <intProp name="LoopController.loops">1</intProp>
+      </elementProp>
+    </ThreadGroup>
+    <hashTree>
+      <CookieManager guiclass="CookiePanel" testclass="CookieManager" testname="Cookie Manager" enabled="true">
+        <collectionProp name="CookieManager.cookies"/>
+        <boolProp name="CookieManager.clearEachIteration">false</boolProp>
+      </CookieManager>
+      <hashTree/>
+      <TransactionController guiclass="TransactionControllerGui" testclass="TransactionController" testname="POST请求组" enabled="true">
+        <boolProp name="TransactionController.includeTimers">false</boolProp>
+        <boolProp name="TransactionController.parent">false</boolProp>
+      </TransactionController>
+      <hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="07_无人机管理场景_航空器飞行记录查询" enabled="true">
+          <stringProp name="HTTPSampler.domain">${host}</stringProp>
+          <stringProp name="HTTPSampler.port">${port}</stringProp>
+          <stringProp name="HTTPSampler.protocol">${protocol}</stringProp>
+          <stringProp name="HTTPSampler.path">${basePath}/flight/record/search</stringProp>
+          <stringProp name="HTTPSampler.method">POST</stringProp>
+          <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <stringProp name="HTTPSampler.connect_timeout">60000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">60000</stringProp>
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+            <collectionProp name="Arguments.arguments">
+              <elementProp name="" elementType="HTTPArgument">
+                <boolProp name="HTTPArgument.always_encode">false</boolProp>
+                <stringProp name="Argument.value">{
+    "identifyCode": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "uavId": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "startTime": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "endTime": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "pageNo": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "pageSize": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\""
+}</stringProp>
+                <stringProp name="Argument.metadata">=</stringProp>
+              </elementProp>
+            </collectionProp>
+          </elementProp>
+          <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="07_无人机管理场景_航空器飞行记录查询_HeaderManager" enabled="true">
+            <collectionProp name="HeaderManager.headers">
+              <elementProp name="Content-Type" elementType="Header">
+                <stringProp name="Header.name">Content-Type</stringProp>
+                <stringProp name="Header.value">application/json</stringProp>
+              </elementProp>
+              <elementProp name="jwt-token" elementType="Header">
+                <stringProp name="Header.name">jwt-token</stringProp>
+                <stringProp name="Header.value">${jwt-token}</stringProp>
+              </elementProp>
+            </collectionProp>
+          </HeaderManager>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: status = 200" enabled="true">
+            <stringProp name="JSON_PATH">$.status</stringProp>
+            <stringProp name="EXPECTED_VALUE">200</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: code = 0" enabled="true">
+            <stringProp name="JSON_PATH">$.code</stringProp>
+            <stringProp name="EXPECTED_VALUE">0</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+        </hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="07_无人机管理场景_分页查询无人机告警信息" enabled="true">
+          <stringProp name="HTTPSampler.domain">${host}</stringProp>
+          <stringProp name="HTTPSampler.port">${port}</stringProp>
+          <stringProp name="HTTPSampler.protocol">${protocol}</stringProp>
+          <stringProp name="HTTPSampler.path">${basePath}/uav/alert/search?uavId&amp;identifyCode&amp;startTime;&amp;endTime</stringProp>
+          <stringProp name="HTTPSampler.method">POST</stringProp>
+          <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <stringProp name="HTTPSampler.connect_timeout">60000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">60000</stringProp>
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+            <collectionProp name="Arguments.arguments">
+              <elementProp name="" elementType="HTTPArgument">
+                <boolProp name="HTTPArgument.always_encode">false</boolProp>
+                <stringProp name="Argument.value">{
+    "identifyCode": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "startTime": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "endTime": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "pageNo": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "pageSize": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\""
+}</stringProp>
+                <stringProp name="Argument.metadata">=</stringProp>
+              </elementProp>
+            </collectionProp>
+          </elementProp>
+          <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="07_无人机管理场景_分页查询无人机告警信息_HeaderManager" enabled="true">
+            <collectionProp name="HeaderManager.headers">
+              <elementProp name="Content-Type" elementType="Header">
+                <stringProp name="Header.name">Content-Type</stringProp>
+                <stringProp name="Header.value">application/json</stringProp>
+              </elementProp>
+              <elementProp name="jwt-token" elementType="Header">
+                <stringProp name="Header.name">jwt-token</stringProp>
+                <stringProp name="Header.value">${jwt-token}</stringProp>
+              </elementProp>
+            </collectionProp>
+          </HeaderManager>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: status = 200" enabled="true">
+            <stringProp name="JSON_PATH">$.status</stringProp>
+            <stringProp name="EXPECTED_VALUE">200</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: code = 0" enabled="true">
+            <stringProp name="JSON_PATH">$.code</stringProp>
+            <stringProp name="EXPECTED_VALUE">0</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+        </hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="07_无人机管理场景_导入航空器" enabled="true">
+          <stringProp name="HTTPSampler.domain">${host}</stringProp>
+          <stringProp name="HTTPSampler.port">${port}</stringProp>
+          <stringProp name="HTTPSampler.protocol">${protocol}</stringProp>
+          <stringProp name="HTTPSampler.path">${basePath}/uav/batch/import</stringProp>
+          <stringProp name="HTTPSampler.method">POST</stringProp>
+          <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <stringProp name="HTTPSampler.connect_timeout">60000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">60000</stringProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="07_无人机管理场景_导入航空器_HeaderManager" enabled="true">
+            <collectionProp name="HeaderManager.headers">
+              <elementProp name="Content-Type" elementType="Header">
+                <stringProp name="Header.name">Content-Type</stringProp>
+                <stringProp name="Header.value">application/json</stringProp>
+              </elementProp>
+              <elementProp name="jwt-token" elementType="Header">
+                <stringProp name="Header.name">jwt-token</stringProp>
+                <stringProp name="Header.value">${jwt-token}</stringProp>
+              </elementProp>
+            </collectionProp>
+          </HeaderManager>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: status = 200" enabled="true">
+            <stringProp name="JSON_PATH">$.status</stringProp>
+            <stringProp name="EXPECTED_VALUE">200</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: code = 0" enabled="true">
+            <stringProp name="JSON_PATH">$.code</stringProp>
+            <stringProp name="EXPECTED_VALUE">0</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+        </hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="07_无人机管理场景_新增航空器信息" enabled="true">
+          <stringProp name="HTTPSampler.domain">${host}</stringProp>
+          <stringProp name="HTTPSampler.port">${port}</stringProp>
+          <stringProp name="HTTPSampler.protocol">${protocol}</stringProp>
+          <stringProp name="HTTPSampler.path">${basePath}/uav/create</stringProp>
+          <stringProp name="HTTPSampler.method">POST</stringProp>
+          <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <stringProp name="HTTPSampler.connect_timeout">60000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">60000</stringProp>
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+            <collectionProp name="Arguments.arguments">
+              <elementProp name="" elementType="HTTPArgument">
+                <boolProp name="HTTPArgument.always_encode">false</boolProp>
+                <stringProp name="Argument.value">{
+    "name": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "orgId": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "userId": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "identifyCode": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "uavModel": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "runCategory": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "manufacturer": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "category": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "registrationCode": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "uavType": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "averageEndurance": 0,
+    "ownerType": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "ownerName": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "ownerIdCard": "\"${__RandomString(1,123456789,)}${__time(yyMMdd)}${__RandomString(4,0123456789,X,)}\"",
+    "ownerIdType": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "organizationName": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "organizationCreditCode": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "airworthinessStatus": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "airworthinessLicenseNo": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "insurancePolicyNo": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "insuranceCompany": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "insuranceType": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "insuranceAmount": 0,
+    "insuranceStartDate": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "insuranceExpiryDate": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "insuranceInfo": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "isCustomized": 0,
+    "speed": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "typicalClimbSpeed": 0,
+    "maxClimbSpeed": 0.0,
+    "typicalDeclineSpeed": 0,
+    "maxDeclineSpeed": 0,
+    "typicalTurnSpeed": 0,
+    "maxTurnSpeed": 0,
+    "windResistanceLevel": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "envConstraint": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "maxEndurance": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "takeoffConditions": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "landConditions": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "maxPayload": 0.0,
+    "emptyWeight": 0.0,
+    "maxTakeoffWeight": 0,
+    "maxNoise": 0,
+    "controlMode": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "perceptionAvoidanceDesc": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "navigationDesc": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "autonomousAbilityDesc": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "uavImages": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\""
+}</stringProp>
+                <stringProp name="Argument.metadata">=</stringProp>
+              </elementProp>
+            </collectionProp>
+          </elementProp>
+          <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="07_无人机管理场景_新增航空器信息_HeaderManager" enabled="true">
+            <collectionProp name="HeaderManager.headers">
+              <elementProp name="Content-Type" elementType="Header">
+                <stringProp name="Header.name">Content-Type</stringProp>
+                <stringProp name="Header.value">application/json</stringProp>
+              </elementProp>
+              <elementProp name="jwt-token" elementType="Header">
+                <stringProp name="Header.name">jwt-token</stringProp>
+                <stringProp name="Header.value">${jwt-token}</stringProp>
+              </elementProp>
+            </collectionProp>
+          </HeaderManager>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: status = 200" enabled="true">
+            <stringProp name="JSON_PATH">$.status</stringProp>
+            <stringProp name="EXPECTED_VALUE">200</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: code = 0" enabled="true">
+            <stringProp name="JSON_PATH">$.code</stringProp>
+            <stringProp name="EXPECTED_VALUE">0</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+        </hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="07_无人机管理场景_分页查询" enabled="true">
+          <stringProp name="HTTPSampler.domain">${host}</stringProp>
+          <stringProp name="HTTPSampler.port">${port}</stringProp>
+          <stringProp name="HTTPSampler.protocol">${protocol}</stringProp>
+          <stringProp name="HTTPSampler.path">${basePath}/uav/search?name&amp;registStatus&amp;category&amp;identifyCode&amp;registrationCode&amp;operateOrgId&amp;uavType&amp;ownerType&amp;keyword&amp;pageNo&amp;pageSize</stringProp>
+          <stringProp name="HTTPSampler.method">POST</stringProp>
+          <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <stringProp name="HTTPSampler.connect_timeout">60000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">60000</stringProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="07_无人机管理场景_分页查询_HeaderManager" enabled="true">
+            <collectionProp name="HeaderManager.headers">
+              <elementProp name="Content-Type" elementType="Header">
+                <stringProp name="Header.name">Content-Type</stringProp>
+                <stringProp name="Header.value">application/json</stringProp>
+              </elementProp>
+              <elementProp name="jwt-token" elementType="Header">
+                <stringProp name="Header.name">jwt-token</stringProp>
+                <stringProp name="Header.value">${jwt-token}</stringProp>
+              </elementProp>
+            </collectionProp>
+          </HeaderManager>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: status = 200" enabled="true">
+            <stringProp name="JSON_PATH">$.status</stringProp>
+            <stringProp name="EXPECTED_VALUE">200</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: code = 0" enabled="true">
+            <stringProp name="JSON_PATH">$.code</stringProp>
+            <stringProp name="EXPECTED_VALUE">0</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+        </hashTree>
+      </hashTree>
+      <TransactionController guiclass="TransactionControllerGui" testclass="TransactionController" testname="GET请求组" enabled="true">
+        <boolProp name="TransactionController.includeTimers">false</boolProp>
+        <boolProp name="TransactionController.parent">false</boolProp>
+      </TransactionController>
+      <hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="07_无人机管理场景_查询航空器型号参数" enabled="true">
+          <stringProp name="HTTPSampler.domain">${host}</stringProp>
+          <stringProp name="HTTPSampler.port">${port}</stringProp>
+          <stringProp name="HTTPSampler.protocol">${protocol}</stringProp>
+          <stringProp name="HTTPSampler.path">${basePath}/aircraftModel/page?modelCode&amp;pageNo&amp;pageSize&amp;keyword</stringProp>
+          <stringProp name="HTTPSampler.method">GET</stringProp>
+          <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <stringProp name="HTTPSampler.connect_timeout">60000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">60000</stringProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="07_无人机管理场景_查询航空器型号参数_HeaderManager" enabled="true">
+            <collectionProp name="HeaderManager.headers">
+              <elementProp name="Content-Type" elementType="Header">
+                <stringProp name="Header.name">Content-Type</stringProp>
+                <stringProp name="Header.value">application/json</stringProp>
+              </elementProp>
+              <elementProp name="jwt-token" elementType="Header">
+                <stringProp name="Header.name">jwt-token</stringProp>
+                <stringProp name="Header.value">${jwt-token}</stringProp>
+              </elementProp>
+            </collectionProp>
+          </HeaderManager>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: status = 200" enabled="true">
+            <stringProp name="JSON_PATH">$.status</stringProp>
+            <stringProp name="EXPECTED_VALUE">200</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: code = 0" enabled="true">
+            <stringProp name="JSON_PATH">$.code</stringProp>
+            <stringProp name="EXPECTED_VALUE">0</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+        </hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="07_无人机管理场景_查询无人机飞行记录" enabled="true">
+          <stringProp name="HTTPSampler.domain">${host}</stringProp>
+          <stringProp name="HTTPSampler.port">${port}</stringProp>
+          <stringProp name="HTTPSampler.protocol">${protocol}</stringProp>
+          <stringProp name="HTTPSampler.path">${basePath}/uav-runtime-data/page?receiverKeyword&amp;planNumber&amp;uavKeyword&amp;startTime&amp;endTime&amp;sortField&amp;sortDirection&amp;pageNo&amp;pageSize</stringProp>
+          <stringProp name="HTTPSampler.method">GET</stringProp>
+          <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <stringProp name="HTTPSampler.connect_timeout">60000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">60000</stringProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="07_无人机管理场景_查询无人机飞行记录_HeaderManager" enabled="true">
+            <collectionProp name="HeaderManager.headers">
+              <elementProp name="Content-Type" elementType="Header">
+                <stringProp name="Header.name">Content-Type</stringProp>
+                <stringProp name="Header.value">application/json</stringProp>
+              </elementProp>
+              <elementProp name="jwt-token" elementType="Header">
+                <stringProp name="Header.name">jwt-token</stringProp>
+                <stringProp name="Header.value">${jwt-token}</stringProp>
+              </elementProp>
+            </collectionProp>
+          </HeaderManager>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: status = 200" enabled="true">
+            <stringProp name="JSON_PATH">$.status</stringProp>
+            <stringProp name="EXPECTED_VALUE">200</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: code = 0" enabled="true">
+            <stringProp name="JSON_PATH">$.code</stringProp>
+            <stringProp name="EXPECTED_VALUE">0</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+        </hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="07_无人机管理场景_查询详情" enabled="true">
+          <stringProp name="HTTPSampler.domain">${host}</stringProp>
+          <stringProp name="HTTPSampler.port">${port}</stringProp>
+          <stringProp name="HTTPSampler.protocol">${protocol}</stringProp>
+          <stringProp name="HTTPSampler.path">${basePath}/uav/detail/7425744594714624</stringProp>
+          <stringProp name="HTTPSampler.method">GET</stringProp>
+          <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <stringProp name="HTTPSampler.connect_timeout">60000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">60000</stringProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="07_无人机管理场景_查询详情_HeaderManager" enabled="true">
+            <collectionProp name="HeaderManager.headers">
+              <elementProp name="Content-Type" elementType="Header">
+                <stringProp name="Header.name">Content-Type</stringProp>
+                <stringProp name="Header.value">application/json</stringProp>
+              </elementProp>
+              <elementProp name="jwt-token" elementType="Header">
+                <stringProp name="Header.name">jwt-token</stringProp>
+                <stringProp name="Header.value">${jwt-token}</stringProp>
+              </elementProp>
+            </collectionProp>
+          </HeaderManager>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: status = 200" enabled="true">
+            <stringProp name="JSON_PATH">$.status</stringProp>
+            <stringProp name="EXPECTED_VALUE">200</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: code = 0" enabled="true">
+            <stringProp name="JSON_PATH">$.code</stringProp>
+            <stringProp name="EXPECTED_VALUE">0</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+        </hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="07_无人机管理场景_根据识别码查看详情" enabled="true">
+          <stringProp name="HTTPSampler.domain">${host}</stringProp>
+          <stringProp name="HTTPSampler.port">${port}</stringProp>
+          <stringProp name="HTTPSampler.protocol">${protocol}</stringProp>
+          <stringProp name="HTTPSampler.path">${basePath}/uav/getByIdentifyCode?identifyCode</stringProp>
+          <stringProp name="HTTPSampler.method">GET</stringProp>
+          <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <stringProp name="HTTPSampler.connect_timeout">60000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">60000</stringProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="07_无人机管理场景_根据识别码查看详情_HeaderManager" enabled="true">
+            <collectionProp name="HeaderManager.headers">
+              <elementProp name="Content-Type" elementType="Header">
+                <stringProp name="Header.name">Content-Type</stringProp>
+                <stringProp name="Header.value">application/json</stringProp>
+              </elementProp>
+              <elementProp name="jwt-token" elementType="Header">
+                <stringProp name="Header.name">jwt-token</stringProp>
+                <stringProp name="Header.value">${jwt-token}</stringProp>
+              </elementProp>
+            </collectionProp>
+          </HeaderManager>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: status = 200" enabled="true">
+            <stringProp name="JSON_PATH">$.status</stringProp>
+            <stringProp name="EXPECTED_VALUE">200</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: code = 0" enabled="true">
+            <stringProp name="JSON_PATH">$.code</stringProp>
+            <stringProp name="EXPECTED_VALUE">0</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+        </hashTree>
+      </hashTree>
+      <TransactionController guiclass="TransactionControllerGui" testclass="TransactionController" testname="PUT请求组" enabled="true">
+        <boolProp name="TransactionController.includeTimers">false</boolProp>
+        <boolProp name="TransactionController.parent">false</boolProp>
+      </TransactionController>
+      <hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="07_无人机管理场景_更新航空器信息" enabled="true">
+          <stringProp name="HTTPSampler.domain">${host}</stringProp>
+          <stringProp name="HTTPSampler.port">${port}</stringProp>
+          <stringProp name="HTTPSampler.protocol">${protocol}</stringProp>
+          <stringProp name="HTTPSampler.path">${basePath}/uav/7425744594714624</stringProp>
+          <stringProp name="HTTPSampler.method">PUT</stringProp>
+          <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <stringProp name="HTTPSampler.connect_timeout">60000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">60000</stringProp>
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+            <collectionProp name="Arguments.arguments">
+              <elementProp name="" elementType="HTTPArgument">
+                <boolProp name="HTTPArgument.always_encode">false</boolProp>
+                <stringProp name="Argument.value">{
+    "name": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "orgId": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "userId": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "identifyCode": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "uavModel": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "runCategory": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "manufacturer": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "category": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "registrationStatus": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "lastFlyTime": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "registrationCode": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "uavType": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "averageEndurance": 0,
+    "ownerType": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "ownerName": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "ownerIdCard": "\"${__RandomString(1,123456789,)}${__time(yyMMdd)}${__RandomString(4,0123456789,X,)}\"",
+    "ownerIdType": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "organizationName": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "organizationCreditCode": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "airworthinessStatus": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "airworthinessLicenseNo": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "insurancePolicyNo": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "insuranceCompany": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "insuranceType": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "insuranceAmount": 0,
+    "insuranceStartDate": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "insuranceExpiryDate": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "insuranceInfo": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "isCustomized": 0,
+    "speed": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "typicalClimbSpeed": 0,
+    "maxClimbSpeed": 0.0,
+    "typicalDeclineSpeed": 0,
+    "maxDeclineSpeed": 0,
+    "typicalTurnSpeed": 0,
+    "maxTurnSpeed": 0,
+    "windResistanceLevel": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "envConstraint": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "maxEndurance": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "takeoffConditions": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "landConditions": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "maxPayload": 0.0,
+    "emptyWeight": 0.0,
+    "maxTakeoffWeight": 0,
+    "maxNoise": 0,
+    "controlMode": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "perceptionAvoidanceDesc": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "navigationDesc": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "autonomousAbilityDesc": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "uavImages": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\""
+}</stringProp>
+                <stringProp name="Argument.metadata">=</stringProp>
+              </elementProp>
+            </collectionProp>
+          </elementProp>
+          <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="07_无人机管理场景_更新航空器信息_HeaderManager" enabled="true">
+            <collectionProp name="HeaderManager.headers">
+              <elementProp name="Content-Type" elementType="Header">
+                <stringProp name="Header.name">Content-Type</stringProp>
+                <stringProp name="Header.value">application/json</stringProp>
+              </elementProp>
+              <elementProp name="jwt-token" elementType="Header">
+                <stringProp name="Header.name">jwt-token</stringProp>
+                <stringProp name="Header.value">${jwt-token}</stringProp>
+              </elementProp>
+            </collectionProp>
+          </HeaderManager>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: status = 200" enabled="true">
+            <stringProp name="JSON_PATH">$.status</stringProp>
+            <stringProp name="EXPECTED_VALUE">200</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: code = 0" enabled="true">
+            <stringProp name="JSON_PATH">$.code</stringProp>
+            <stringProp name="EXPECTED_VALUE">0</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+        </hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="07_无人机管理场景_无人机配置" enabled="true">
+          <stringProp name="HTTPSampler.domain">${host}</stringProp>
+          <stringProp name="HTTPSampler.port">${port}</stringProp>
+          <stringProp name="HTTPSampler.protocol">${protocol}</stringProp>
+          <stringProp name="HTTPSampler.path">${basePath}/uav/config</stringProp>
+          <stringProp name="HTTPSampler.method">PUT</stringProp>
+          <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <stringProp name="HTTPSampler.connect_timeout">60000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">60000</stringProp>
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+            <collectionProp name="Arguments.arguments">
+              <elementProp name="" elementType="HTTPArgument">
+                <boolProp name="HTTPArgument.always_encode">false</boolProp>
+                <stringProp name="Argument.value">{
+    "uavId": 0,
+    "tip": "\"${__RandomString(10,abcdefghijklmnopqrstuvwxyz,)}\"",
+    "showSign": true,
+    "showSpeedVectorLine": true,
+    "historyPointCount": 0,
+    "predictDuring": 0
+}</stringProp>
+                <stringProp name="Argument.metadata">=</stringProp>
+              </elementProp>
+            </collectionProp>
+          </elementProp>
+          <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="07_无人机管理场景_无人机配置_HeaderManager" enabled="true">
+            <collectionProp name="HeaderManager.headers">
+              <elementProp name="Content-Type" elementType="Header">
+                <stringProp name="Header.name">Content-Type</stringProp>
+                <stringProp name="Header.value">application/json</stringProp>
+              </elementProp>
+              <elementProp name="jwt-token" elementType="Header">
+                <stringProp name="Header.name">jwt-token</stringProp>
+                <stringProp name="Header.value">${jwt-token}</stringProp>
+              </elementProp>
+            </collectionProp>
+          </HeaderManager>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: status = 200" enabled="true">
+            <stringProp name="JSON_PATH">$.status</stringProp>
+            <stringProp name="EXPECTED_VALUE">200</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: code = 0" enabled="true">
+            <stringProp name="JSON_PATH">$.code</stringProp>
+            <stringProp name="EXPECTED_VALUE">0</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+        </hashTree>
+      </hashTree>
+      <TransactionController guiclass="TransactionControllerGui" testclass="TransactionController" testname="DELETE请求组" enabled="true">
+        <boolProp name="TransactionController.includeTimers">false</boolProp>
+        <boolProp name="TransactionController.parent">false</boolProp>
+      </TransactionController>
+      <hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="07_无人机管理场景_删除" enabled="true">
+          <stringProp name="HTTPSampler.domain">${host}</stringProp>
+          <stringProp name="HTTPSampler.port">${port}</stringProp>
+          <stringProp name="HTTPSampler.protocol">${protocol}</stringProp>
+          <stringProp name="HTTPSampler.path">${basePath}/uav/7425744594714625</stringProp>
+          <stringProp name="HTTPSampler.method">DELETE</stringProp>
+          <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <stringProp name="HTTPSampler.connect_timeout">60000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">60000</stringProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="07_无人机管理场景_删除_HeaderManager" enabled="true">
+            <collectionProp name="HeaderManager.headers">
+              <elementProp name="Content-Type" elementType="Header">
+                <stringProp name="Header.name">Content-Type</stringProp>
+                <stringProp name="Header.value">application/json</stringProp>
+              </elementProp>
+              <elementProp name="jwt-token" elementType="Header">
+                <stringProp name="Header.name">jwt-token</stringProp>
+                <stringProp name="Header.value">${jwt-token}</stringProp>
+              </elementProp>
+            </collectionProp>
+          </HeaderManager>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: status = 200" enabled="true">
+            <stringProp name="JSON_PATH">$.status</stringProp>
+            <stringProp name="EXPECTED_VALUE">200</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="断言: code = 0" enabled="true">
+            <stringProp name="JSON_PATH">$.code</stringProp>
+            <stringProp name="EXPECTED_VALUE">0</stringProp>
+            <boolProp name="JSONVALIDATION">true</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="ISREGEX">true</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+        </hashTree>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

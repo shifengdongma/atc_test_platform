@@ -1,0 +1,18 @@
+version: '3'
+
+services:
+  utm-moc52-ha:
+    build: .
+    image: utm_moc52_ha_0331:latest
+    container_name: utm-moc52-ha
+    volumes:
+     # - ./env.conf:/app/env.conf
+      - type: bind
+        source: ${PWD}/env.conf
+        target: /app/env.conf
+        read_only: true
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    environment:
+      - TZ=Asia/Shanghai
+    restart: unless-stopped

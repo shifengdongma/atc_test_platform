@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>飞行计划与模拟数据路线 - Three.js</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #0a0e1a;
+            color: #e2e8f0;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        .legend {
+            position: absolute;
+            bottom: 24px;
+            left: 24px;
+            z-index: 100;
+            background: rgba(10, 14, 26, 0.92);
+            padding: 14px 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(71, 85, 105, 0.35);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            font-size: 13px;
+            letter-spacing: 0.02em;
+        }
+
+        .legend span {
+            margin-right: 20px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .legend .route-plan {
+            color: #94a3b8;
+        }
+
+        .legend .route-sim {
+            color: #22d3ee;
+        }
+
+        .legend .route-mock {
+            color: #fbbf24;
+        }
+
+        .legend .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .legend .dot-plan {
+            background: #94a3b8;
+        }
+
+        .legend .dot-sim {
+            background: #22d3ee;
+        }
+
+        .legend .dot-mock {
+            background: #fbbf24;
+        }
+
+        .legend .legend-item {
+            cursor: pointer;
+            user-select: none;
+            padding: 4px 8px;
+            margin: -4px 4px -4px -4px;
+            border-radius: 8px;
+            transition: opacity 0.2s;
+        }
+
+        .legend .legend-item:hover {
+            opacity: 0.9;
+        }
+
+        .legend .legend-item.off {
+            opacity: 0.4;
+        }
+
+        .legend .legend-item.off .dot {
+            opacity: 0.5;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 18px;
+            color: #64748b;
+        }
+
+        #point-tooltip {
+            position: fixed;
+            left: 0;
+            top: 0;
+            pointer-events: none;
+            z-index: 200;
+            display: none;
+            min-width: 200px;
+            padding: 10px 14px;
+            background: rgba(15, 23, 42, 0.96);
+            border: 1px solid rgba(71, 85, 105, 0.5);
+            border-radius: 10px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            font-size: 12px;
+            line-height: 1.6;
+            color: #e2e8f0;
+        }
+
+        #point-tooltip.visible {
+            display: block;
+        }
+
+        #point-tooltip .tt-title {
+            color: #94a3b8;
+            margin-bottom: 6px;
+            font-weight: 600;
+        }
+
+        #point-tooltip .tt-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+        }
+
+        #point-tooltip .tt-label {
+            color: #64748b;
+        }
+
+        #point-tooltip .tt-value {
+            color: #f1f5f9;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .copy-toast {
+            position: fixed;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%) translateY(10px);
+            padding: 8px 16px;
+            background: rgba(34, 211, 238, 0.9);
+            color: #0f172a;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            z-index: 300;
+            opacity: 0;
+            transition: opacity 0.2s, transform 0.2s;
+            pointer-events: none;
+        }
+
+        .copy-toast.visible {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .flight-plan-filter {
+            position: absolute;
+            top: 24px;
+            left: 24px;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(10, 14, 26, 0.92);
+            padding: 10px 16px;
+            border-radius: 12px;
+            border: 1px solid rgba(71, 85, 105, 0.35);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            font-size: 13px;
+        }
+
+        .flight-plan-filter label {
+            color: #94a3b8;
+            white-space: nowrap;
+        }
+
+        .flight-plan-filter select {
+            min-width: 220px;
+            padding: 6px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(71, 85, 105, 0.5);
+            background: rgba(15, 23, 42, 0.98);
+            color: #e2e8f0;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .flight-plan-filter select:hover,
+        .flight-plan-filter select:focus {
+            border-color: rgba(34, 211, 238, 0.5);
+            outline: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="loading" class="loading">正在加载 JSON 数据...</div>
+    <div id="flight-plan-filter" class="flight-plan-filter" style="display: none;">
+        <label for="flight-plan-select">飞行计划</label>
+        <select id="flight-plan-select" title="按 redis_route 的 key 过滤飞行计划、模拟数据与预测数据">
+        </select>
+    </div>
+    <div id="point-tooltip" class="point-tooltip"></div>
+    <div id="legend" class="legend" style="display: none;">
+        <span id="legend-plan" class="legend-item route-plan" data-route="plan" title="点击切换显示"><i class="dot dot-plan"></i>
+            飞行计划 (redis_route)</span>
+        <span id="legend-sim" class="legend-item route-sim" data-route="sim" title="点击切换显示"><i class="dot dot-sim"></i> 模拟数据
+            (kafka_data)</span>
+        <span id="legend-mock" class="legend-item route-mock" data-route="mock" title="点击切换显示"><i class="dot dot-mock"></i>
+            预测数据 (redis_trace)</span>
+    </div>
+
+    <script>
+        (function () {
+            const CONFIG = {
+                scale: 12000,
+                tubeRadius: 1,
+                tubeSegments: 6
+            };
+
+            let scene, camera, renderer, controls;
+            let routePlanGroup = null;
+            let routeSimGroup = null;
+            let routeMockGroup = null;
+            let rawData = null;
+            let centerRef = { centerLng: 120.65, centerLat: 31.25 };
+
+            // 经纬高 → Three 场景坐标 (X, Y, Z)，Y 为高度；北半球纬度取反使北(高纬)在画面上方
+            function lngLatAltToScene (lng, lat, alt, centerLng, centerLat) {
+                const x = (lng - centerLng) * CONFIG.scale;
+                const z = -(lat - centerLat) * CONFIG.scale;
+                const y = typeof alt === 'number' ? alt : 0;
+                return new THREE.Vector3(x, y, z);
+            }
+
+            // 从 redis_route.json 解析飞行计划路径点（按 key 分组，selectedKey 为空则取第一条）
+            function parseRedisRoute (data, selectedKey) {
+                const points = [];
+                if (!Array.isArray(data) || data.length === 0) return points;
+                var list = selectedKey ? data.filter(function (item) { return item.key === selectedKey; }) : data;
+                var item = list[0];
+                if (!item?.value?.flightPlanList?.[0]?.routeList) return points;
+                const routeList = item.value.flightPlanList[0].routeList;
+                var first = routeList[0];
+                points.push({
+                    lng: first.segmentStartLon,
+                    lat: first.segmentStartLat,
+                    alt: first.segmentStartHeight,
+                    label: '飞行计划'
+                });
+                for (var i = 0; i < routeList.length; i++) {
+                    var seg = routeList[i];
+                    points.push({
+                        lng: seg.segmentEndLon,
+                        lat: seg.segmentEndLat,
+                        alt: seg.segmentEndHeight,
+                        label: '飞行计划'
+                    });
+                }
+                return dedupePathPoints(points);
+            }
+
+            // 合并连续重复点
+            function dedupePathPoints (points) {
+                if (points.length <= 1) return points;
+                var out = [points[0]];
+                var eps = 1e-9;
+                for (var i = 1; i < points.length; i++) {
+                    var prev = out[out.length - 1];
+                    var p = points[i];
+                    if (Math.abs(prev.lng - p.lng) < eps && Math.abs(prev.lat - p.lat) < eps && Math.abs(prev.alt - p.alt) < eps) continue;
+                    out.push(p);
+                }
+                return out;
+            }
+
+            // 从 kafka_data.json 解析模拟飞行路径点（按 uniqueProductIdentificationCode 过滤）
+            function parseKafkaData (data, selectedKey) {
+                if (!Array.isArray(data)) return [];
+                var list = selectedKey ? data.filter(function (item) { return item.uniqueProductIdentificationCode === selectedKey; }) : data;
+                return dedupePathPoints(list.map(function (item) {
+                    return {
+                        lng: item.longitude,
+                        lat: item.latitude,
+                        alt: item.geodeticAltitude != null ? item.geodeticAltitude : 0,
+                        label: '模拟数据',
+                        speed: item.speed,
+                        trackAngle: item.trackAngle,
+                        verticalSpeed: item.verticalSpeed,
+                        timestamp: item.timestamp
+                    };
+                }));
+            }
+
+            // 从 redis_trace.json 解析预测数据路径点（按 value 中 uniqueProductIdentificationCode 过滤）
+            function parseRedisMock (data, selectedKey) {
+                if (!Array.isArray(data) || data.length === 0) return [];
+                var items = selectedKey
+                    ? data.filter(function (item) {
+                        var val = item.value;
+                        if (!Array.isArray(val)) return false;
+                        return val.some(function (p) { return p && p.uniqueProductIdentificationCode === selectedKey; });
+                    })
+                    : data;
+                var points = items.map(function (item) {
+                    var val = item.value;
+                    if (!Array.isArray(val) || val.length === 0) return null;
+                    var v = selectedKey
+                        ? val.find(function (p) { return p && p.uniqueProductIdentificationCode === selectedKey; })
+                        : val[0];
+                    if (!v) return null;
+                    return {
+                        lng: v.longitude,
+                        lat: v.latitude,
+                        alt: v.altitude != null ? v.altitude : 0,
+                        label: '预测数据',
+                        speed: v.speed,
+                        trackAngle: v.trackAngle,
+                        verticalSpeed: v.verticalSpeed,
+                        timestamp: v.timestamp
+                    };
+                }).filter(Boolean);
+                return dedupePathPoints(points);
+            }
+
+            // 计算中心点（所有路线共用的中心）
+            function getCenter (routePoints, kafkaPoints, mockPoints) {
+                let lngSum = 0, latSum = 0, n = 0;
+                routePoints.forEach(function (p) { lngSum += p.lng; latSum += p.lat; n++; });
+                kafkaPoints.forEach(function (p) { lngSum += p.lng; latSum += p.lat; n++; });
+                if (mockPoints && mockPoints.length) mockPoints.forEach(function (p) { lngSum += p.lng; latSum += p.lat; n++; });
+                if (n === 0) return { centerLng: 120.65, centerLat: 31.25 };
+                return { centerLng: lngSum / n, centerLat: latSum / n };
+            }
+
+            // 折线：直接用点连成直线段（不插值曲线）
+            function createRouteLineStraight (points, color, centerLng, centerLat) {
+                if (points.length < 2) return null;
+                const vec3s = points.map(function (p) {
+                    return lngLatAltToScene(p.lng, p.lat, p.alt, centerLng, centerLat);
+                });
+                const lineGeo = new THREE.BufferGeometry().setFromPoints(vec3s);
+                const lineMat = new THREE.LineBasicMaterial({
+                    color: color,
+                    transparent: true,
+                    opacity: 0.88
+                });
+                const line = new THREE.Line(lineGeo, lineMat);
+                const group = new THREE.Group();
+                group.add(line);
+                return group;
+            }
+
+            // 模拟数据：点与点直连 + 细管，细线与细管共用同一折线路径
+            function createRouteLine (points, color, centerLng, centerLat, tubeRadius) {
+                if (points.length < 2) return null;
+                var radius = tubeRadius != null ? tubeRadius : CONFIG.tubeRadius;
+                const vec3s = points.map(function (p) {
+                    return lngLatAltToScene(p.lng, p.lat, p.alt, centerLng, centerLat);
+                });
+                var path = new THREE.CurvePath();
+                for (var i = 0; i < vec3s.length - 1; i++) {
+                    path.add(new THREE.LineCurve3(vec3s[i], vec3s[i + 1]));
+                }
+                var tubularSegments = Math.max(20, (vec3s.length - 1) * 8);
+                const tubeGeometry = new THREE.TubeGeometry(path, tubularSegments, radius, CONFIG.tubeSegments, false);
+                const tubeMat = new THREE.MeshPhongMaterial({
+                    color: color,
+                    transparent: true,
+                    opacity: 0.88,
+                    shininess: 40,
+                    emissive: color,
+                    emissiveIntensity: 0.12
+                });
+                const tube = new THREE.Mesh(tubeGeometry, tubeMat);
+
+                const lineGeo = new THREE.BufferGeometry().setFromPoints(vec3s);
+                const lineMat = new THREE.LineBasicMaterial({
+                    color: color,
+                    transparent: true,
+                    opacity: 0.6
+                });
+                const line = new THREE.Line(lineGeo, lineMat);
+
+                const group = new THREE.Group();
+                group.add(tube);
+                group.add(line);
+                return group;
+            }
+
+            // 在路径的每个点上创建标记（小球体，只比管线粗一号），userData 存完整点信息供 hover 显示
+            function createRoutePointMarkers (points, color, centerLng, centerLat) {
+                var group = new THREE.Group();
+                var radius = 0.8;
+                var geometry = new THREE.SphereGeometry(radius, 10, 8);
+                var material = new THREE.MeshPhongMaterial({
+                    color: color,
+                    emissive: color,
+                    emissiveIntensity: 0.2,
+                    shininess: 60
+                });
+                for (var i = 0; i < points.length; i++) {
+                    var p = points[i];
+                    var pos = lngLatAltToScene(p.lng, p.lat, p.alt, centerLng, centerLat);
+                    var sphere = new THREE.Mesh(geometry, material.clone());
+                    sphere.position.copy(pos);
+                    sphere.userData = {
+                        index: i,
+                        lng: p.lng,
+                        lat: p.lat,
+                        alt: p.alt,
+                        label: p.label || '',
+                        speed: p.speed,
+                        trackAngle: p.trackAngle,
+                        verticalSpeed: p.verticalSpeed,
+                        timestamp: p.timestamp
+                    };
+                    group.add(sphere);
+                }
+                return group;
+            }
+
+            // 水平面：地面 + 网格（明显可见）
+            function createGroundPlane () {
+                const size = 3200;
+                const planeGeo = new THREE.PlaneGeometry(size, size, 1, 1);
+                const planeMat = new THREE.MeshPhongMaterial({
+                    color: 0x1e293b,
+                    transparent: true,
+                    opacity: 0.98,
+                    side: THREE.DoubleSide,
+                    shininess: 8
+                });
+                const plane = new THREE.Mesh(planeGeo, planeMat);
+                plane.rotation.x = -Math.PI / 2;
+                plane.position.y = 0;
+                plane.receiveShadow = true;
+
+                const gridSize = size / 2;
+                const divisions = 32;
+                const grid = new THREE.GridHelper(gridSize * 2, divisions, 0x64748b, 0x475569);
+                grid.position.y = 0.2;
+                grid.material.opacity = 0.85;
+                grid.material.transparent = true;
+
+                const group = new THREE.Group();
+                group.add(plane);
+                group.add(grid);
+                return group;
+            }
+
+            function addRouteGroup (points, color, centerLng, centerLat, name, createLineFn) {
+                if (!points || points.length < 2) return null;
+                var group = createLineFn(points, color, centerLng, centerLat);
+                if (!group) return null;
+                group.name = name;
+                group.add(createRoutePointMarkers(points, color, centerLng, centerLat));
+                scene.add(group);
+                return group;
+            }
+
+            function buildRouteGroups (selectedKey) {
+                var routePoints = parseRedisRoute(rawData.redisRoute, selectedKey);
+                var kafkaPoints = parseKafkaData(rawData.kafkaData, selectedKey);
+                var mockPoints = parseRedisMock(rawData.redisMock || [], selectedKey);
+                var center = getCenter(routePoints, kafkaPoints, mockPoints);
+                centerRef.centerLng = center.centerLng;
+                centerRef.centerLat = center.centerLat;
+
+                if (routePlanGroup) { scene.remove(routePlanGroup); routePlanGroup = null; }
+                if (routeSimGroup) { scene.remove(routeSimGroup); routeSimGroup = null; }
+                if (routeMockGroup) { scene.remove(routeMockGroup); routeMockGroup = null; }
+
+                var clng = center.centerLng, clat = center.centerLat;
+                var createSimLine = function (p, c, cl, ca) { return createRouteLine(p, c, cl, ca, 0.4); };
+                routePlanGroup = addRouteGroup(routePoints, 0x94a3b8, clng, clat, 'routePlan', createRouteLineStraight);
+                routeSimGroup = addRouteGroup(kafkaPoints, 0x22d3ee, clng, clat, 'routeSim', createSimLine);
+                routeMockGroup = addRouteGroup(mockPoints, 0xfbbf24, clng, clat, 'routeMock', createRouteLineStraight);
+
+                // 切换飞行计划后同步图例为“全部显示”
+                var planEl = document.getElementById('legend-plan');
+                var simEl = document.getElementById('legend-sim');
+                var mockEl = document.getElementById('legend-mock');
+                if (planEl) planEl.classList.remove('off');
+                if (simEl) simEl.classList.remove('off');
+                if (mockEl) mockEl.classList.remove('off');
+            }
+
+            function init (data) {
+                rawData = data;
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('legend').style.display = 'block';
+
+                scene = new THREE.Scene();
+                scene.background = new THREE.Color(0x0a0e1a);
+                scene.fog = new THREE.Fog(0x0a0e1a, 600, 2800);
+
+                renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.setPixelRatio(window.devicePixelRatio);
+                renderer.setClearColor(0x0a0e1a);
+                document.body.appendChild(renderer.domElement);
+
+                camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 1, 5000);
+                var routeKeys = (data.redisRoute || []).filter(function (item) { return item && item.key; }).map(function (item) { return item.key; });
+                var uniqueKeys = routeKeys.filter(function (k, i, a) { return a.indexOf(k) === i; });
+                var selectEl = document.getElementById('flight-plan-select');
+                uniqueKeys.forEach(function (key) {
+                    var opt = document.createElement('option');
+                    opt.value = key;
+                    opt.textContent = key.length > 28 ? key.slice(0, 12) + '…' + key.slice(-8) : key;
+                    opt.title = key;
+                    selectEl.appendChild(opt);
+                });
+                var defaultKey = uniqueKeys.length > 0 ? uniqueKeys[0] : null;
+                buildRouteGroups(defaultKey);
+                var center = centerRef;
+                const c = lngLatAltToScene(center.centerLng, center.centerLat, 0, center.centerLng, center.centerLat);
+                camera.position.set(c.x + 420, 280, c.z + 420);
+                camera.lookAt(c.x, 80, c.z);
+
+                controls = new THREE.OrbitControls(camera, renderer.domElement);
+                controls.target.set(c.x, 80, c.z);
+                controls.enableDamping = true;
+                controls.dampingFactor = 0.06;
+
+                scene.add(new THREE.AmbientLight(0x4a6fa5, 0.45));
+                scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+                const dir = new THREE.DirectionalLight(0xffffff, 0.75);
+                dir.position.set(300, 400, 200);
+                scene.add(dir);
+                const fill = new THREE.DirectionalLight(0x7dd3fc, 0.2);
+                fill.position.set(-150, 100, -150);
+                scene.add(fill);
+
+                scene.add(createGroundPlane());
+
+                selectEl.addEventListener('change', function () {
+                    buildRouteGroups(selectEl.value);
+                });
+                document.getElementById('flight-plan-filter').style.display = 'flex';
+
+                bindLegendToggle();
+                bindPointHover();
+                window.addEventListener('resize', onResize);
+                animate();
+            }
+
+            function bindLegendToggle () {
+                var planEl = document.getElementById('legend-plan');
+                var simEl = document.getElementById('legend-sim');
+                var mockEl = document.getElementById('legend-mock');
+                if (planEl && routePlanGroup) {
+                    planEl.addEventListener('click', function () {
+                        routePlanGroup.visible = !routePlanGroup.visible;
+                        planEl.classList.toggle('off', !routePlanGroup.visible);
+                    });
+                }
+                if (simEl && routeSimGroup) {
+                    simEl.addEventListener('click', function () {
+                        routeSimGroup.visible = !routeSimGroup.visible;
+                        simEl.classList.toggle('off', !routeSimGroup.visible);
+                    });
+                }
+                if (mockEl && routeMockGroup) {
+                    mockEl.addEventListener('click', function () {
+                        routeMockGroup.visible = !routeMockGroup.visible;
+                        mockEl.classList.toggle('off', !routeMockGroup.visible);
+                    });
+                }
+            }
+
+            var raycaster = new THREE.Raycaster();
+            var mouse = new THREE.Vector2();
+
+            function isPointUnderHiddenRoute (object) {
+                var o = object;
+                while (o) {
+                    if (o === routePlanGroup || o === routeSimGroup || o === routeMockGroup) {
+                        return !o.visible;
+                    }
+                    o = o.parent;
+                }
+                return false;
+            }
+
+            function bindPointHover () {
+                var tooltipEl = document.getElementById('point-tooltip');
+                if (!tooltipEl) return;
+
+                function formatNum (v) {
+                    if (v == null || v !== v) return '—';
+                    if (typeof v === 'number' && (v > 1e10 || v < -1e10)) return v.toExponential(2);
+                    return typeof v === 'number' ? v.toFixed(6) : String(v);
+                }
+
+                function formatTime (ts) {
+                    if (ts == null || ts !== ts) return '—';
+                    var d = new Date(Number(ts));
+                    return isNaN(d.getTime()) ? '—' : d.toLocaleString('zh-CN');
+                }
+
+                function buildTooltipHtml (d) {
+                    var html = '<div class="tt-title">' + (d.label || '数据点') + ' #' + (d.index + 1) + '</div>';
+                    html += '<div class="tt-row"><span class="tt-label">经度</span><span class="tt-value">' + formatNum(d.lng) + '</span></div>';
+                    html += '<div class="tt-row"><span class="tt-label">纬度</span><span class="tt-value">' + formatNum(d.lat) + '</span></div>';
+                    html += '<div class="tt-row"><span class="tt-label">高度(m)</span><span class="tt-value">' + formatNum(d.alt) + '</span></div>';
+                    if (d.speed != null && d.speed === d.speed) {
+                        html += '<div class="tt-row"><span class="tt-label">速度</span><span class="tt-value">' + formatNum(d.speed) + '</span></div>';
+                    }
+                    if (d.trackAngle != null && d.trackAngle === d.trackAngle) {
+                        html += '<div class="tt-row"><span class="tt-label">航向角(°)</span><span class="tt-value">' + formatNum(d.trackAngle) + '</span></div>';
+                    }
+                    if (d.verticalSpeed != null && d.verticalSpeed === d.verticalSpeed) {
+                        html += '<div class="tt-row"><span class="tt-label">垂直速度</span><span class="tt-value">' + formatNum(d.verticalSpeed) + '</span></div>';
+                    }
+                    if (d.timestamp != null) {
+                        html += '<div class="tt-row"><span class="tt-label">时间</span><span class="tt-value">' + formatTime(d.timestamp) + '</span></div>';
+                    }
+                    return html;
+                }
+
+                renderer.domElement.addEventListener('mousemove', function (ev) {
+                    var rect = renderer.domElement.getBoundingClientRect();
+                    mouse.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+                    mouse.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+                    raycaster.setFromCamera(mouse, camera);
+                    var intersects = raycaster.intersectObjects(scene.children, true);
+                    var hit = null;
+                    for (var i = 0; i < intersects.length; i++) {
+                        var obj = intersects[i].object;
+                        if (obj.userData && typeof obj.userData.lng === 'number' && !isPointUnderHiddenRoute(obj)) {
+                            hit = obj.userData;
+                            break;
+                        }
+                    }
+                    if (hit) {
+                        tooltipEl.innerHTML = buildTooltipHtml(hit);
+                        tooltipEl.classList.add('visible');
+                        tooltipEl.style.left = (ev.clientX + 14) + 'px';
+                        tooltipEl.style.top = (ev.clientY + 14) + 'px';
+                        var r = tooltipEl.getBoundingClientRect();
+                        if (r.right > window.innerWidth) tooltipEl.style.left = (ev.clientX - r.width - 8) + 'px';
+                        if (r.bottom > window.innerHeight) tooltipEl.style.top = (ev.clientY - r.height - 8) + 'px';
+                    } else {
+                        tooltipEl.classList.remove('visible');
+                    }
+                });
+
+                // 点击小球：复制经度到剪贴板
+                renderer.domElement.addEventListener('click', function (ev) {
+                    var rect = renderer.domElement.getBoundingClientRect();
+                    mouse.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+                    mouse.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+                    raycaster.setFromCamera(mouse, camera);
+                    var intersects = raycaster.intersectObjects(scene.children, true);
+                    for (var i = 0; i < intersects.length; i++) {
+                        var obj = intersects[i].object;
+                        if (obj.userData && typeof obj.userData.lng === 'number' && !isPointUnderHiddenRoute(obj)) {
+                            var lngStr = String(obj.userData.lng);
+                            if (navigator.clipboard && navigator.clipboard.writeText) {
+                                navigator.clipboard.writeText(lngStr).then(function () {
+                                    showCopyToast('经度已复制');
+                                }).catch(function () {
+                                    fallbackCopy(lngStr);
+                                });
+                            } else {
+                                fallbackCopy(lngStr);
+                            }
+                            break;
+                        }
+                    }
+                });
+
+                function fallbackCopy (text) {
+                    var ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.style.position = 'fixed';
+                    ta.style.opacity = '0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try {
+                        document.execCommand('copy');
+                        showCopyToast('经度已复制');
+                    } catch (e) { }
+                    document.body.removeChild(ta);
+                }
+
+                function showCopyToast (msg) {
+                    var toast = document.getElementById('copy-toast');
+                    if (!toast) {
+                        toast = document.createElement('div');
+                        toast.id = 'copy-toast';
+                        toast.className = 'copy-toast';
+                        document.body.appendChild(toast);
+                    }
+                    toast.textContent = msg;
+                    toast.classList.add('visible');
+                    clearTimeout(toast._tid);
+                    toast._tid = setTimeout(function () {
+                        toast.classList.remove('visible');
+                    }, 1500);
+                }
+            }
+
+            function onResize () {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+
+            function animate () {
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+            }
+
+            // 加载三个 JSON 文件（按 redis_route 的 key 分组后可过滤）
+            Promise.all([
+                fetch('json/redis_route.json').then(function (r) { return r.json(); }),
+                fetch('json/kafka_data.json').then(function (r) { return r.json(); }),
+                fetch('json/redis_trace.json').then(function (r) { return r.json(); })
+            ]).then(function (arr) {
+                init({ redisRoute: arr[0], kafkaData: arr[1], redisMock: arr[2] });
+            }).catch(function (err) {
+                document.getElementById('loading').textContent = '加载失败: ' + err.message + '（请通过本地服务器打开本页，如 npx serve .）';
+            });
+        })();
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,17 @@
+sector:
+  code: "yfksq201"
+  name: "yfksq2-1"
+  type: "物理扇区"
+  min_altitude: 1
+  max_altitude: 120
+  vertices:
+    - lon: 120.661626
+      lat: 31.33506
+    - lon: 120.667088
+      lat: 31.286363
+    - lon: 120.740236
+      lat: 31.287378
+    - lon: 120.730974
+      lat: 31.342769
+    - lon: 120.661626
+      lat: 31.33506

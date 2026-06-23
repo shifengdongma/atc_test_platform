@@ -1,0 +1,241 @@
+{
+	"code": "0",
+	"result": {
+		"airspaceType": "NON_SEGREGATED",
+		"applicantDeptId": "30456526292533248",
+		"applicantDeptName": "蓝天使飞行运营公司",
+		"applicantId": "30456526913290240",
+		"applicantName": "lantianshi",
+		"approves": [
+			{
+				"approveResult": "Approve",
+				"approveTime": "2026-03-26 14:33",
+				"approveType": "Auto",
+				"submitTime": "2026-03-26 14:33"
+			}
+		],
+		"contact": "lantianshi",
+		"files": [],
+		"flightControlMode": "1",
+		"flightLines": [
+			{
+				"arrivalAirportId": "30562044881289216",
+				"arrivalAirportName": "机场西起降场",
+				"arrivalPointLat": 40.077968,
+				"arrivalPointLon": 116.509523,
+				"departureAirportId": "30550874061422592",
+				"departureAirportName": "机场南起降场",
+				"departurePointLat": 39.984207,
+				"departurePointLon": 116.637865,
+				"flightLineName": "起降场机场南起降场-离场点-航路G00091-G00092-G00093-G00094-起降场机场西起降场-进场点",
+				"landPointLat": 116.508525,
+				"landPointLon": 116.508525,
+				"lineSegments": [
+					{
+						"airRouteElementId": "30783616711802880",
+						"airRouteId": "30564257439563776",
+						"airRouteSegmentSeq": "1",
+						"endPointHeight": 460.0,
+						"endPointLat": 40.003031,
+						"endPointLon": 116.613989,
+						"protectHeight": 300.0,
+						"startPointHeight": 260.0,
+						"startPointLat": 39.970506,
+						"startPointLon": 116.640541,
+						"type": 2,
+						"width": 1000.0
+					},
+					{
+						"airRouteElementId": "30783616711802881",
+						"airRouteId": "30564257439563776",
+						"airRouteSegmentSeq": "2",
+						"endPointHeight": 460.0,
+						"endPointLat": 40.009186,
+						"endPointLon": 116.586772,
+						"protectHeight": 300.0,
+						"startPointHeight": 460.0,
+						"startPointLat": 40.003031,
+						"startPointLon": 116.613989,
+						"type": 2,
+						"width": 1000.0
+					},
+					{
+						"airRouteElementId": "30783616711802882",
+						"airRouteId": "30564257439563776",
+						"airRouteSegmentSeq": "3",
+						"endPointHeight": 460.0,
+						"endPointLat": 40.060192,
+						"endPointLon": 116.51523,
+						"protectHeight": 300.0,
+						"startPointHeight": 460.0,
+						"startPointLat": 40.009186,
+						"startPointLon": 116.586772,
+						"type": 2,
+						"width": 1000.0
+					},
+					{
+						"airRouteElementId": "30783616711802883",
+						"airRouteId": "30564257439563776",
+						"airRouteSegmentSeq": "4",
+						"endPointHeight": 260.0,
+						"endPointLat": 40.077801,
+						"endPointLon": 116.504368,
+						"protectHeight": 300.0,
+						"startPointHeight": 460.0,
+						"startPointLat": 40.060192,
+						"startPointLon": 116.51523,
+						"type": 2,
+						"width": 1000.0
+					},
+					{
+						"areaLowerHeight": 120.0,
+						"areaUpperHeight": 300.0,
+						"shape": 1,
+						"shapePolygon": {
+							"type": "Polygon",
+							"coordinates": [
+								[]
+							]
+						},
+						"type": 3
+					}
+				],
+				"takeoffPointLat": 116.638877,
+				"takeoffPointLon": 116.638877,
+				"taskId": "30848530792988672",
+				"taskLineId": "30868914850381824"
+			},
+			{
+				"arrivalAirportId": "30550874061422592",
+				"arrivalAirportName": "机场南起降场",
+				"arrivalPointHeight": 260.0,
+				"arrivalPointLat": 39.983295,
+				"arrivalPointLon": 116.638467,
+				"departureAirportId": "30562044881289216",
+				"departureAirportName": "机场西起降场",
+				"departurePointLat": 40.084552,
+				"departurePointLon": 116.498174,
+				"flightLineName": "起降场机场西起降场-离场点-航路G00081-G00082-G00083-G00084-起降场机场南起降场-进场点",
+				"landPointLat": 39.983846,
+				"landPointLon": 116.638877,
+				"lineSegments": [
+					{
+						"airRouteElementId": "32710053945622528",
+						"airRouteId": "30563977624961024",
+						"airRouteSegmentSeq": "1",
+						"endPointHeight": 460.0,
+						"endPointLat": 40.056432,
+						"endPointLon": 116.546339,
+						"protectHeight": 300.0,
+						"startPointHeight": 260.0,
+						"startPointLat": 40.075686,
+						"startPointLon": 116.520266,
+						"type": 2,
+						"width": 1000.0
+					},
+					{
+						"airRouteElementId": "32710053945622529",
+						"airRouteId": "30563977624961024",
+						"airRouteSegmentSeq": "2",
+						"endPointHeight": 460.0,
+						"endPointLat": 40.019835,
+						"endPointLon": 116.598714,
+						"protectHeight": 300.0,
+						"startPointHeight": 460.0,
+						"startPointLat": 40.056432,
+						"startPointLon": 116.546339,
+						"type": 2,
+						"width": 1000.0
+					},
+					{
+						"airRouteElementId": "32710053945622530",
+						"airRouteId": "30563977624961024",
+						"airRouteSegmentSeq": "3",
+						"endPointHeight": 460.0,
+						"endPointLat": 40.011077,
+						"endPointLon": 116.632564,
+						"protectHeight": 300.0,
+						"startPointHeight": 460.0,
+						"startPointLat": 40.019835,
+						"startPointLon": 116.598714,
+						"type": 2,
+						"width": 1000.0
+					},
+					{
+						"airRouteElementId": "32710053945622531",
+						"airRouteId": "30563977624961024",
+						"airRouteSegmentSeq": "4",
+						"endPointHeight": 260.0,
+						"endPointLat": 39.989702,
+						"endPointLon": 116.644686,
+						"protectHeight": 300.0,
+						"startPointHeight": 460.0,
+						"startPointLat": 40.011077,
+						"startPointLon": 116.632564,
+						"type": 2,
+						"width": 1000.0
+					}
+				],
+				"takeoffPointLat": 40.087987,
+				"takeoffPointLon": 116.508525,
+				"taskId": "32990966650503168",
+				"taskLineId": "32990966650503168"
+			}
+		],
+		"flightMode": "0",
+		"havePlan": false,
+		"id": "30848530792988672",
+		"isDangerousGoods": false,
+		"isMovingOper": false,
+		"isOverCrowds": false,
+		"isRelayOrNet": false,
+		"isRtOrSwarm": false,
+		"observers": [],
+		"operatorId": "30456526292533248",
+		"operatorName": "蓝天使飞行运营公司",
+		"operatorType": "1",
+		"periods": [
+			{
+				"endTime": 1774510859000,
+				"startTime": 1774506916000
+			}
+		],
+		"phoneNumber": "13750469012",
+		"pilots": [
+			{
+				"idType": "0",
+				"licenseNumber": "451234567",
+				"operatorId": "30502116275666944",
+				"operatorIdNumber": "410105198611231234",
+				"operatorName": "张明",
+				"rplType": "RPL_S"
+			}
+		],
+		"taskDesc": "",
+		"taskName": "巡查任务20260326A",
+		"taskNumber": "FT20260326000004",
+		"taskPurpose": "23",
+		"taskStatus": "FIN",
+		"taskType": "SINGLE",
+		"uavInfos": [
+			{
+				"insuranceCompany": "",
+				"policyNumber": "",
+				"uavId": "30528058129793024",
+				"uavIdentifyCode": "ZKJXVT05F5G6H7J8K918",
+				"uavName": "B-1761"
+			},
+			{
+				"insuranceCompany": "",
+				"policyNumber": "",
+				"uavId": "30528058129793025",
+				"uavIdentifyCode": "ZKJXVT05F5G6H7J8K919",
+				"uavName": "B-1762"
+			}
+		],
+		"uavType": "MEDIUM"
+	},
+	"status": 200,
+	"timeElapsed": 57,
+	"timestamp": 1774520484922
+}

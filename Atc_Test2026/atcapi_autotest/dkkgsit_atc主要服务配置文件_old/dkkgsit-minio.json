@@ -1,0 +1,45 @@
+{
+	"configMigrations":[
+		{
+			"configs":[
+				{
+					"configKey":"minio_tool.sh",
+					"configValue":"#!/bin/bash\nfunction minio_tool() {\n    while true\n    do\n      course=`netstat -anp |grep 127.0.0.1:9000`\n      if [ -n \"$course\" ]; then\n        sh -c /opt/minio/mc_local.sh\n        mc anonymous set private data/\n        break\n      else\n        sleep 30s\n      fi\n    done\n}\n\nminio_tool",
+					"projectId":"dkkgsit-minio",
+					"version":"1.0.0"
+				}
+			],
+			"profile":{
+				"category":"PERSONAL",
+				"name":"minio_tool.sh",
+				"profileRealType":"yml",
+				"profileType":"bootstrap",
+				"projectId":"dkkgsit-minio",
+				"version":"1.0.0",
+				"visible":0
+			}
+		},
+		{
+			"configs":[
+				{
+					"configKey":"minio.conf",
+					"configValue":"#集群节点数量\nNODES=\"1\"\n#数据存放目录\nMINIO_VOLUMES=\"/opt/minio/data\"\n#端口号设置\nSERVER_PORT=\"9000\"\nCONSOLER_PORT=\"9001\"\n#用户名\nMINIO_ROOT_USER=\"admin\"\n#密码\nMINIO_ROOT_PASSWORD=\"kedacom123\"\n",
+					"projectId":"dkkgsit-minio",
+					"version":"1.0.0"
+				}
+			],
+			"profile":{
+				"category":"PERSONAL",
+				"name":"minio.conf",
+				"profileRealType":"yml",
+				"profileType":"bootstrap",
+				"projectId":"dkkgsit-minio",
+				"version":"1.0.0",
+				"visible":0
+			}
+		}
+	],
+	"mark":"minio",
+	"md5":"0373d0a0b36a7d5c099b6a1da0f0fffb",
+	"projectVersion":"1.0.0"
+}

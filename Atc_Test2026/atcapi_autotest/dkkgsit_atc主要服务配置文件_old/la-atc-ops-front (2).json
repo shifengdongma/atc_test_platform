@@ -1,0 +1,27 @@
+{
+	"configMigrations":[
+		{
+			"configs":[
+				{
+					"configKey":"text",
+					"configValue":"{\n  \"CUSTOM_CONFIG\": {},\n  \"CLOUD_RBAC_URL\": {},\n  \"BASE_URL\": \"https://dkkgsit-test.testdolphin.com/la-atc-ops-server/\",\n  \"FILE_URL\": \"https://dkkgsit-test.testdolphin.com/la-atc-ops-front/static/server/\"\n}",
+					"projectId":"la-atc-ops-front",
+					"version":"1.0.0"
+				}
+			],
+			"profile":{
+				"category":"PERSONAL",
+				"name":"global",
+				"path":"static/config/global-production.json",
+				"profileRealType":"json",
+				"profileType":"text",
+				"projectId":"la-atc-ops-front",
+				"version":"1.0.0",
+				"visible":0
+			}
+		}
+	],
+	"mark":"la-atc-ops-front",
+	"md5":"cb850410bd452908571e645cd9e6a3fe",
+	"projectVersion":"1.0.0"
+}

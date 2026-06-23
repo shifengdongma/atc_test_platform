@@ -1,0 +1,16 @@
+uavs:
+  - file: "UAV_danger_scene01_rise_from_below.json"
+    enabled: true
+  - file: "UAV_danger_scene02_descend_from_above.json"
+    enabled: true
+  - file: "UAV_danger_scene03_horizontal_intrude.json"
+    enabled: true
+  - file: "UAV_danger_scene04_inside_flight.json"
+    enabled: true
+  - file: "UAV_danger_scene05_cross_through.json"
+    enabled: true
+
+params:
+  formation_type: "parallel"
+  distance: 50
+  description: "危险区圆柱体侵入测试场景"

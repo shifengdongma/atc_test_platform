@@ -1,0 +1,138 @@
+# ============================================
+# UAV 飞行数据工具 - 统一配置文件
+# 整合 uav_emitter + utm_随机模拟飞行数据
+# ============================================
+
+# 运行模式切换
+# scene        - 场景模式：加载自定义 JSON 轨迹文件发送（原 uav_emitter）
+# simulation   - 仿真模式：随机生成飞行计划并物理仿真发送（原 utm main_multi）
+# stress_test  - 压力测试模式：3000 架批量性能测试（原 utm main_multi2）
+mode: "simulation"
+
+# ============================================
+# Kafka 配置
+# ============================================
+kafka:
+  url: "10.165.19.213:30011"
+  topic: 'uav_runtime_data'
+  consumer_topic: 'uav_runtime_trace'
+  # Kafka 客户端类型：kafka-python | confluent
+  # kafka-python: 纯 Python 实现，兼容性更好
+  # confluent: 基于 C 库 librdkafka，性能高 5~10 倍，需安装 confluent-kafka
+  client_type: "kafka-python"
+
+# ============================================
+# Redis 配置
+# ============================================
+redis:
+  host: "10.67.89.106"
+  port: 16379
+  password: ""
+  db: 0
+  flight_plan_key: "BIZ_DATA:UAV_ROUTE"
+
+# ============================================
+# 场景模式配置（对应原 uav_emitter）
+# ============================================
+scene_mode:
+  # 场景文件夹路径
+  scenes_path: "scenes/"
+  # 当前激活的场景（为空则加载所有场景）
+  active_scenes:
+    - "独立测试用例"
+  # 发射设置
+  emitter:
+    # 发射间隔（毫秒）
+    interval_ms: 1000
+    # 时间戳处理模式
+    # - preserve: 保留原始时间戳
+    # - align: 对齐到当前时间，保持相对间隔
+    # - replace: 替换为当前时间（默认）
+    timestamp_mode: replace
+    # 是否循环播放
+    loop: false
+
+# ============================================
+# 仿真模式配置（对应原 main_multi.py）
+# ============================================
+simulation_mode:
+  # 工作线程数
+  num_workers: 10
+  # 总活跃无人机数量（所有线程之和）
+  target_drones: 3000
+  # 是否打印子线程详细日志
+  enable_worker_log: false
+  # 时间戳偏移量（毫秒），负值表示提前
+  timestamp_offset_ms: -1000
+  # 是否消费 uav_runtime_trace
+  enable_trace_consumer: true
+  # 后台 flush 间隔（秒）
+  flush_interval_sec: 5
+
+# ============================================
+# 压力测试模式配置（对应原 main_multi2.py）
+# ============================================
+stress_test_mode:
+  # 工作线程数
+  num_workers: 10
+  # 总活跃无人机数量
+  target_drones: 3000
+  # 是否打印子线程详细日志
+  enable_worker_log: false
+  # 时间戳偏移量（毫秒）
+  timestamp_offset_ms: -1000
+  # Kafka 发送线程数（仿真与发送解耦）
+  sender_threads: 2
+  # 发送队列最大长度
+  sender_queue_size: 10000
+  # 是否消费 uav_runtime_trace
+  enable_trace_consumer: true
+
+# ============================================
+# 航空器名称生成（预留扩展）
+# ============================================
+aircraft_name:
+  # 是否启用自定义名称生成
+  enabled: false
+  # 名称格式模板
+  # 可用变量: {seq} 序号, {uuid} 短UUID, {timestamp} 时间戳, {date} 日期
+  format: "UAV_{seq:05d}"
+  # 起始序号
+  start_seq: 1
+  # 分类前缀映射（预留）
+  classification_prefix:
+    0: "MICRO"
+    1: "LIGHT"
+    2: "SMALL"
+    3: "MEDIUM"
+    4: "LARGE"
+
+# ============================================
+# 日志配置
+# ============================================
+logging:
+  level: INFO
+  # 日志文件路径（为空则不写入文件）
+  file: ""
+  # 控制台输出
+  console: true
+
+# ============================================
+# WebUI 预留配置
+# ============================================
+webui:
+  enabled: false
+  host: "0.0.0.0"
+  port: 8080
+  # 是否允许远程控制启停
+  allow_control: true
+
+# ============================================
+# GUI 预留配置
+# ============================================
+gui:
+  enabled: false
+  # 主题: dark | light
+  theme: "dark"
+  # 刷新频率（毫秒）
+  refresh_ms: 1000

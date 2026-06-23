@@ -1,0 +1,27 @@
+uavs:
+  - file: "UAV_conflict_scene01_head_on_A.json"
+    enabled: true
+  - file: "UAV_conflict_scene01_head_on_B.json"
+    enabled: true
+  - file: "UAV_conflict_scene02_chase_A.json"
+    enabled: true
+  - file: "UAV_conflict_scene02_chase_B.json"
+    enabled: true
+  - file: "UAV_conflict_scene03_cross_A.json"
+    enabled: true
+  - file: "UAV_conflict_scene03_cross_B.json"
+    enabled: true
+  - file: "UAV_conflict_scene04_persistent_close_A.json"
+    enabled: true
+  - file: "UAV_conflict_scene04_persistent_close_B.json"
+    enabled: true
+  - file: "UAV_conflict_scene05_formation_then_separate_A.json"
+    enabled: true
+  - file: "UAV_conflict_scene05_formation_then_separate_B.json"
+    enabled: true
+
+params:
+  formation_type: "conflict_pair"
+  distance: 50
+  description: "短期冲突告警趋势解除测试场景"
+  trend_release_cycles: 10

@@ -49,10 +49,13 @@ _sim_core.ACTIVE_UAV_IDENTIFIERS = UAV_IDENTIFIERS_EXTENDED
 # =============================================================
 
 # ── 默认参数（可在此修改）─────────────────────────────────────────────
-DEFAULT_INTERVAL_MS = 1000      # 发射间隔（毫秒）
-DEFAULT_LOOP = False            # 数据耗尽后是否循环
-DEFAULT_CONSUME_TRACE = True    # 是否消费 uav_runtime_trace
-ENABLE_REDIS_PREHEAT = True   # Redis预热开关，默认关闭
+DEFAULT_INTERVAL_MS = 1000              # 发射间隔（毫秒）
+DEFAULT_LOOP = True                     # 数据耗尽后是否循环
+DEFAULT_CONSUME_TRACE = True            # 是否消费 uav_runtime_trace
+ENABLE_REDIS_PREHEAT = False            # Redis预热开关，默认关闭
+DEFAULT_KAFKA_FLUSH_TIMEOUT_SEC = 1.0   # Kafka flush 超时（秒），双集群场景建议 5.0
+DEFAULT_TIMESTAMP_DELAY_MS = 0       # 时间戳主动延迟（毫秒），给后端消费留缓冲，0=不延迟
+DEFAULT_LOOP_DELAY_SEC = 0             # 每轮循环结束后等待秒数，再开始下一轮发射
 
 # IDE 直接运行配置：设为 True 时，无需命令行参数直接发射多场景数据
 IDE_QUICK_RUN = True
@@ -62,16 +65,19 @@ IDE_QUICK_RUN = True
 # 进程2: 场景 07-11
 # 进程3: 场景 12-17
 _SCENE_GROUP_1 = [
-    "ha_data_scene_01bj", "ha_data_scene_02tj", "ha_data_scene_03cz",
-    "ha_data_scene_04dy", "ha_data_scene_05jn", "ha_data_scene_06yt",
+    #"ha_data_scene_01bj", "ha_data_scene_02tj",
+    "ha_data_scene_03cz","ha_data_scene_04dy", 
+    #"ha_data_scene_05jn", "ha_data_scene_06yt",
 ]
 _SCENE_GROUP_2 = [
-    "ha_data_scene_07wh", "ha_data_scene_08qd", "ha_data_scene_09ly",
-    "ha_data_scene_10sq", "ha_data_scene_11zz",
+    #"ha_data_scene_07wh", "ha_data_scene_08qd",
+    "ha_data_scene_09ly",
+    #"ha_data_scene_10sq", "ha_data_scene_11zz",
 ]
 _SCENE_GROUP_3 = [
-    "ha_data_scene_12zmd", "ha_data_scene_13bb", "ha_data_scene_14yc",
-    "ha_data_scene_15nj", "ha_data_scene_16sz", "ha_data_scene_17sh",
+    #"ha_data_scene_12zmd", "ha_data_scene_13bb",
+    "ha_data_scene_14yc",
+    #"ha_data_scene_15nj", "ha_data_scene_16sz", "ha_data_scene_17sh",
 ]
 _SCENE_GROUPS = [_SCENE_GROUP_1, _SCENE_GROUP_2, _SCENE_GROUP_3]
 
@@ -137,17 +143,22 @@ class HaSceneEmitter:
         topic: str = "uav_runtime_data",
         interval_ms: int = 1000,
         timestamp_mode: str = "replace",
+        timestamp_delay_ms: int = DEFAULT_TIMESTAMP_DELAY_MS,
         loop: bool = False,
+        loop_delay_sec: float = DEFAULT_LOOP_DELAY_SEC,
         debug_print_uav_ids: bool = False,
         consume_trace: bool = False,
         trace_group_id: Optional[str] = None,
         quiet: bool = False,
         enable_redis_preheat: bool = False,
+        flush_timeout_sec: float = DEFAULT_KAFKA_FLUSH_TIMEOUT_SEC,
     ):
         self.topic = topic
         self.interval_ms = interval_ms
         self.timestamp_mode = timestamp_mode
+        self.timestamp_delay_ms = timestamp_delay_ms
         self.loop = loop
+        self.loop_delay_sec = loop_delay_sec
         self.debug_print_uav_ids = debug_print_uav_ids
         self.consume_trace = consume_trace
         self.trace_group_id = trace_group_id or f"ha_scene_emitter_trace_{os.getpid()}"
@@ -161,6 +172,8 @@ class HaSceneEmitter:
         self.kafka = KafkaProducerClient(
             _k_a,
             bootstrap_servers_mirror=_k_b if _k_b else None,
+            flush_timeout_sec=flush_timeout_sec,
+            producer_config={"buffer_memory": 134217728},  # 128MB 缓冲区，避免 3000 条消息阻塞
         )
 
         # ── 加载 UAV 数据（仅一次，保证 A/B 两侧 UID 完全一致） ──
@@ -173,6 +186,8 @@ class HaSceneEmitter:
         self._thread = None
         self._first_emit_time = None
         self._first_record_time = None
+        self._base_emit_time = None  # 单调递增时间戳基准（毫秒）
+        self._emit_count = 0         # 已发射轮次
 
         # ── Redis A/B（并行连接） ──
         self.redis_a = None
@@ -309,7 +324,7 @@ class HaSceneEmitter:
     # ── 时间戳处理 ──
     def _process_timestamp(self, record: Dict, now_ms: int) -> int:
         original_ts = record.get("timestamp", 0)
-        now_ms = now_ms - 1000  # 减 1 秒，可以慢不能快
+        now_ms = now_ms - self.timestamp_delay_ms  # 主动延迟，给后端消费留缓冲
         if self.timestamp_mode == "preserve":
             return original_ts
         elif self.timestamp_mode == "align":
@@ -359,6 +374,9 @@ class HaSceneEmitter:
             print(f"[Redis] 航线写入完成: {len(self.uav_data_list)} 架")
         elif not self.enable_redis_preheat:
             print("\n[Redis] 预热已关闭，跳过航线写入")
+        elif self.enable_redis_preheat and not self.redis_a and not self.redis_b:
+            print("\n[Redis] ⚠️ 预热已开启，但 A/B 集群 Redis 均连接失败，跳过航线写入")
+            print("         后端将无法获取飞行计划，可能导致时间戳异常！")
 
         print(f"\n🚀 高可用发射器启动")
         print(f"   UAV 数量: {len(self.uav_data_list)}")
@@ -430,25 +448,36 @@ class HaSceneEmitter:
             if self._is_all_completed():
                 if self.loop:
                     self._reset_all()
+                    print(f"\n⏳ 本轮结束，等待 {self.loop_delay_sec}s 后开始下一轮...")
+                    time.sleep(self.loop_delay_sec)
+                    continue
                 else:
                     print("\n🏁 所有 UAV 数据已耗尽")
                     self.running = False
                     break
+            t1 = time.perf_counter()
             self._emit_once()
+            emit_cost_ms = (time.perf_counter() - t1) * 1000
             elapsed = (time.perf_counter() - t0) * 1000
             sleep_ms = max(0, self.interval_ms - elapsed)
+            if emit_cost_ms > 2000:
+                print(f"⚠️ _emit_once 耗时异常: {emit_cost_ms:.0f}ms")
             time.sleep(sleep_ms / 1000)
 
     def _emit_once(self):
         """单次发射：生成 records 后通过 KafkaProducerClient(mirror) 同时发往 A/B"""
         records = []
-        now_ms = int(time.time() * 1000)
+
+        # 首次发射时记录基准时间，之后每轮严格按 interval 单调递增
+        if self._base_emit_time is None:
+            self._base_emit_time = int(time.time() * 1000)
+        round_ts = self._base_emit_time + self._emit_count * self.interval_ms
 
         for uav in self.uav_data_list:
             if not uav.has_next():
                 continue
             record = uav.next()
-            record["timestamp"] = self._process_timestamp(record, now_ms)
+            record["timestamp"] = self._process_timestamp(record, round_ts)
             records.append(record)
 
         if records:
@@ -456,6 +485,7 @@ class HaSceneEmitter:
                 # KafkaProducerClient 内部会自动同时发往主集群和 mirror 集群
                 self.kafka.send_bulk(records, self.topic)
                 self.stats["sent"] += len(records)
+                self._emit_count += 1  # 只有成功排队后才进入下一轮时间戳
 
                 if not self.quiet:
                     progress = self._get_progress()
@@ -476,6 +506,8 @@ class HaSceneEmitter:
             uav.reset()
         self._first_emit_time = None
         self._first_record_time = None
+        self._base_emit_time = None
+        self._emit_count = 0
         print("🔄 循环模式: 重新开始")
 
     def _get_progress(self) -> str:
@@ -780,7 +812,7 @@ def step1_generate_data():
     return json_files
 
 
-def _emit_worker(json_files, interval_ms, loop, consume_trace, quiet=False, trace_group_id=None, enable_redis_preheat=False):
+def _emit_worker(json_files, interval_ms, loop, consume_trace, quiet=False, trace_group_id=None, enable_redis_preheat=False, flush_timeout_sec=DEFAULT_KAFKA_FLUSH_TIMEOUT_SEC):
     scene_names = [os.path.basename(f) for f in json_files]
     scene_name = ", ".join(scene_names[:3])
     if len(scene_names) > 3:
@@ -794,6 +826,7 @@ def _emit_worker(json_files, interval_ms, loop, consume_trace, quiet=False, trac
             trace_group_id=trace_group_id,
             quiet=quiet,
             enable_redis_preheat=enable_redis_preheat,
+            flush_timeout_sec=flush_timeout_sec,
         )
         print(f"[{scene_name}] 高可用发射器初始化完成，UAV数量: {len(emitter.uav_data_list)}")
         emitter.start()
@@ -813,8 +846,8 @@ def _emit_worker(json_files, interval_ms, loop, consume_trace, quiet=False, trac
         print(f"[{scene_name}] 进程结束")
 
 
-def step2_emit_parallel(json_files, interval_ms, loop, consume_trace, enable_redis_preheat=False):
-    """步骤2：并发启动多个发射进程（按分组）"""
+def step2_emit_parallel(json_files, interval_ms, loop, consume_trace, enable_redis_preheat=False, flush_timeout_sec=DEFAULT_KAFKA_FLUSH_TIMEOUT_SEC):
+    """步骤2：并发启动多个发射进程（每个场景一个独立进程，与 3000平行模拟器发射.py 对齐）"""
     print("=" * 70)
     print("步骤 2/2：并发启动高可用发射进程 (A/B 双集群)")
     print("=" * 70)
@@ -825,27 +858,25 @@ def step2_emit_parallel(json_files, interval_ms, loop, consume_trace, enable_red
     print(f"  循环模式: {'开启' if loop else '关闭'}")
     print(f"  Redis预热: {'开启' if enable_redis_preheat else '关闭'}")
     print(f"  Trace消费: {'开启' if consume_trace else '关闭'} (A/B 双集群)")
+    print(f"  Flush超时: {flush_timeout_sec}s")
     print("=" * 70)
     print()
 
     processes = []
     shared_trace_group = "ha_scene_emitter_trace_shared"
-    
-    # 按分组启动进程
-    for group_idx, scene_names in enumerate(_SCENE_GROUPS):
-        group_files = [os.path.join(ENGINE_DIR, "mock", f"{name}.json") for name in scene_names]
-        
-        # 只让第一个进程消费 trace，避免重复打印
-        consume = consume_trace if group_idx == 0 else False
-        
+
+    # 每个场景文件一个独立进程（降低每进程负载，避免 Kafka 队列积压）
+    for i, f in enumerate(json_files):
+        # 只让第一个进程消费 trace，避免重复打印；所有子进程静默发送
+        consume = consume_trace if i == 0 else False
         p = multiprocessing.Process(
             target=_emit_worker,
-            args=(group_files, interval_ms, loop, consume, True, 
-                  shared_trace_group if consume else None, enable_redis_preheat),
+            args=([f], interval_ms, loop, consume, True,
+                  shared_trace_group if consume else None, enable_redis_preheat, flush_timeout_sec),
         )
         p.start()
-        processes.append((p, f"Group{group_idx+1}"))
-        print(f"[启动] 发射进程: Group{group_idx+1} ({len(scene_names)}场景, pid={p.pid}, trace={'开启' if consume else '关闭'})")
+        processes.append((p, os.path.basename(f)))
+        print(f"[启动] 发射进程: {os.path.basename(f)} (pid={p.pid}, trace={'开启' if consume else '关闭'})")
 
     # 等待所有进程完成（或收到中断信号）
     try:
@@ -891,6 +922,7 @@ def main():
     parser.add_argument("--no-consume-trace", action="store_true", help="不消费uav_runtime_trace")
     parser.add_argument("--redis-preheat", action="store_true", default=ENABLE_REDIS_PREHEAT, help="开启Redis预热")
     parser.add_argument("--no-redis-preheat", action="store_true", help="关闭Redis预热")
+    parser.add_argument("--flush-timeout", type=float, default=DEFAULT_KAFKA_FLUSH_TIMEOUT_SEC, help="Kafka flush 超时(秒)")
     parser.add_argument("--generate-only", action="store_true", help="仅生成数据，不发射")
     parser.add_argument("--emit-only", action="store_true", help="跳过生成，直接发射")
     args = parser.parse_args()
@@ -916,7 +948,7 @@ def main():
             return
 
         # 步骤2：并发发射
-        step2_emit_parallel(json_files, args.interval, args.loop, consume_trace, enable_redis_preheat)
+        step2_emit_parallel(json_files, args.interval, args.loop, consume_trace, enable_redis_preheat, args.flush_timeout)
         return
 
     # 单文件模式

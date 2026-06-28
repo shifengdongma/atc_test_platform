@@ -1,5 +1,6 @@
 import json
 import time
+import traceback
 from kafka import KafkaProducer, KafkaConsumer, TopicPartition
 from kafka.errors import KafkaTimeoutError
 from typing import List, Dict, Any, Optional, Tuple, Callable
@@ -16,11 +17,14 @@ class KafkaProducerClient:
         bootstrap_servers="10.67.89.106:9092",
         bootstrap_servers_mirror: Optional[str] = None,
         producer_config: Optional[Dict[str, Any]] = None,
+        flush_timeout_sec: Optional[float] = None,
     ):
         """初始化Kafka生产者
 
         bootstrap_servers_mirror:
             若为非空字符串，会额外建一个生产者；向主集群发送的消息会同步发往该集群（flush 后主从均完成排队）。
+        flush_timeout_sec:
+            覆盖全局默认的 flush 超时（秒），None 则使用全局默认值 _KAFKA_FLUSH_TIMEOUT_SEC。
         """
         self.bootstrap_servers = bootstrap_servers
         mirror = (bootstrap_servers_mirror or "").strip()
@@ -29,6 +33,7 @@ class KafkaProducerClient:
         self.producer_secondary = None
         self.connected = False
         self.producer_config = producer_config or {}
+        self.flush_timeout_sec = flush_timeout_sec
         self.connect()
     
     def connect(self):
@@ -36,7 +41,7 @@ class KafkaProducerClient:
         try:
             config = {
                 'bootstrap_servers': self.bootstrap_servers,
-                'value_serializer': lambda v: json.dumps(v).encode('utf-8')
+                'value_serializer': lambda v: json.dumps(v).encode('utf-8'),
             }
             # 用用户传入的配置覆盖/扩展默认配置
             config.update(self.producer_config)
@@ -45,6 +50,7 @@ class KafkaProducerClient:
             print("Kafka生产者初始化成功")
         except Exception as e:
             print(f"Kafka生产者初始化失败: {e}, server url:{self.bootstrap_servers}")
+            traceback.print_exc()
             self.connected = False
 
         self.producer_secondary = None
@@ -52,13 +58,18 @@ class KafkaProducerClient:
             try:
                 self.producer_secondary = KafkaProducer(
                     bootstrap_servers=self.bootstrap_servers_mirror,
-                    value_serializer=lambda v: json.dumps(v).encode('utf-8')
+                    value_serializer=lambda v: json.dumps(v).encode('utf-8'),
                 )
-                print(f"Kafka生产者（高可用集群）初始化成功: {self.bootstrap_servers_mirror}")
+                print(f"[Kafka-Mirror] ✅ 高可用集群生产者初始化成功: {self.bootstrap_servers_mirror}")
             except Exception as e:
-                print(f"Kafka生产者（高可用集群）初始化失败: {e}, server url:{self.bootstrap_servers_mirror}")
+                print(f"[Kafka-Mirror] ❌ 高可用集群生产者初始化失败: {e}, server url:{self.bootstrap_servers_mirror}")
+                traceback.print_exc()
                 self.producer_secondary = None
-    
+        elif not self.connected:
+            print("[Kafka-Mirror] ⚠️ 主集群未连接，跳过高可用集群生产者初始化")
+        elif not self.bootstrap_servers_mirror:
+            print("[Kafka-Mirror] ⚠️ 未配置高可用集群地址，仅发送主集群")
+
     def is_connected(self):
         """检查连接状态"""
         return self.connected and self.producer is not None
@@ -66,6 +77,12 @@ class KafkaProducerClient:
     def send_bulk(self, objs, topic):
         if not objs:
             return
+        if not self.producer:
+            print(f"❌ Kafka生产者未初始化，无法发送 {len(objs)} 条消息到 {topic}")
+            return
+        if self.bootstrap_servers_mirror and not self.producer_secondary:
+            print(f"[Kafka-Mirror] ⚠️ 高可用集群生产者未初始化，本次仅发送主集群")
+        _flush_to = self.flush_timeout_sec if self.flush_timeout_sec is not None else _KAFKA_FLUSH_TIMEOUT_SEC
         start = time.time()
         key_fn = lambda it: it.get("uniqueProductIdentificationCode").encode('utf-8')
         for item in objs:
@@ -73,16 +90,16 @@ class KafkaProducerClient:
             if self.producer_secondary:
                 self.producer_secondary.send(topic, item, key_fn(item))
         try:
-            self.producer.flush(timeout=_KAFKA_FLUSH_TIMEOUT_SEC)
+            self.producer.flush(timeout=_flush_to)
         except KafkaTimeoutError as e:
-            print(f"Kafka 主集群 flush 超时 ({_KAFKA_FLUSH_TIMEOUT_SEC}s): {e}")
+            print(f"[Kafka-Primary] ❌ 主集群 flush 超时 ({_flush_to}s): {e}")
         if self.producer_secondary:
             try:
-                self.producer_secondary.flush(timeout=_KAFKA_FLUSH_TIMEOUT_SEC)
+                self.producer_secondary.flush(timeout=_flush_to)
             except KafkaTimeoutError as e:
-                print(f"Kafka 副本集群 flush 超时 ({_KAFKA_FLUSH_TIMEOUT_SEC}s): {e}")
+                print(f"[Kafka-Mirror] ❌ 副本集群 flush 超时 ({_flush_to}s): {e}")
         end = time.time()
-        suffix = "（同步高可用集群）" if self.producer_secondary else ""
+        suffix = "（同步高可用集群）" if self.producer_secondary else "（仅主集群）"
         print(f"[{topic}]: {int(end)} 发送 {len(objs)} 条{suffix}")
 
     
@@ -92,20 +109,20 @@ class KafkaProducerClient:
             print("Kafka未连接，使用模拟模式")
             print(f"模拟发送Kafka消息到 {topic}: {message}")
             return True
-        
+        _flush_to = self.flush_timeout_sec if self.flush_timeout_sec is not None else _KAFKA_FLUSH_TIMEOUT_SEC
         try:
             self.producer.send(topic, message)
             if self.producer_secondary:
                 self.producer_secondary.send(topic, message)
             try:
-                self.producer.flush(timeout=_KAFKA_FLUSH_TIMEOUT_SEC)
+                self.producer.flush(timeout=_flush_to)
             except KafkaTimeoutError as e:
-                print(f"Kafka 主集群 flush 超时 ({_KAFKA_FLUSH_TIMEOUT_SEC}s): {e}")
+                print(f"Kafka 主集群 flush 超时 ({_flush_to}s): {e}")
             if self.producer_secondary:
                 try:
-                    self.producer_secondary.flush(timeout=_KAFKA_FLUSH_TIMEOUT_SEC)
+                    self.producer_secondary.flush(timeout=_flush_to)
                 except KafkaTimeoutError as e:
-                    print(f"Kafka 副本集群 flush 超时 ({_KAFKA_FLUSH_TIMEOUT_SEC}s): {e}")
+                    print(f"Kafka 副本集群 flush 超时 ({_flush_to}s): {e}")
             return True
         except Exception as e:
             print(f"Kafka消息发送失败: {e}")
@@ -173,12 +190,13 @@ class KafkaProducerClient:
                         print(f"❌ 消息确认失败: {e}")
 
                 if self.producer_secondary:
+                    _flush_to = self.flush_timeout_sec if self.flush_timeout_sec is not None else _KAFKA_FLUSH_TIMEOUT_SEC
                     try:
                         for msg in batch:
                             self.producer_secondary.send(topic, msg)
-                        self.producer_secondary.flush(timeout=_KAFKA_FLUSH_TIMEOUT_SEC)
+                        self.producer_secondary.flush(timeout=_flush_to)
                     except KafkaTimeoutError as e:
-                        print(f"❌ 副本集群 flush 超时 ({_KAFKA_FLUSH_TIMEOUT_SEC}s): {e}")
+                        print(f"❌ 副本集群 flush 超时 ({_flush_to}s): {e}")
                     except Exception as e:
                         print(f"❌ 副本集群批量发送失败: {e}")
 

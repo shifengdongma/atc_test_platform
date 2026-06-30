@@ -125,6 +125,7 @@ class SceneEmitter:
 
         # Kafka 配置
         _kafka_url = kafka_url or getattr(_env, 'kafka_url', 'localhost:9092')
+        print(f"[Kafka] 连接地址: {_kafka_url}")
         self.kafka = KafkaProducerClient(_kafka_url)
 
         # 加载 UAV 数据
@@ -150,7 +151,7 @@ class SceneEmitter:
                     decode_responses=True,
                 )
                 self.redis_client.ping()
-                print("[Redis] 连接成功")
+                print(f"[Redis] 连接成功 ({_env.redis_ip}:{_env.redis_port})")
             except Exception as e:
                 print(f"[Redis] 连接失败: {e}")
 

@@ -2,6 +2,7 @@ import os
 import sys
 import requests
 import json
+import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
@@ -15,7 +16,7 @@ ACCESS_KEY = 'tuyl03la5kkhm7ky'               # 访问密钥
 QUERY_ALL_SERVICES = True
 
 # 日志级别：DEBUG = 输出所有查询明细；INFO = 只输出汇总表格和异常
-LOG_LEVEL = "INFO"
+LOG_LEVEL = "DEBUG"
 
 # 公共参数模板（减少重复配置）
 DEFAULT_CLUSTER = 'cloudtest'
@@ -26,34 +27,48 @@ DEFAULT_LABELS = {'app': 'clog'}
 # 请在这里按资源类型分组配置服务名，只需写 deploy_name 列表
 # 如需查询多个集群/命名空间，可在下方 SERVICE_CONFIGS 中为单个服务指定 cluster_name/namespace
 DEPLOYMENT_SERVICES = [
-    'la-atc-daemon-server',
-    'cloud-rbac',
-    'la-atc-data-exchange-ads-b',
-    'la-atc-biz-backend',
     'al-atc-data-exchange-mqtt',
-    'la-atc-ws-backend',
+    'cloud-rbac',
+    'dkkgsit-minio',
+    'kfront-ctserver-search-server',
+    'kfront-ctserver-usermng-server',
+    'kfront-ctserver-ws-server',
+    'kgis-map-server',
+    'kgis-portal-gateway',
+    'kgis-portal-web',
+    'la-atc-3dviz-frontend-3286',
+    'la-atc-biz-backend',
+    'la-atc-daemon-server',
+    'la-atc-data-exchange-ads-b',
     'la-atc-frontend',
-    'redis-atc',
-    'la-atc-ops-server',
+    'la-atc-glis-frontend-6134',
+    'la-atc-ops-front',
     'la-atc-ops-mqtt',
+    'la-atc-ops-server',
+    'la-atc-ws-backend',
+    'rbac-front',
+    'redis-atc',
+    'redis-daemon',
+    'redis-gis',
+    'redis-hx',
+    'redis-ops',
+    'redis-utm',
     'utm-mid-conflicts-v3',
     'utm-v3',
-    'utm-conflicts-v3',
-    'redis-hx',
-    'gis-redis',
-    'kgis-map-server',
-    'kgis-portal-gateway',   
+    'utm-conflicts-v3', 
 ]
 
 STATEFULSET_SERVICES = [
-    'dol-mysql',
-    'kafka-dkkghx',
-    'dol-kafka',
-    'dol-elasticsearch',
+    #'dol-mysql',
+    #'kafka-dkkghx',
+    #'dol-kafka',
+    #'dol-elasticsearch',
+    'emqx',
+    'emqx-ops',
 ]
 
 DAEMONSET_SERVICES = [
-    'keepalivedvip',
+    #'keepalivedvip',
 ]
 
 # 自动展开为简写配置
@@ -129,6 +144,7 @@ class IOMPQueryClient:
                     self.jwt_token = result.get('result', {}).get('jwtToken')
                     if self.jwt_token:
                         self._log('INFO', f"[鉴权] | OK | 状态码: {response.status_code}")
+                        time.sleep(1)  # 鉴权成功后等待1秒，避免后续请求过快
                         return True
             self._log('ERROR', f"[鉴权] | FAIL | 状态码: {response.status_code}")
             return False
@@ -167,17 +183,28 @@ class IOMPQueryClient:
             self._log('ERROR', f"[查询空间] | {cluster_name}/{namespace} | ERROR | {e}")
             return {}
 
-    def query_service_deployment(self, cluster_name: str, namespace: str, kind: str, deploy_name: str) -> Dict[str, Any]:
-        """查询指定服务部署的相关信息"""
+    def query_service_deployment(self, cluster_name: str, namespace: str, kind: str, deploy_name: str, retry: int = 2) -> Dict[str, Any]:
+        """查询指定服务部署的相关信息（支持自动重试）"""
         url = f"{self.base_url}/iomp/api/v2/cluster/{cluster_name}/{namespace}/{kind}/{deploy_name}"
-        try:
-            response = requests.get(url, headers=self._get_headers(), timeout=10)
-            result = response.json()
-            self._log('DEBUG', f"[查询部署] | {cluster_name}/{namespace}/{kind}/{deploy_name} | 状态码: {response.status_code}")
-            return result
-        except Exception as e:
-            self._log('ERROR', f"[查询部署] | {cluster_name}/{namespace}/{kind}/{deploy_name} | ERROR | {e}")
-            return {}
+        for attempt in range(retry + 1):
+            try:
+                response = requests.get(url, headers=self._get_headers(), timeout=10)
+                result = response.json()
+                self._log('DEBUG', f"[查询部署] | {cluster_name}/{namespace}/{kind}/{deploy_name} | 状态码: {response.status_code}")
+                self._log('DEBUG', f"[查询部署响应] | {deploy_name} | result: {json.dumps(result, ensure_ascii=False)[:500]}")
+                if result.get('code') == 'A0001' and attempt < retry:
+                    wait_time = attempt + 1
+                    self._log('DEBUG', f"[查询部署重试] | {deploy_name} | 等待 {wait_time}s 后重试...")
+                    time.sleep(wait_time)
+                    continue
+                return result
+            except Exception as e:
+                self._log('ERROR', f"[查询部署] | {cluster_name}/{namespace}/{kind}/{deploy_name} | ERROR | {e}")
+                if attempt < retry:
+                    wait_time = attempt + 1
+                    time.sleep(wait_time)
+                    continue
+                return {}
 
     def query_service_by_labels(self, cluster_name: str, namespace: str, kind: str, labels: Dict[str, str]) -> Dict[str, Any]:
         """查询服务–通过标签查询pods"""
@@ -204,18 +231,31 @@ class IOMPQueryClient:
             self._log('ERROR', f"[标签查询] | {cluster_name}/{namespace}/All | ERROR | {e}")
             return {}
 
-    def query_service_detail(self, cluster_name: str, namespace: str, kind: str, deploy_name: str, labels: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
-        """查询服务详情"""
+    def query_service_detail(self, cluster_name: str, namespace: str, kind: str, deploy_name: str, labels: Optional[Dict[str, str]] = None, retry: int = 2) -> Dict[str, Any]:
+        """查询服务详情（支持自动重试）"""
         url = f"{self.base_url}/iomp/api/v2/service/{cluster_name}/{namespace}/{kind}/{deploy_name}"
-        try:
-            payload = {'labels': labels} if labels else {}
-            response = requests.get(url, headers=self._get_headers(), json=payload, timeout=10)
-            result = response.json()
-            self._log('DEBUG', f"[查询服务] | {cluster_name}/{namespace}/{kind}/{deploy_name} | 状态码: {response.status_code}")
-            return result
-        except Exception as e:
-            self._log('ERROR', f"[查询服务] | {cluster_name}/{namespace}/{kind}/{deploy_name} | ERROR | {e}")
-            return {}
+        for attempt in range(retry + 1):
+            try:
+                # 修复：GET 请求不应携带 JSON body，避免服务端解析异常
+                response = requests.get(url, headers=self._get_headers(), timeout=10)
+                result = response.json()
+                self._log('DEBUG', f"[查询服务] | {cluster_name}/{namespace}/{kind}/{deploy_name} | 状态码: {response.status_code}")
+                # 增加原始数据调试，方便排查字段结构问题
+                self._log('DEBUG', f"[查询服务响应] | {deploy_name} | result: {json.dumps(result, ensure_ascii=False)[:500]}")
+                # 遇到权限类错误且还有重试次数时，等待后重试
+                if result.get('code') == 'A0001' and attempt < retry:
+                    wait_time = attempt + 1
+                    self._log('DEBUG', f"[查询服务重试] | {deploy_name} | 等待 {wait_time}s 后重试...")
+                    time.sleep(wait_time)
+                    continue
+                return result
+            except Exception as e:
+                self._log('ERROR', f"[查询服务] | {cluster_name}/{namespace}/{kind}/{deploy_name} | ERROR | {e}")
+                if attempt < retry:
+                    wait_time = attempt + 1
+                    time.sleep(wait_time)
+                    continue
+                return {}
 
     def query_service_resources(self, cluster_name: str, namespace: str, deploy_name: str) -> Dict[str, Any]:
         """获取服务相关资源"""
@@ -239,11 +279,78 @@ class IOMPQueryClient:
             'version': '-',
         }
 
+        # 修复：先检查 detail_info 是否返回错误（如 No permission）
+        detail_code = (detail_info or {}).get('code', '0')
+        detail_status = (detail_info or {}).get('status', 200)
+        if detail_code != '0' or (isinstance(detail_status, int) and detail_status != 200):
+            # 检查 deploy_info 是否也失败（两个接口都无权访问则显示 NoPermission）
+            deploy_code = (deploy_info or {}).get('code', '0')
+            deploy_status = (deploy_info or {}).get('status', 200)
+            if deploy_code != '0' or (isinstance(deploy_status, int) and deploy_status != 200):
+                summary['status'] = 'NoPermission'
+                summary['instances'] = '-'
+                return summary
+
+            # 回退：从 deploy_info 提取副本状态
+            deploy_result = (deploy_info or {}).get('result') or {}
+            deploy_spec = deploy_result.get('spec', {})
+            deploy_status = deploy_result.get('status', {})
+            replicas_fb = deploy_spec.get('replicas', 0)
+            ready_fb = deploy_status.get('readyReplicas', 0)
+            # DaemonSet/StatefulSet 补充字段
+            if not ready_fb and not replicas_fb:
+                ready_fb = deploy_status.get('numberReady', 0)
+                replicas_fb = deploy_status.get('desiredNumberScheduled', 0)
+                if not replicas_fb:
+                    replicas_fb = deploy_status.get('replicas', 0)
+            if replicas_fb == 0 and ready_fb == 0:
+                summary['status'] = 'Stopped'
+            elif ready_fb == replicas_fb and replicas_fb > 0:
+                summary['status'] = 'Running'
+            else:
+                summary['status'] = 'Pending'
+            summary['instances'] = f"{ready_fb}/{replicas_fb}"
+            # 仍然尝试从 deploy_info 提取 limits
+            template = deploy_spec.get('template', {})
+            pod_spec = template.get('spec', {})
+            containers = pod_spec.get('containers', [])
+            if containers:
+                main_container = containers[0]
+                limits = main_container.get('resources', {}).get('limits', {})
+                cpu = limits.get('cpu', {})
+                mem = limits.get('memory', {})
+                cpu_amount = cpu.get('amount', '-')
+                cpu_format = cpu.get('format', '')
+                mem_amount = mem.get('amount', '-')
+                mem_format = mem.get('format', '')
+                summary['cpu_limit'] = f"{cpu_amount}{cpu_format}" if cpu_format else str(cpu_amount)
+                summary['mem_limit'] = f"{mem_amount}{mem_format}" if mem_format else str(mem_amount)
+            return summary
+
         # 从 service_detail 提取状态和实例
         detail_result = (detail_info or {}).get('result') or {}
+
+        # 兼容两种结构：IOMP 扁平结构 和 标准 K8s 结构
         pods = detail_result.get('pods', [])
         ready = detail_result.get('readyReplicas', 0)
         replicas = detail_result.get('replicas', 0)
+
+        # 标准 K8s 结构：spec.replicas / status.readyReplicas
+        if not replicas:
+            spec = detail_result.get('spec', {})
+            replicas = spec.get('replicas', 0)
+
+        status = detail_result.get('status', {})
+        if not ready:
+            ready = status.get('readyReplicas', 0)
+
+        # StatefulSet/DaemonSet 补充字段
+        if not ready and not replicas:
+            ready = status.get('numberReady', ready)
+            replicas = status.get('desiredNumberScheduled', replicas)
+            # StatefulSet 也可能用 status.replicas
+            if not replicas:
+                replicas = status.get('replicas', replicas)
 
         if pods:
             pod_statuses = [p.get('status', 'Unknown') for p in pods]
@@ -258,7 +365,11 @@ class IOMPQueryClient:
         summary['instances'] = f"{ready}/{replicas}"
 
         # 版本号（保留完整，超长截断）
+        # 兼容 K8s 标准结构：labels 可能在 metadata.labels 中
         labels = detail_result.get('labels', {})
+        if not labels:
+            metadata = detail_result.get('metadata', {})
+            labels = metadata.get('labels', {})
         version = labels.get('app.kubernetes.io/version', '')
         if not version:
             version = labels.get('app.kubernetes.io/name', '-')
@@ -295,7 +406,7 @@ class IOMPQueryClient:
             (self.config.services[:2] if len(self.config.services) >= 2 else self.config.services)
 
         results = []
-        for service in services_to_query:
+        for idx, service in enumerate(services_to_query):
             deploy_info = self.query_service_deployment(
                 service.cluster_name, service.namespace, service.kind, service.deploy_name
             )
@@ -309,6 +420,9 @@ class IOMPQueryClient:
                 'service_detail': detail_info,
                 'summary': summary,
             })
+            # 避免请求过快触发服务端限流或权限校验抖动
+            if idx < len(services_to_query) - 1:
+                time.sleep(1)
         return results
 
 

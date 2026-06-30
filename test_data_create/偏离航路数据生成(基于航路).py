@@ -58,7 +58,7 @@ _ROOT = os.path.dirname(_SCRIPT_DIR)  # utm_moc52_develop 项目根目录
 # 添加 dmdbclient.py 所在路径，供数据库查询使用
 sys.path.insert(0, os.path.join(_ROOT, "tools_expend_test", "script"))
 # 添加 uav_identifiers_extended.py 所在路径，供获取 UAV ID 使用
-sys.path.insert(0, _ROOT)
+sys.path.insert(0, os.path.join(_ROOT, "atc_api_autotest", "api_tools"))
 
 # 尝试导入数据库客户端（需安装 dmPython）
 try:
@@ -76,17 +76,19 @@ except ImportError:
 
 # ==================== 默认配置（IDE 直接修改此处即可运行）====================
 DEFAULT_ROUTE_NAME = "跨顺义三河段"      # 默认查询的航线名称
-DEFAULT_DEVIATE_OFFSET = 0.0        # 偏离航道数值（米），实际偏离中心线 = 航路宽度/2 + 此值；为0时沿中心线飞行
-DEFAULT_DEVIATE_START = 0            # 第几秒开始偏离（从 0 开始计数）
+DEFAULT_DEVIATE_OFFSET = 0        # 偏离航道数值（米），实际偏离中心线 = 航路宽度/2 + 此值；为0时沿中心线飞行
+DEFAULT_DEVIATE_START = 20            # 第几秒开始偏离（从 0 开始计数）
 DEFAULT_SPEED = 15.0                  # 飞行速度（m/s），决定每秒经纬度增量
-DEFAULT_ALTITUDE = 40.0               # 飞行高度（米），None 表示从数据库自动计算
+DEFAULT_ALTITUDE = 50.0               # 飞行高度（米），None 表示从数据库自动计算
+DEFAULT_UID = "CW000000000000000004"                     # 指定 UAV ID（如 "CW000000000000000004"），None 则使用 uid_offset 从列表中选取
+DEFAULT_REG_SIGN = "XFH0000000004"                # 指定实名登记标识，None 则与 UID 相同
 DEFAULT_UID_OFFSET = 10                # UAV ID 起始偏移（倒序列表中的索引）
 DEFAULT_INTERVAL_MS = 1000            # 采样间隔（毫秒），固定每秒 1 个点
 DEFAULT_CLASSIFICATION = 3            # 航空器分类: 0=微型 1=轻型 2=小型 3=中型 4=大型
-DEFAULT_OUTPUT_DIR = os.path.join(_ROOT, "mock")  # JSON 输出目录
+DEFAULT_OUTPUT_DIR = os.path.join(_ROOT, "utm_simulator", "mock")  # JSON 输出目录
 DEFAULT_DEVIATE_TRANSITION = None      # 偏离渐变时间（秒），None 表示根据偏离距离和飞行速度自动计算
-DEFAULT_DEVIATE_ALTITUDE_OFFSET = 0.0   # 高度偏离数值（米），正值=上升，负值=下降。最终高度 = 基础高度 + 此值，基础高度 = (minimum_safe_altitude + vertical_altitude) / 2
-DEFAULT_DEVIATE_MODE = "horizontal"     # 偏离模式: horizontal=仅水平偏移, vertical=仅高度偏移, both=水平+高度综合偏移
+DEFAULT_DEVIATE_ALTITUDE_OFFSET = 200.0   # 高度偏离数值（米），正值=上升，负值=下降。最终高度 = 基础高度 + 此值，基础高度 = (minimum_safe_altitude + vertical_altitude) / 2
+DEFAULT_DEVIATE_MODE = "vertical"     # 偏离模式: horizontal=仅水平偏移, vertical=仅高度偏移, both=水平+高度综合偏移
 DEFAULT_FILENAME = "跨顺义三河段航路最低安全高度数据_0.1.json"                 # 默认输出JSON文件名，None=自动生成（如：跨顺义三河段航路偏航数据_0.1.json）；可改为固定名称如 "test.json"
 # ==================== 默认配置结束 ====================
 
@@ -1107,6 +1109,16 @@ def main():
 
     # UAV 信息
     parser.add_argument(
+        "--uid",
+        default=DEFAULT_UID,
+        help="指定 UAV ID（如 CW000000000000000004），优先于 --uid-offset",
+    )
+    parser.add_argument(
+        "--reg-sign",
+        default=DEFAULT_REG_SIGN,
+        help="指定实名登记标识，默认与 --uid 相同",
+    )
+    parser.add_argument(
         "--uid-offset",
         type=int,
         default=DEFAULT_UID_OFFSET,
@@ -1199,11 +1211,16 @@ def main():
         print("[错误] 无法加载 UAV_IDENTIFIERS_EXTENDED，请检查 uav_identifiers_extended.py 路径")
         sys.exit(1)
 
-    # 获取 UAV ID（倒序列表）
-    id_pool = UAV_IDENTIFIERS_EXTENDED[::-1]
-    uid_offset = args.uid_offset % len(id_pool)
-    uid, reg_sign = id_pool[uid_offset]
-    print(f"[信息] 使用 UAV ID: {uid}, 实名登记: {reg_sign}")
+    # 获取 UAV ID
+    if args.uid is not None:
+        uid = args.uid
+        reg_sign = args.reg_sign if args.reg_sign is not None else uid
+        print(f"[信息] 使用指定 UAV ID: {uid}, 实名登记: {reg_sign}")
+    else:
+        id_pool = UAV_IDENTIFIERS_EXTENDED[::-1]
+        uid_offset = args.uid_offset % len(id_pool)
+        uid, reg_sign = id_pool[uid_offset]
+        print(f"[信息] 使用 UAV ID: {uid}, 实名登记: {reg_sign} (uid_offset={uid_offset})")
 
     # 查询数据库获取航线信息
     if args.route_id is not None:

@@ -1,0 +1,10 @@
+# 日志文件
+tmp/log/
+
+# Mock数据
+utm_simulator/mock/
+
+# Python缓存
+**/__pycache__/
+*.pyc
+*.pyo

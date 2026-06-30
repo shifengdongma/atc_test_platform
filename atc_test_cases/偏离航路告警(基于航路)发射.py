@@ -14,9 +14,8 @@ import argparse
 
 # ── 路径配置 ─────────────────────────────────────────────────────────
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-ENGINE_DIR = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+ENGINE_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "utm_simulator")
 TOOLS_DIR = os.path.join(ENGINE_DIR, "tools")
-PROJECT_ROOT = os.path.dirname(ENGINE_DIR)
 #DATA_FILE = os.path.join(ENGINE_DIR, "mock", "kafka_data_scene_bj_tsjk.json")
 DATA_FILE = os.path.join(ENGINE_DIR, "mock", "跨顺义三河段航路最低安全高度数据_0.1.json")
 sys.path.insert(0, ENGINE_DIR)

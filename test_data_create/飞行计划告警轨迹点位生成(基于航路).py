@@ -46,7 +46,7 @@ _ROOT = os.path.dirname(_SCRIPT_DIR)  # utm_moc52_develop 项目根目录
 # 添加 dmdbclient.py 所在路径，供数据库查询使用
 sys.path.insert(0, os.path.join(_ROOT, "tools_expend_test", "script"))
 # 添加 uav_identifiers_extended.py 所在路径，供获取 UAV ID 使用
-sys.path.insert(0, _ROOT)
+sys.path.insert(0, os.path.join(_ROOT, "atc_api_autotest", "api_tools"))
 
 # 尝试导入数据库客户端（需安装 dmPython）
 try:
@@ -72,7 +72,7 @@ DEFAULT_ALTITUDE = None               # 飞行高度（米），None 表示从�
 DEFAULT_UID_START_OFFSET = 0          # UAV ID 起始偏移（倒序列表中的索引）
 DEFAULT_INTERVAL_MS = 1000            # 采样间隔（毫秒），固定每秒 1 个点
 DEFAULT_CLASSIFICATION = 2            # 航空器分类: 0=微型 1=轻型 2=小型 3=中型 4=大型
-DEFAULT_OUTPUT_DIR = os.path.join(_ROOT, "mock")  # JSON 输出目录
+DEFAULT_OUTPUT_DIR = os.path.join(_ROOT, "utm_simulator", "mock")  # JSON 输出目录
 DEFAULT_UIDS = "CW000000000000000004,CH000000000000000003"                                  
     # 指定 UAV ID 列表（逗号分隔），如 "DJI1MAV101A2B3C4D5E6,DJI1MAV1F7G8H9J0K1L2"；
     # 指定 UAV ID 列表（逗号分隔），如 "DJI1MAV101A2B3C4D5E6,DJI1MAV1F7G8H9J0K1L2"；

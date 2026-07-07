@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(grep -E \"\\\\.\\(md|txt|json|yaml|yml|xml|cfg|ini\\)$\")",
-      "Bash(python \"tools\\\\ha3000+架平行飞行无人机轨迹点生成_1.0.py\" --count 100 --spacing 500 --dry-run)"
-    ]
-  }
-}

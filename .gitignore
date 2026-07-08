@@ -19,3 +19,6 @@ utm_simulator/mock/
 **/__pycache__/
 *.pyc
 *.pyo
+
+# SQLite 本地数据库
+utm_simulator/data.db

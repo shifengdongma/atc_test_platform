@@ -33,6 +33,16 @@ from config import load_config, AppConfig
 from sim_manager import SimulationManager
 import env as _env
 
+# ── 环境管理器（惰性导入，避免 SQLite 初始化阻塞） ───────────────────
+_env_mgr = None
+
+def _get_env_mgr():
+    global _env_mgr
+    if _env_mgr is None:
+        import env_manager as em
+        _env_mgr = em
+    return _env_mgr
+
 # ── 桥接层导入（异步，避免阻塞启动时加载 tools 脚本） ────────────────
 _data_gen_bridge = None
 
@@ -1106,6 +1116,70 @@ def api_batch_presets():
     """获取批量预设列表（供前端展示按钮）。"""
     bridge = _get_bridge()
     return jsonify({"presets": bridge.BATCH_PRESETS})
+
+
+# ==================== 环境管理 API ==================================
+
+@app.route("/api/env/list", methods=["GET"])
+def api_env_list():
+    """列出所有环境配置。"""
+    mgr = _get_env_mgr()
+    envs = mgr.list_envs()
+    current = mgr.get_current_config()
+    return jsonify({"envs": envs, "current": current})
+
+
+@app.route("/api/env/<int:env_id>", methods=["GET"])
+def api_env_get(env_id):
+    """获取单个环境配置。"""
+    mgr = _get_env_mgr()
+    env = mgr.get_env(env_id)
+    if not env:
+        return jsonify({"success": False, "message": "环境不存在"}), 404
+    return jsonify({"success": True, "env": env})
+
+
+@app.route("/api/env/save", methods=["POST"])
+def api_env_save():
+    """新增或更新环境配置。"""
+    data = request.get_json(silent=True) or {}
+    if not data.get("name"):
+        return jsonify({"success": False, "message": "环境名称不能为空"}), 400
+    mgr = _get_env_mgr()
+    env_id = mgr.save_env(data)
+    return jsonify({"success": True, "id": env_id, "message": "已保存"})
+
+
+@app.route("/api/env/<int:env_id>", methods=["DELETE"])
+def api_env_delete(env_id):
+    """删除环境配置。"""
+    mgr = _get_env_mgr()
+    mgr.delete_env(env_id)
+    return jsonify({"success": True, "message": "已删除"})
+
+
+@app.route("/api/env/<int:env_id>/activate", methods=["POST"])
+def api_env_activate(env_id):
+    """激活指定环境配置。"""
+    mgr = _get_env_mgr()
+    result = mgr.activate_env(env_id)
+    if result["success"]:
+        # 同步更新运行时配置
+        cfg = result.get("config", {})
+        with _lock:
+            _current_config["redis_ip"] = cfg.get("redis_ip", _current_config["redis_ip"])
+            _current_config["redis_port"] = cfg.get("redis_port", _current_config["redis_port"])
+            _current_config["kafka_url"] = cfg.get("kafka_url", _current_config["kafka_url"])
+        _add_log(f"已切换环境配置: Redis={cfg.get('redis_ip')}:{cfg.get('redis_port')}, Kafka={cfg.get('kafka_url')}")
+    return jsonify(result)
+
+
+@app.route("/api/env/import", methods=["POST"])
+def api_env_import():
+    """从 env.py 导入当前配置。"""
+    mgr = _get_env_mgr()
+    result = mgr.import_from_env_py()
+    return jsonify(result)
 
 
 # ── WebSocket 事件 ────────────────────────────────────────────────

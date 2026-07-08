@@ -3,12 +3,44 @@
 
 'use strict';
 
-// ── 坐标转换：WGS-84 保持原值 ────────────────────────────
-// OSM/CartoDB 瓦片使用原生 WGS-84，与仿真数据一致，无需转换
-// 保留此函数为 no-op，便于未来如需切换回 GCJ-02 瓦片源
+// ── 坐标转换：WGS-84 → GCJ-02（火星坐标系）────────────────────
+// 高德/腾讯/百度等国内瓦片使用 GCJ-02，我们的仿真数据是 WGS-84
+// 需要转换后再叠加到地图上
 
 function wgs84ToGcj02(lat, lon) {
-  return [lat, lon];
+  const A = 6378245.0;
+  const EE = 0.00669342162296594323;
+
+  function _transformLat(x, y) {
+    let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+    ret += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0;
+    ret += (20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin(y / 3.0 * Math.PI)) * 2.0 / 3.0;
+    ret += (160.0 * Math.sin(y / 12.0 * Math.PI) + 320.0 * Math.sin(y * Math.PI / 30.0)) * 2.0 / 3.0;
+    return ret;
+  }
+
+  function _transformLon(x, y) {
+    let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+    ret += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0;
+    ret += (20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin(x / 3.0 * Math.PI)) * 2.0 / 3.0;
+    ret += (150.0 * Math.sin(x / 12.0 * Math.PI) + 300.0 * Math.sin(x / 30.0 * Math.PI)) * 2.0 / 3.0;
+    return ret;
+  }
+
+  // 中国境外不转换
+  if (lon < 72.004 || lon > 137.8347 || lat < 0.8293 || lat > 55.8271) {
+    return [lat, lon];
+  }
+
+  const dLat = _transformLat(lon - 105.0, lat - 35.0);
+  const dLon = _transformLon(lon - 105.0, lat - 35.0);
+  const radLat = lat / 180.0 * Math.PI;
+  let magic = Math.sin(radLat);
+  magic = 1 - EE * magic * magic;
+  const sqrtMagic = Math.sqrt(magic);
+  const dLatFinal = (dLat * 180.0) / ((A * (1 - EE)) / (magic * sqrtMagic) * Math.PI);
+  const dLonFinal = (dLon * 180.0) / (A / sqrtMagic * Math.cos(radLat) * Math.PI);
+  return [lat + dLatFinal, lon + dLonFinal];
 }
 
 // ── 地图全局状态 ──────────────────────────────────────────────────
@@ -27,8 +59,13 @@ const ROUTE_COLORS = [
   '#2c3e50', '#27ae60', '#8e44ad', '#16a085',
 ];
 
-// ── 瓦片源配置（OSM 为主，CartoDB 为备用）───────────────
+// ── 瓦片源配置（国内首选高德，备用 CartoDB/OSM）───────────────
 const TILE_PROVIDERS = {
+  gaode: {
+    name: '高德地图',
+    url: 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
+    options: { subdomains: '1234', maxZoom: 18, minZoom: 1 },
+  },
   osm: {
     name: 'OpenStreetMap',
     url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -42,7 +79,7 @@ const TILE_PROVIDERS = {
 };
 
 let _currentTileLayer = null;
-let _tileProviderKey = 'osm';  // 默认 OSM
+let _tileProviderKey = 'gaode';  // 默认高德
 
 // ── 初始化地图 ────────────────────────────────────────────────────
 function initMap() {
@@ -73,7 +110,7 @@ function initMap() {
     attributionControl: false,
   });
 
-  // 添加瓦片（OSM 为默认，全球稳定）
+  // 添加瓦片（高德为默认，国内秒加载）
   _addTileLayer(_tileProviderKey);
 
   // 瓦片加载失败提示（连续失败 ≥5 次后显示警告）
@@ -127,7 +164,7 @@ function _addTileLayer(providerKey) {
   if (_currentTileLayer && map) {
     map.removeLayer(_currentTileLayer);
   }
-  const provider = TILE_PROVIDERS[providerKey] || TILE_PROVIDERS['osm'];
+  const provider = TILE_PROVIDERS[providerKey] || TILE_PROVIDERS['gaode'];
   _tileProviderKey = providerKey;
 
   _currentTileLayer = L.tileLayer(provider.url, Object.assign({

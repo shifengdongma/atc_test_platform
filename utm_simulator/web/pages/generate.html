@@ -22,6 +22,7 @@
         <button class="gen-tab" data-gentab="single">单机场景</button>
         <button class="gen-tab" data-gentab="multi">多机场景</button>
         <button class="gen-tab" data-gentab="batch">批量预设</button>
+        <button class="gen-tab" data-gentab="ai">🤖 AI 生成</button>
       </div>
 
       <!-- 基础生成 -->
@@ -149,6 +150,29 @@
         <div id="batch-preset-list" class="batch-grid"><div class="empty-hint">加载预设中...</div></div>
         <button id="btn-gen-batch-all" class="btn btn-start" style="width:100%;margin-top:8px;">🚀 一键生成全部预设</button>
         <span id="gen-batch-result" style="font-size:12px;margin-top:4px;"></span>
+      </div>
+
+      <!-- AI 生成 -->
+      <div class="gen-tab-content" id="gentab-ai">
+        <div class="form-group"><label>🤖 通过大模型 API 生成模拟 JSON 数据</label></div>
+        <div class="mode-description" style="margin-bottom:12px;">
+          支持任何兼容 OpenAI Chat Completions API 的模型（DeepSeek、通义千问、GPT 等）。
+        </div>
+        <div class="gen-form">
+          <div class="form-row"><label>API URL:</label><input type="text" id="ai-api-url" placeholder="https://api.deepseek.com/chat/completions" value="https://api.deepseek.com/chat/completions"></div>
+          <div class="form-row"><label>API Key:</label><input type="password" id="ai-api-key" placeholder="sk-..."></div>
+          <div class="form-row"><label>模型:</label><input type="text" id="ai-model" placeholder="deepseek-chat" value="deepseek-chat"></div>
+          <div class="form-row"><label>模板:</label><select id="ai-template"></select></div>
+          <div class="form-row"><label>保存文件名:</label><input type="text" id="ai-save-name" placeholder="留空自动命名"></div>
+          <div id="ai-params-container" style="margin-bottom:8px;"></div>
+          <div class="form-row">
+            <label></label>
+            <label><input type="checkbox" id="ai-save-db" checked> 保存到数据库</label>
+          </div>
+          <button id="btn-ai-generate" class="btn btn-start" style="width:100%;">🤖 生成数据</button>
+          <div id="ai-result" style="margin-top:8px;font-size:12px;"></div>
+          <div id="ai-preview" class="data-preview" style="max-height:250px;display:none;"></div>
+        </div>
       </div>
     </div>
   </main>

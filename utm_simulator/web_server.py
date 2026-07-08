@@ -1289,6 +1289,63 @@ def api_db_categories():
     return jsonify({"categories": mgr.get_categories()})
 
 
+# ==================== AI 数据生成 API ================================
+
+_ai_gen = None
+
+def _get_ai_gen():
+    global _ai_gen
+    if _ai_gen is None:
+        import ai_data_gen as aig
+        _ai_gen = aig
+    return _ai_gen
+
+
+@app.route("/api/ai/templates", methods=["GET"])
+def api_ai_templates():
+    """获取所有 Prompt 模板列表。"""
+    mgr = _get_ai_gen()
+    return jsonify({"templates": mgr.list_templates()})
+
+
+@app.route("/api/ai/generate", methods=["POST"])
+def api_ai_generate():
+    """调用大模型生成 JSON 数据。"""
+    data = request.get_json(silent=True) or {}
+    api_url = data.get("api_url", "").strip()
+    api_key = data.get("api_key", "").strip()
+    model = data.get("model", "").strip()
+    template_name = data.get("template_name", "")
+    params = data.get("params", {})
+    save_to_db = data.get("save_to_db", True)
+    save_name = data.get("save_name", "").strip()
+
+    if not api_url:
+        return jsonify({"success": False, "error": "API URL 不能为空"}), 400
+    if not api_key:
+        return jsonify({"success": False, "error": "API Key 不能为空"}), 400
+    if not template_name:
+        return jsonify({"success": False, "error": "请选择 Prompt 模板"}), 400
+
+    mgr = _get_ai_gen()
+    result = mgr.generate_and_save(
+        api_url=api_url,
+        api_key=api_key,
+        model=model,
+        template_name=template_name,
+        params=params,
+        save_to_db=save_to_db,
+        save_name=save_name,
+    )
+
+    if result.get("success"):
+        _add_log(f"AI 生成成功: {template_name} ({len(str(result.get('data',''))) if result.get('data') else 0} chars)")
+    else:
+        _add_log(f"AI 生成失败: {template_name} — {result.get('error','')}")
+
+    return jsonify(result)
+
+
 # ── WebSocket 事件 ────────────────────────────────────────────────
 
 @socketio.on("connect")

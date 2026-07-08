@@ -178,6 +178,97 @@ $('#btn-gen-batch-all').addEventListener('click', async function() {
   r.style.color = result.success ? '#2ecc71' : '#e74c3c';
 });
 
+// ── AI 生成 ─────────────────────────────────────────────────────────
+var aiTemplates = [];
+
+async function loadAITemplates() {
+  try {
+    var data = await apiGet('/api/ai/templates');
+    aiTemplates = data.templates || [];
+    var sel = $('#ai-template');
+    sel.innerHTML = aiTemplates.map(function(t) {
+      return '<option value="' + t.key + '">' + t.name + ' (' + t.category + ')</option>';
+    }).join('');
+    if (aiTemplates.length > 0) showAIParams(aiTemplates[0].key);
+  } catch(e) {}
+}
+
+function showAIParams(templateKey) {
+  var t = aiTemplates.find(function(x) { return x.key === templateKey; });
+  if (!t) return;
+  var container = $('#ai-params-container');
+  var html = '';
+  t.params.forEach(function(p) {
+    var label = p.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+    var defVal = p === 'count' ? '5' : p === 'lat' ? '31.315' : p === 'lon' ? '120.665'
+      : p === 'radius_km' ? '5' : p === 'cruise_alt_m' ? '120' : p === 'duration_sec' ? '600'
+      : p === 'interval_ms' ? '1000' : p === 'speed_ms' ? '15' : p === 'meeting_time_s' ? '300'
+      : p === 'uav1_uid' ? 'UAV_COL_A' : p === 'uav2_uid' ? 'UAV_COL_B'
+      : p === 'nfz_radius_m' ? '500' : p === 'scenes' ? 'scene3,scene5' : '';
+    html += '<div class="form-row"><label>' + label + ':</label><input type="text" id="ai-param-' + p + '" value="' + defVal + '"></div>';
+  });
+  container.innerHTML = html;
+}
+
+$('#ai-template').addEventListener('change', function() {
+  showAIParams(this.value);
+});
+
+$('#btn-ai-generate').addEventListener('click', async function() {
+  var apiUrl = $('#ai-api-url').value.trim();
+  var apiKey = $('#ai-api-key').value.trim();
+  if (!apiUrl) { showToast('请输入 API URL', 'error'); return; }
+  if (!apiKey) { showToast('请输入 API Key', 'error'); return; }
+
+  var templateKey = $('#ai-template').value;
+  var params = {};
+  var paramInputs = document.querySelectorAll('[id^="ai-param-"]');
+  paramInputs.forEach(function(el) {
+    var key = el.id.replace('ai-param-', '');
+    var val = el.value.trim();
+    // 尝试转为数字
+    params[key] = isNaN(val) || val === '' ? val : parseFloat(val);
+  });
+
+  var el = $('#ai-result');
+  var previewEl = $('#ai-preview');
+  el.innerHTML = '⏳ AI 生成中（可能需要数十秒）...';
+  previewEl.style.display = 'none';
+
+  var body = {
+    api_url: apiUrl,
+    api_key: apiKey,
+    model: $('#ai-model').value.trim(),
+    template_name: templateKey,
+    params: params,
+    save_to_db: $('#ai-save-db').checked,
+    save_name: $('#ai-save-name').value.trim(),
+  };
+
+  var result = await apiPost('/api/ai/generate', body);
+  if (result.success) {
+    var usage = result.usage ? ' (tokens: ' + (result.usage.total_tokens||'?') + ')' : '';
+    var valid = result.validation ? (result.validation.passed ? '✅ 校验通过' : '⚠️ ' + result.validation.message) : '';
+    var saved = result.db_saved ? ' 💾 已保存到数据库(id=' + result.db_id + ')' : '';
+    el.innerHTML = '✅ 生成成功' + usage + ' | ' + valid + saved;
+    el.style.color = '#2ecc71';
+    // 预览
+    try {
+      var preview = JSON.stringify(result.data, null, 2);
+      previewEl.innerHTML = '<pre style="margin:0;white-space:pre-wrap;">' + escHtml(preview).substring(0, 5000) + '</pre>';
+      previewEl.style.display = '';
+    } catch(e) {}
+  } else {
+    el.innerHTML = '❌ ' + (result.error || '未知错误');
+    el.style.color = '#e74c3c';
+    if (result.raw_response) {
+      previewEl.innerHTML = '<pre style="margin:0;color:var(--danger);">' + escHtml(result.raw_response) + '</pre>';
+      previewEl.style.display = '';
+    }
+  }
+});
+
 // ── 初始化 ─────────────────────────────────────────────────────────
 initGenTabs();
+loadAITemplates();
 })();

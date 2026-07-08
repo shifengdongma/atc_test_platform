@@ -101,7 +101,8 @@ $RequiredPkgs = @(
     @{Name="kafka"; Pip="kafka-python"},
     @{Name="pydantic"; Pip="pydantic"},
     @{Name="pytest"; Pip="pytest"},
-    @{Name="pytest_cov"; Pip="pytest-cov"}
+    @{Name="pytest_cov"; Pip="pytest-cov"},
+    @{Name="requests"; Pip="requests"}
 )
 $MissingPkgs = @()
 

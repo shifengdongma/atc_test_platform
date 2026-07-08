@@ -10,8 +10,17 @@ from __future__ import annotations
 
 import json
 import re
-import requests
 from typing import Any, Dict, List, Optional, Tuple
+
+# requests 懒加载 — 仅在调用 API 时导入，避免未安装时阻塞模板列表查询
+_requests = None
+
+def _get_requests():
+    global _requests
+    if _requests is None:
+        import requests as _r
+        _requests = _r
+    return _requests
 
 # ── Prompt 模板 ─────────────────────────────────────────────────────
 
@@ -138,7 +147,8 @@ class AIDataGenerator:
         }
 
         try:
-            resp = requests.post(
+            rq = _get_requests()
+            resp = rq.post(
                 self.api_url + "/v1/chat/completions" if not self.api_url.endswith("/chat/completions") else self.api_url,
                 json=body,
                 headers=headers,
@@ -146,11 +156,20 @@ class AIDataGenerator:
             )
             resp.raise_for_status()
             result = resp.json()
-        except requests.exceptions.Timeout:
-            return {"success": False, "error": "API 调用超时（120秒）"}
-        except requests.exceptions.ConnectionError:
-            return {"success": False, "error": f"无法连接到 API: {self.api_url}"}
-        except requests.exceptions.HTTPError as e:
+        except Exception as e:
+            # 区分不同类型的错误
+            err_str = str(e)
+            if "timed out" in err_str.lower() or "timeout" in err_str.lower():
+                return {"success": False, "error": "API 调用超时（120秒）"}
+            if "connection" in err_str.lower():
+                return {"success": False, "error": f"无法连接到 API: {self.api_url}"}
+            # 尝试从 response 中获取错误信息
+            try:
+                err_detail = resp.json() if 'resp' in dir() else {}
+                err_str = err_detail.get("error", {}).get("message", err_str)
+            except Exception:
+                pass
+            return {"success": False, "error": f"API 错误: {err_str}"}
             err_msg = str(e)
             try:
                 err_detail = resp.json()

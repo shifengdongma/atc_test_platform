@@ -1346,6 +1346,116 @@ def api_ai_generate():
     return jsonify(result)
 
 
+# ==================== 定时任务调度 API ===============================
+
+_scheduler = None
+
+def _get_scheduler():
+    global _scheduler
+    if _scheduler is None:
+        from scheduler import get_scheduler
+
+        def _run_task(task):
+            """调度器回调：执行仿真任务。"""
+            mode = task.get("sim_mode", "replay")
+            params = {}
+            try:
+                sim_params = task.get("sim_params", "{}")
+                if isinstance(sim_params, str):
+                    params = json.loads(sim_params)
+                else:
+                    params = sim_params or {}
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+            params["mode"] = mode
+            params["target_drones"] = params.get("target_drones", 10)
+
+            _add_log(f"[定时任务] {task.get('name','')} 开始执行 (模式={mode})")
+            try:
+                runner = SimulationRunner(params)
+                runner.start()
+                # 等待仿真运行（最多1小时）
+                wait = params.get("duration_min", 10) * 60
+                deadline = time.time() + min(wait, 3600)
+                while runner._running and time.time() < deadline:
+                    time.sleep(1)
+                runner.stop()
+                return f"任务完成: {task.get('name','')} (模式={mode}, 运行{params.get('duration_min',10)}分钟)"
+            except Exception as e:
+                return f"任务异常: {e}"
+
+        _scheduler = get_scheduler(execute_callback=_run_task)
+    return _scheduler
+
+
+@app.route("/api/schedule/tasks", methods=["GET"])
+def api_schedule_list():
+    """列出所有定时任务。"""
+    sch = _get_scheduler()
+    tasks = sch.list_tasks()
+    return jsonify({"tasks": tasks})
+
+
+@app.route("/api/schedule/tasks", methods=["POST"])
+def api_schedule_create():
+    """创建定时任务。"""
+    data = request.get_json(silent=True) or {}
+    if not data.get("name"):
+        return jsonify({"success": False, "message": "任务名称不能为空"}), 400
+    sch = _get_scheduler()
+    tid = sch.add_task(data)
+    _add_log(f"定时任务已创建: {data.get('name','')}")
+    return jsonify({"success": True, "id": tid, "message": "已创建"})
+
+
+@app.route("/api/schedule/tasks/<int:task_id>", methods=["PUT"])
+def api_schedule_update(task_id):
+    """更新定时任务。"""
+    data = request.get_json(silent=True) or {}
+    sch = _get_scheduler()
+    sch.update_task(task_id, data)
+    return jsonify({"success": True, "message": "已更新"})
+
+
+@app.route("/api/schedule/tasks/<int:task_id>", methods=["DELETE"])
+def api_schedule_delete(task_id):
+    """删除定时任务。"""
+    sch = _get_scheduler()
+    sch.delete_task(task_id)
+    return jsonify({"success": True, "message": "已删除"})
+
+
+@app.route("/api/schedule/tasks/<int:task_id>/pause", methods=["POST"])
+def api_schedule_pause(task_id):
+    sch = _get_scheduler()
+    sch.pause_task(task_id)
+    return jsonify({"success": True, "message": "已暂停"})
+
+
+@app.route("/api/schedule/tasks/<int:task_id>/resume", methods=["POST"])
+def api_schedule_resume(task_id):
+    sch = _get_scheduler()
+    sch.resume_task(task_id)
+    return jsonify({"success": True, "message": "已恢复"})
+
+
+@app.route("/api/schedule/tasks/<int:task_id>/run-now", methods=["POST"])
+def api_schedule_run_now(task_id):
+    """立即执行一次。"""
+    sch = _get_scheduler()
+    result = sch.run_now(task_id)
+    return jsonify(result)
+
+
+@app.route("/api/schedule/tasks/<int:task_id>/history", methods=["GET"])
+def api_schedule_history(task_id):
+    """获取任务执行历史。"""
+    sch = _get_scheduler()
+    history = sch.get_history(task_id)
+    return jsonify({"history": history})
+
+
 # ── WebSocket 事件 ────────────────────────────────────────────────
 
 @socketio.on("connect")

@@ -123,6 +123,79 @@ function initRun() {
   setTimeout(loadNoFlyZones, 800);
 }
 
+// ── 定时任务 ───────────────────────────────────────────────────────
+async function loadScheduledTasks() {
+  var el = $('#sched-list');
+  if (!el) return;
+  try {
+    var data = await apiGet('/api/schedule/tasks');
+    if (!data.tasks || !data.tasks.length) {
+      el.innerHTML = '<div class="empty-hint">暂无定时任务</div>';
+      return;
+    }
+    el.innerHTML = data.tasks.map(function(t) {
+      var status = t.enabled ? '<span class="current-badge">启用</span>' : '<span style="color:var(--danger);font-size:10px;">暂停</span>';
+      return '<div style="padding:4px 0;border-bottom:1px solid #1a2740;font-size:11px;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+          '<span style="color:#82aaff;">' + escHtml(t.name||'') + '</span>' + status +
+        '</div>' +
+        '<div style="color:var(--text-dim);">' + escHtml(t.cron_expr||'') + ' | ' + escHtml(t.sim_mode||'') +
+          ' | 上次: ' + escHtml((t.last_run_at||'--').substring(0,16)) + '</div>' +
+        '<div style="margin-top:2px;">' +
+          (t.enabled ?
+            '<button class="btn-tiny" onclick="pauseTask(' + t.id + ')">⏸</button>' :
+            '<button class="btn-tiny" onclick="resumeTask(' + t.id + ')">▶</button>') +
+          '<button class="btn-tiny" onclick="runTaskNow(' + t.id + ')">⚡立即</button>' +
+          '<button class="btn-tiny" onclick="deleteTask(' + t.id + ')">🗑</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  } catch(e) {}
+}
+
+window.pauseTask = async function(id) {
+  await apiPost('/api/schedule/tasks/' + id + '/pause');
+  showToast('已暂停', 'success'); loadScheduledTasks();
+};
+window.resumeTask = async function(id) {
+  await apiPost('/api/schedule/tasks/' + id + '/resume');
+  showToast('已恢复', 'success'); loadScheduledTasks();
+};
+window.runTaskNow = async function(id) {
+  var r = await apiPost('/api/schedule/tasks/' + id + '/run-now');
+  showToast(r.message||'已触发', r.success?'success':'error');
+};
+window.deleteTask = async function(id) {
+  if (!confirm('确定删除？')) return;
+  await fetch('/api/schedule/tasks/' + id, {method:'DELETE'});
+  showToast('已删除', 'success'); loadScheduledTasks();
+};
+
+// 新建任务弹窗（简化版：快捷 cron 选择器）
+$('#btn-sched-new').addEventListener('click', async function() {
+  var name = prompt('任务名称：', '自动仿真-' + new Date().toLocaleTimeString('zh-CN',{hour12:false}));
+  if (!name) return;
+  var cronOpts = ['*/30 * * * * (每30分钟)', '0 * * * * (每小时)', '0 */2 * * * (每2小时)', '0 9 * * * (每天9点)'];
+  var cronChoice = prompt('选择执行频率：\n1. 每30分钟\n2. 每小时\n3. 每2小时\n4. 每天9:00\n或输入自定义 cron 表达式', '1');
+  if (!cronChoice) return;
+  var cronMap = {'1':'*/30 * * * *','2':'0 * * * *','3':'0 */2 * * *','4':'0 9 * * *'};
+  var cronExpr = cronMap[cronChoice] || cronChoice;
+
+  var body = {
+    name: name,
+    cron_expr: cronExpr,
+    sim_mode: 'replay',
+    sim_params: JSON.stringify({target_drones:10, duration_min:5}),
+    enabled: 1,
+  };
+  var r = await apiPost('/api/schedule/tasks', body);
+  showToast(r.message||'已创建', r.success?'success':'error');
+  loadScheduledTasks();
+});
+
+// 首次加载
+setTimeout(loadScheduledTasks, 1500);
+
 // 等待 Leaflet 等资源加载
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initRun);

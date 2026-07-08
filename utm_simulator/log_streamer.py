@@ -8,12 +8,28 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 import threading
 import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 from db_manager import query, query_all, _now, init_tables
+
+# ── MySQL 持久化（可选，优雅降级） ─────────────────────────────────
+try:
+    _atc_tools = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..", "atc_api_autotest", "api_tools",
+    )
+    if _atc_tools not in sys.path:
+        sys.path.insert(0, _atc_tools)
+    from mysqldbclient import MysqlDbClient
+    _HAS_MYSQL = True
+except (ImportError, Exception):
+    _HAS_MYSQL = False
+    MysqlDbClient = None
 
 LOG_TABLE = "sim_task_logs"
 
@@ -44,6 +60,10 @@ class LogStreamer:
         self._max_buffer = 1000
         self._redis_thread: Optional[threading.Thread] = None
         self._counts: Dict[str, int] = {k: 0 for k in LOG_TYPES}
+        # MySQL 持久化（延迟初始化）
+        self._mysql_enabled = _HAS_MYSQL
+        self._mysql_client: Any = None
+        self._cleanup_counter = 0
 
     def start(self) -> None:
         """启动日志采集。"""
@@ -136,6 +156,117 @@ class LogStreamer:
         if count > 0:
             self.push("kafka_trace", f"收到 {count} 条轨迹预测 (uav_runtime_trace)")
 
+    # ── MySQL 持久化 ───────────────────────────────────────────────
+
+    def _get_mysql_client(self):
+        """延迟初始化 MySQL 连接（失败则禁用后续写入）。"""
+        if not self._mysql_enabled:
+            return None
+        if self._mysql_client is None:
+            try:
+                self._mysql_client = MysqlDbClient()
+                if self._mysql_client.connect():
+                    self._ensure_mysql_table()
+                else:
+                    print("[LogStreamer] MySQL 连接失败，日志将仅保存在内存中")
+                    self._mysql_client = None
+                    self._mysql_enabled = False
+            except Exception as e:
+                print(f"[LogStreamer] MySQL 初始化异常: {e}")
+                self._mysql_enabled = False
+        return self._mysql_client
+
+    def _ensure_mysql_table(self):
+        """创建 sim_system_logs 表（如不存在）。"""
+        ddl = """
+        CREATE TABLE IF NOT EXISTS `sim_system_logs` (
+            `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+            `time` VARCHAR(20) NOT NULL COMMENT '日志时间 HH:mm:ss',
+            `type` VARCHAR(32) NOT NULL COMMENT '日志类型 key',
+            `type_name` VARCHAR(64) DEFAULT '' COMMENT '日志类型中文名',
+            `message` TEXT COMMENT '日志消息',
+            `detail` TEXT COMMENT '结构化详情 JSON',
+            `task_id` VARCHAR(64) DEFAULT '' COMMENT '关联任务 ID',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间'
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统日志持久化表'
+        """
+        try:
+            self._mysql_client.execute(ddl)
+            print("[LogStreamer] 系统日志表已就绪: sim_system_logs")
+        except Exception as e:
+            print(f"[LogStreamer] 建表失败: {e}")
+            self._mysql_enabled = False
+
+    def export_logs_from_db(
+        self,
+        start_date: str = "",
+        end_date: str = "",
+        types: Optional[List[str]] = None,
+        keyword: str = "",
+        limit: int = 5000,
+    ) -> List[Dict[str, Any]]:
+        """从 MySQL 导出日志（支持日期范围过滤）。"""
+        client = self._get_mysql_client()
+        if not client:
+            return []
+
+        where_parts = []
+        params = []
+
+        if start_date:
+            where_parts.append("created_at >= %s")
+            params.append(start_date)
+        if end_date:
+            where_parts.append("created_at <= %s")
+            params.append(end_date + " 23:59:59")
+        if types:
+            placeholders = ", ".join(["%s"] * len(types))
+            where_parts.append(f"type IN ({placeholders})")
+            params.extend(types)
+        if keyword:
+            where_parts.append("message LIKE %s")
+            params.append(f"%{keyword}%")
+
+        where_sql = " AND ".join(where_parts) if where_parts else "1=1"
+        sql = f"SELECT * FROM `sim_system_logs` WHERE {where_sql} ORDER BY id ASC LIMIT {limit}"
+
+        try:
+            client.cursor.execute(sql, tuple(params))
+            rows = client.cursor.fetchall()
+            result = []
+            for row in rows:
+                entry = {
+                    "time": row.get("time", ""),
+                    "type": row.get("type", ""),
+                    "type_name": row.get("type_name", ""),
+                    "message": row.get("message", ""),
+                }
+                detail_raw = row.get("detail", "")
+                if detail_raw:
+                    try:
+                        entry["detail"] = json.loads(detail_raw)
+                    except json.JSONDecodeError:
+                        pass
+                result.append(entry)
+            return result
+        except Exception as e:
+            print(f"[LogStreamer] MySQL 导出失败: {e}")
+            return []
+
+    def _cleanup_old_logs(self, days: int = 7):
+        """清理超过指定天数的旧日志。"""
+        client = self._get_mysql_client()
+        if not client:
+            return
+        try:
+            sql = f"DELETE FROM `sim_system_logs` WHERE created_at < NOW() - INTERVAL {days} DAY"
+            client.execute(sql)
+            print(f"[LogStreamer] 已清理 {days} 天前的日志")
+        except Exception as e:
+            print(f"[LogStreamer] 日志清理失败: {e}")
+
+    # ── 推送 ─────────────────────────────────────────────────────
+
     def push(self, log_type: str, message: str, detail: Optional[Dict] = None) -> None:
         """推送一条日志。type 必须是 LOG_TYPES 中的 key。
 
@@ -167,6 +298,28 @@ class LogStreamer:
                 self._callback(entry)
             except Exception as e:
                 print(f"[LogStreamer] 推送回调失败: {e}")
+
+        # ── MySQL 持久化（异步写，忽略失败不影响主流程） ──────────
+        if self._mysql_enabled:
+            try:
+                client = self._get_mysql_client()
+                if client:
+                    detail_json = json.dumps(detail, ensure_ascii=False) if detail is not None else ""
+                    client.insert("sim_system_logs", {
+                        "time": entry["time"],
+                        "type": entry["type"],
+                        "type_name": entry["type_name"],
+                        "message": entry["message"],
+                        "detail": detail_json,
+                        "task_id": "",
+                    })
+                    # 每约 3600 条日志触发一次旧日志清理（约每小时）
+                    self._cleanup_counter += 1
+                    if self._cleanup_counter >= 3600:
+                        self._cleanup_counter = 0
+                        self._cleanup_old_logs()
+            except Exception as e:
+                print(f"[LogStreamer] MySQL 写入异常: {e}")
 
     def push_sim_log(self, message: str) -> None:
         """推送仿真运行日志（兼容 _add_log）。"""

@@ -1586,6 +1586,49 @@ def api_logs_clear():
     return jsonify({"success": True, "message": "日志已清空"})
 
 
+@app.route("/api/logs/export/db", methods=["POST"])
+def api_logs_export_db():
+    """从 MySQL 导出持久化日志（支持日期范围、类型过滤、关键字搜索）。"""
+    data = request.get_json(silent=True) or {}
+    start_date = data.get("start_date", "")
+    end_date = data.get("end_date", "")
+    types_str = data.get("types", "")
+    types = [t.strip() for t in types_str.split(",") if t.strip()] if types_str else None
+    keyword = data.get("keyword", "")
+    fmt = data.get("format", "json")
+
+    from flask import Response as _Response
+    streamer = _get_streamer()
+    logs = streamer.export_logs_from_db(
+        start_date=start_date,
+        end_date=end_date,
+        types=types,
+        keyword=keyword,
+    )
+
+    if fmt == "csv":
+        lines = ["time,type,type_name,message,detail"]
+        for l in logs:
+            msg = (l.get("message", "") or "").replace('"', '""')
+            tn = (l.get("type_name", "") or "").replace('"', '""')
+            detail_str = ""
+            if l.get("detail"):
+                detail_str = json.dumps(l["detail"], ensure_ascii=False).replace('"', '""')
+            lines.append(f'{l.get("time","")},{l.get("type","")},"{tn}","{msg}","{detail_str}"')
+        content = "\n".join(lines)
+        mime = "text/csv;charset=utf-8"
+    else:
+        content = json.dumps(logs, ensure_ascii=False, indent=2)
+        mime = "application/json;charset=utf-8"
+
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    return _Response(
+        content,
+        mimetype=mime,
+        headers={"Content-Disposition": f"attachment; filename=sim-logs-db-{ts}.{fmt}"},
+    )
+
+
 @app.route("/api/logs/types", methods=["GET"])
 def api_logs_types():
     """获取日志类型列表。"""

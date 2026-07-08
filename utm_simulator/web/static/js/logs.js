@@ -10,6 +10,12 @@ var logs = [];          // {time, type, type_name, msg, detail}
 var paused = false;
 var activeTab = 'situation-uav';
 
+// ── 数值格式化辅助（防御 toFixed 类型错误） ──────────────────────
+function fmtNum(val, decimals, suffix) {
+  if (typeof val === 'number' && isFinite(val)) return val.toFixed(decimals) + (suffix || '');
+  return '-';
+}
+
 // ── 枚举标签 ─────────────────────────────────────────────────────
 function statusLabel(s) {
   return {0:'未起飞',1:'起飞中',2:'飞行中',3:'悬停',4:'降落中',5:'已降落'}[s] || ('状态'+s);
@@ -95,12 +101,12 @@ function renderUavTab() {
       html += '</div>';
       html += '<div class="uav-card-body">';
       html += '<div class="uav-detail-grid">';
-      html += '<div><span class="dim">经度:</span> ' + (uav.longitude != null ? uav.longitude.toFixed(6) : '-') + '</div>';
-      html += '<div><span class="dim">纬度:</span> ' + (uav.latitude != null ? uav.latitude.toFixed(6) : '-') + '</div>';
-      html += '<div><span class="dim">海拔高度:</span> ' + (uav.geodeticAltitude != null ? uav.geodeticAltitude.toFixed(1) + ' m' : '-') + '</div>';
-      html += '<div><span class="dim">地速:</span> ' + (uav.speed != null ? uav.speed.toFixed(1) + ' m/s' : '-') + '</div>';
-      html += '<div><span class="dim">航向角:</span> ' + (uav.trackAngle != null ? uav.trackAngle.toFixed(1) + '°' : '-') + '</div>';
-      html += '<div><span class="dim">升降速:</span> ' + (uav.verticalSpeed != null ? uav.verticalSpeed.toFixed(1) + ' m/s' : '-') + '</div>';
+      html += '<div><span class="dim">经度:</span> ' + fmtNum(uav.longitude, 6) + '</div>';
+      html += '<div><span class="dim">纬度:</span> ' + fmtNum(uav.latitude, 6) + '</div>';
+      html += '<div><span class="dim">海拔高度:</span> ' + fmtNum(uav.geodeticAltitude, 1, ' m') + '</div>';
+      html += '<div><span class="dim">地速:</span> ' + fmtNum(uav.speed, 1, ' m/s') + '</div>';
+      html += '<div><span class="dim">航向角:</span> ' + fmtNum(uav.trackAngle, 1, '°') + '</div>';
+      html += '<div><span class="dim">升降速:</span> ' + fmtNum(uav.verticalSpeed, 1, ' m/s') + '</div>';
       html += '</div></div>';
       html += '</div>';
     });
@@ -319,15 +325,15 @@ function showPlaceholder(msg) {
   });
 }
 
-// ── 定时轮询兜底（每 5 秒拉一次新日志）─────────────────────────────
+// ── 定时轮询兜底（每 10 秒拉一次新日志）─────────────────────────────
 var _lastLogTime = '';
 async function pollLogs() {
-  if (paused) { setTimeout(pollLogs, 5000); return; }
+  if (paused) { setTimeout(pollLogs, 10000); return; }
   try {
     var url = '/api/logs?limit=50';
     if (_lastLogTime) url += '&since=' + encodeURIComponent(_lastLogTime);
     var resp = await fetch(url);
-    if (!resp.ok) { setTimeout(pollLogs, 5000); return; }
+    if (!resp.ok) { setTimeout(pollLogs, 10000); return; }
     var data = await resp.json();
     if (data.logs && data.logs.length > 0) {
       var newCount = 0;
@@ -351,7 +357,7 @@ async function pollLogs() {
   } catch(e) {
     console.error('[logs] pollLogs 异常:', e);
   }
-  setTimeout(pollLogs, 5000);
+  setTimeout(pollLogs, 10000);
 }
 
 // ── 暂停/恢复 ──────────────────────────────────────────────────────
@@ -367,6 +373,25 @@ $('#btn-logs-clear').addEventListener('click', function() {
   var ids = ['logs-stream-uav', 'logs-stream-plan', 'logs-stream-alarm', 'logs-stream-all'];
   ids.forEach(function(id) { var el = document.getElementById(id); if (el) el.innerHTML = ''; });
   updateStats();
+});
+
+// ── 刷新 ───────────────────────────────────────────────────────────
+$('#btn-logs-refresh').addEventListener('click', async function() {
+  var btn = this;
+  btn.disabled = true;
+  btn.classList.add('refreshing');
+  var origText = btn.textContent;
+  btn.textContent = '⏳ 刷新中...';
+
+  // 清空缓冲区并从 API 重新加载
+  logs = [];
+  _lastLogTime = '';
+  await fetchInitialLogs();
+
+  btn.disabled = false;
+  btn.classList.remove('refreshing');
+  btn.textContent = origText;
+  showToast('日志已刷新', 'success');
 });
 
 // ── 关键字过滤 ─────────────────────────────────────────────────────

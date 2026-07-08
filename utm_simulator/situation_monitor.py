@@ -92,7 +92,7 @@ class SituationMonitor:
         self._last_uav_report_time = 0.0
         self._last_uav_count = 0
         self._last_alarm_count = -1  # -1 表示未收到过告警数据
-        self._last_plan_count = -1
+        self._last_plan_key = ""     # 飞行计划复合键（6 个子计数联动去重）
 
         # 告警详情去重 — 通过内容哈希避免相同告警重复推送
         self._last_warnings_hash = ""
@@ -404,30 +404,39 @@ class SituationMonitor:
         if not isinstance(data, dict):
             return
 
-        # 1. 告警统计（alarmStatistic）— 辅助计数，主要告警详情来自 flightTrack 的 warningTags
+        # 1. 告警统计（alarmStatistic）— 主动调用 REST API 获取告警详情
         if data.get("type") == "alarmStatistic" and "value" in data:
             try:
                 alarm_count = int(data["value"])
                 if alarm_count != self._last_alarm_count:
                     self._last_alarm_count = alarm_count
+                    detail = {"total": alarm_count, "source": "alarmStatistic"}
+                    # 主动获取告警详情（含 UAV 编号、类别、原因等）
+                    if alarm_count > 0:
+                        alarm_details = self._fetch_alert_details(alarm_count)
+                        if alarm_details:
+                            detail["warnings"] = alarm_details
                     self._push_log(LOG_TYPE_ALARM, f"实时告警数: {alarm_count}",
-                                   detail={"total": alarm_count, "source": "alarmStatistic"})
+                                   detail=detail)
             except (ValueError, TypeError):
                 pass
             return
 
-        # 2. 飞行计划统计（flowStatistic）— 提取全部 6 个子计数
+        # 2. 飞行计划统计（flowStatistic）— 复合键比较所有子计数
         if data.get("type") == "flowStatistic" and "value" in data:
             try:
                 flow_data = json.loads(data["value"])
                 plan_count = flow_data.get("totalCount", 0)
-                if plan_count != self._last_plan_count:
-                    self._last_plan_count = plan_count
-                    waiting = flow_data.get("waitingCount", 0)
-                    active = flow_data.get("activeCount", 0)
-                    completed = flow_data.get("completedCount", 0)
-                    rejected = flow_data.get("rejectedCount", 0)
-                    cancelled = flow_data.get("cancelledCount", 0)
+                waiting = flow_data.get("waitingCount", 0)
+                active = flow_data.get("activeCount", 0)
+                completed = flow_data.get("completedCount", 0)
+                rejected = flow_data.get("rejectedCount", 0)
+                cancelled = flow_data.get("cancelledCount", 0)
+
+                # 构建复合键：任一子计数变化都触发推送
+                plan_key = f"{plan_count}|{waiting}|{active}|{completed}|{rejected}|{cancelled}"
+                if plan_key != self._last_plan_key:
+                    self._last_plan_key = plan_key
                     msg = (f"实时飞行计划数: {plan_count} "
                            f"(待{waiting}/执{active}/完{completed}/拒{rejected}/取{cancelled})")
                     detail = {
@@ -438,6 +447,10 @@ class SituationMonitor:
                         "rejectedCount": rejected,
                         "cancelledCount": cancelled,
                     }
+                    # 额外增强：通过 REST API 获取实时计划列表详情
+                    plan_list = self._fetch_plan_details()
+                    if plan_list:
+                        detail["plans"] = plan_list
                     self._push_log(LOG_TYPE_PLAN, msg, detail=detail)
             except (json.JSONDecodeError, ValueError, TypeError):
                 pass
@@ -523,6 +536,16 @@ class SituationMonitor:
                 return nd["uavs"]
         return None
 
+    @staticmethod
+    def _to_float(val: Any, default: Optional[float] = None) -> Optional[float]:
+        """安全转换为 float，失败返回 default（None 表示该字段不存在）。"""
+        if val is None:
+            return default
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return default
+
     def _extract_uav_details(self, data: Dict[str, Any]) -> Optional[List[Dict]]:
         """从 flightTrack/uavs 消息中提取每架 UAV 的关键字段列表。"""
         uavs = self._get_uav_list(data)
@@ -537,12 +560,12 @@ class SituationMonitor:
             classification = uav.get("classification")
             item = {
                 "uavIdentifyCode": uav.get("uavIdentifyCode", ""),
-                "longitude": uav.get("longitude"),
-                "latitude": uav.get("latitude"),
-                "geodeticAltitude": uav.get("geodeticAltitude"),
-                "trackAngle": uav.get("trackAngle"),
-                "speed": uav.get("speed"),
-                "verticalSpeed": uav.get("verticalSpeed"),
+                "longitude": self._to_float(uav.get("longitude")),
+                "latitude": self._to_float(uav.get("latitude")),
+                "geodeticAltitude": self._to_float(uav.get("geodeticAltitude")),
+                "trackAngle": self._to_float(uav.get("trackAngle")),
+                "speed": self._to_float(uav.get("speed")),
+                "verticalSpeed": self._to_float(uav.get("verticalSpeed")),
                 "operatingStatus": status,
                 "operatingStatusLabel": OPERATING_STATUS_LABELS.get(status, f"未知({status})") if status is not None else "",
                 "classification": classification,
@@ -579,6 +602,146 @@ class SituationMonitor:
                         "timestamp": tag.get("timestamp", uav.get("timestamp", "")),
                     })
         return warnings if warnings else None
+
+    # ── ATC REST API 数据获取 ────────────────────────────────────
+
+    def _fetch_alert_details(self, count: int) -> Optional[List[Dict[str, Any]]]:
+        """从 ATC REST API POST /alert/search 获取最近告警详情列表。
+
+        Args:
+            count: 期望获取的告警条数（最多 50 条）
+        Returns:
+            [{uavCode, alertCategory, alertLevel, message, time, status}, ...] 或 None
+        """
+        try:
+            token = self._get_token()
+            if not token:
+                return None
+
+            import requests as _requests
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+            now = datetime.now()
+            one_hour_ago = (now.replace(hour=now.hour - 1) if now.hour >= 1
+                            else now.replace(day=now.day - 1, hour=now.hour + 23)
+                            ).strftime("%Y-%m-%d %H:%M:%S")
+            now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
+            payload = {
+                "keyword": "",
+                "seatId": 0,
+                "alertCategory": "",
+                "alertLevel": "",
+                "status": "",
+                "startTime": one_hour_ago,
+                "endTime": now_str,
+                "pageNo": 0,
+                "pageSize": min(count, 50),
+                "orderBy": "createDate",
+                "dir": "desc",
+            }
+            headers = {
+                "Content-Type": "application/json",
+                "jwt-token": token,
+            }
+            base_url = "https://dkkgsit-test.testdolphin.com"
+            resp = _requests.post(
+                f"{base_url}/la-atc-biz-backend/alert/search",
+                json=payload,
+                headers=headers,
+                verify=False,
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                return None
+            result = resp.json()
+            if result.get("code") != "0" and result.get("code") != 0:
+                return None
+
+            content = result.get("result", {}).get("content", [])
+            if not isinstance(content, list):
+                # 有些 API 直接返回 list
+                content = result.get("result", []) if isinstance(result.get("result"), list) else []
+
+            details = []
+            for alert in content:
+                uav_code = ""
+                alert_uavs = alert.get("alertUavList", [])
+                if alert_uavs and isinstance(alert_uavs, list):
+                    uav_code = alert_uavs[0].get("uavIdentifyCode", "") if alert_uavs else ""
+
+                details.append({
+                    "uavCode": uav_code,
+                    "alertCategory": alert.get("alertCategory", ""),
+                    "alertLevel": alert.get("alertLevel", ""),
+                    "message": alert.get("alertReason", ""),
+                    "time": alert.get("createDate", ""),
+                    "status": alert.get("status", ""),
+                })
+            return details if details else None
+        except Exception as e:
+            print(f"[SituationMonitor] 获取告警详情失败: {e}")
+            return None
+
+    def _fetch_plan_details(self) -> Optional[List[Dict[str, Any]]]:
+        """从 ATC REST API POST /flight/plan/realtimePlanPage 获取实时计划列表。
+
+        Returns:
+            [{planNo, planName, status, uavCode, ...}, ...] 或 None
+        """
+        try:
+            token = self._get_token()
+            if not token:
+                return None
+
+            import requests as _requests
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+            payload = {
+                "keyword": "",
+                "planStatus": "",
+                "pageNo": 0,
+                "pageSize": 50,
+            }
+            headers = {
+                "Content-Type": "application/json",
+                "jwt-token": token,
+            }
+            base_url = "https://dkkgsit-test.testdolphin.com"
+            resp = _requests.post(
+                f"{base_url}/la-atc-biz-backend/flight/plan/realtimePlanPage",
+                json=payload,
+                headers=headers,
+                verify=False,
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                return None
+            result = resp.json()
+            if result.get("code") != "0" and result.get("code") != 0:
+                return None
+
+            content = result.get("result", {}).get("content", [])
+            if not isinstance(content, list):
+                content = result.get("result", []) if isinstance(result.get("result"), list) else []
+
+            details = []
+            for plan in content:
+                details.append({
+                    "planNo": plan.get("planNo", ""),
+                    "planName": plan.get("planName", ""),
+                    "status": plan.get("status", ""),
+                    "statusName": plan.get("statusName", ""),
+                    "uavIdentifyCode": plan.get("uavIdentifyCode", ""),
+                    "startTime": plan.get("startTime", ""),
+                    "endTime": plan.get("endTime", ""),
+                })
+            return details if details else None
+        except Exception as e:
+            print(f"[SituationMonitor] 获取飞行计划详情失败: {e}")
+            return None
 
     # ── 日志推送 ────────────────────────────────────────────────
 

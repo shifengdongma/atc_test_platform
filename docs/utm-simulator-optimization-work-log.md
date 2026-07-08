@@ -670,3 +670,61 @@ http://localhost:5000
 | 新增 CSS 样式块 | 4（UAV 卡片/飞行计划/告警卡片/竖排 Tab） |
 | 状态 | ✅ 已完成，待验证 |
 
+---
+
+## 2026-07-08 系统日志板块 5 项 Bug 修复 + MySQL 持久化
+
+### 问题诊断
+
+1. **监视目标 Tab 报错**: `uav.speed.toFixed is not a function` — ATC 下发数值字段为字符串时，前端 `.toFixed()` 崩溃
+2. **飞行计划 Tab 不更新**: 去重仅比较 `totalCount`，子状态变化（待处理→执行中）时不推送
+3. **实时告警 Tab 无详情**: `alarmStatistic` 仅含数字统计，缺少每条告警的具体内容
+4. **缺少刷新机制**: 无手动刷新按钮，用户无法主动获取最新日志
+5. **无持久化存储**: 日志仅存内存（max 1000 条），重启丢失，任务结束后无法导出
+
+### 修改文件
+
+**`utm_simulator/situation_monitor.py`**（修改）— Issues 1/2/3:
+- 新增 `_to_float()` 静态方法，安全转换 ATC 下发的数值字段（longitude/latitude/geodeticAltitude/trackAngle/speed/verticalSpeed）
+- `_extract_uav_details()` 中 6 个数值字段全部包裹 `_to_float()`，杜绝字符串传入前端
+- 飞行计划去重从单值 `_last_plan_count` 改为复合键 `_last_plan_key`（6 个子计数联动比较）
+- 新增 `_fetch_plan_details()` 方法，调用 `POST /flight/plan/realtimePlanPage` 获取实时计划列表
+- 新增 `_fetch_alert_details()` 方法，调用 `POST /alert/search` 获取告警详情列表
+- `alarmStatistic` 处理逻辑增强：当告警数 > 0 时主动调用 API 获取详情，写入 `detail["warnings"]`
+
+**`utm_simulator/web/static/js/logs.js`**（修改）— Issues 1/4:
+- 新增 `fmtNum(val, decimals, suffix)` 防御性格式化函数，检查 `typeof === 'number' && isFinite`
+- 替换监视目标 Tab 中 6 处 `.toFixed()` 调用为 `fmtNum()`，彻底解决类型错误
+- 轮询间隔从 5 秒改为 10 秒（`pollLogs()` 中 3 处 `setTimeout`）
+- 新增刷新按钮事件处理：清空 `logs[]` → `fetchInitialLogs()` → Toast 提示
+
+**`utm_simulator/web/pages/logs.html`**（修改）— Issue 4:
+- 工具栏新增 `🔄 刷新` 按钮（带 `btn-refresh` 样式类）
+
+**`utm_simulator/web/static/css/style.css`**（修改）— Issue 4:
+- 新增 `.btn-refresh` 样式 + `@keyframes btn-spin` 旋转动画
+
+**`utm_simulator/log_streamer.py`**（修改）— Issue 5:
+- 新增 MySQL 导入（`mysqldbclient.MysqlDbClient`，带优雅降级 fallback）
+- 新增 `_mysql_enabled` / `_mysql_client` 属性，延迟初始化连接
+- 新增 `_get_mysql_client()` 方法 — 建立连接 + 建表
+- 新增 `_ensure_mysql_table()` 方法 — 创建 `sim_system_logs` 表（id/time/type/type_name/message/detail/task_id/created_at）
+- 新增 `export_logs_from_db()` 方法 — 支持日期范围/类型/关键字过滤的 MySQL 导出
+- 新增 `_cleanup_old_logs(days=7)` 方法 — 定期清理 7 天前旧日志
+- `push()` 方法增强：内存写入后同步持久化到 MySQL，每 ~3600 条触发一次清理
+
+**`utm_simulator/web_server.py`**（修改）— Issue 5:
+- 新增 `POST /api/logs/export/db` 端点，支持 `start_date`/`end_date`/`types`/`keyword`/`format` 参数
+
+### 本次汇总
+
+| 操作 | 文件数 |
+|------|--------|
+| 修改 | 6（situation_monitor.py, logs.js, logs.html, style.css, log_streamer.py, web_server.py） |
+| 新增 Python 方法 | 7（_to_float, _fetch_alert_details, _fetch_plan_details, _get_mysql_client, _ensure_mysql_table, export_logs_from_db, _cleanup_old_logs） |
+| 新增 JS 函数 | 1（fmtNum） |
+| 新增 API 端点 | 1（/api/logs/export/db） |
+| 新增 CSS 样式 | 1（btn-refresh 旋转动画） |
+| 新增数据库表 | 1（sim_system_logs） |
+| 状态 | ✅ 已完成，语法验证通过 |
+

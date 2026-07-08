@@ -121,7 +121,7 @@ elBtnStart.addEventListener('click', async function() {
     body.route_file = (document.getElementById('replay-route-file')||{}).value || 'redis_route.json';
   }
   if (mode === 'plan') {
-    body.plan_selected_uids = (typeof getSelectedPlanUids === 'function') ? getSelectedPlanUids() : [];
+    body.plan_selected_uids = (typeof window.getSelectedPlanUids === 'function') ? window.getSelectedPlanUids() : [];
   }
   var result = await apiPost('/api/sim/start', body);
   if (result.success) {
@@ -170,6 +170,22 @@ function renderHistory() {
   }).join('');
 }
 
-// ── 初始化 ─────────────────────────────────────────────────────────
-fetchConfig();
+// ── 初始化：加载配置 + 同步运行状态 ──────────────────────────────────
+async function initConfig() {
+  await fetchConfig();
+  // 检查服务器当前是否在运行中
+  syncRunningState().then(function(running) {
+    if (running) setRunningState(true);
+  });
+  // WebSocket 持续同步状态
+  onWsEvent('status', function(data) {
+    if (data.running) setRunningState(true);
+    else if (!data.running && isRunning) setRunningState(false);
+  });
+  onWsEvent('status_change', function(data) {
+    if (data.event === 'started') setRunningState(true);
+    else if (data.event === 'stopped') setRunningState(false);
+  });
+}
+initConfig();
 })();

@@ -161,7 +161,7 @@ class SimulationRunner:
         # plan 模式：用户选择的航线 UID 白名单
         self._plan_selected_uids: Optional[set] = None
 
-        # 检查连接状态
+        # 检查连接状态 + 设置日志监控
         try:
             test_redis = RedisClient(
                 config["redis_ip"], config["redis_port"],
@@ -169,6 +169,11 @@ class SimulationRunner:
             )
             with _lock:
                 _runtime_state["redis_connected"] = test_redis.client is not None
+            # 将 Redis 客户端传给日志采集器用于航线/空域变更监控
+            try:
+                _get_streamer().set_redis_client(test_redis)
+            except Exception:
+                pass
         except Exception:
             with _lock:
                 _runtime_state["redis_connected"] = False
@@ -341,13 +346,23 @@ class SimulationRunner:
 
         self._cleanup()
 
+    _last_reported_kafka = 0
+
     def _push_status(self) -> None:
         """推送运行时状态到所有 WebSocket 客户端。"""
         with _lock:
             if self._start_time:
                 _runtime_state["uptime_sec"] = int(time.time() - self._start_time)
             status = dict(_runtime_state)
+            kafka_tp = status.get("kafka_msg_per_sec", 0)
         socketio.emit("status", status)
+        # 每 5 秒报告一次 Kafka 遥测吞吐量
+        if kafka_tp > 0 and kafka_tp != self._last_reported_kafka:
+            try:
+                _get_streamer().report_kafka_telemetry(kafka_tp)
+            except Exception:
+                pass
+            self._last_reported_kafka = kafka_tp
 
     def _cleanup(self) -> None:
         """清理资源。"""

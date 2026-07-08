@@ -149,9 +149,74 @@ window.showToast = function(msg, type) {
 };
 
 // ── 初始化 WebSocket 连接 ─────────────────────────────────────────
+// ── Plan 模式：航线选择列表（跨页面共享）────────────────────────
+window.populatePlanRouteList = function(plans) {
+  var list = document.getElementById('plan-route-list');
+  var summary = document.getElementById('plan-route-summary');
+  if (!list) return;
+  if (!plans || plans.length === 0) {
+    list.innerHTML = '<div class="empty-hint">Redis 中暂无航线数据</div>';
+    if (summary) summary.textContent = '';
+    return;
+  }
+  var html = '';
+  for (var i = 0; i < plans.length; i++) {
+    var p = plans[i];
+    var uid = p._uid || p.uniqueProductIdentificationCode || '未知';
+    var fpCount = p._fpCount || 0;
+    html += '<label class="plan-route-item">' +
+      '<input type="checkbox" class="plan-route-cb" value="' + window.escHtml(uid) + '" checked>' +
+      '<span class="plan-route-uid">' + window.escHtml(uid) + '</span>' +
+      '<span class="plan-route-info">' + fpCount + ' 个计划</span>' +
+    '</label>';
+  }
+  list.innerHTML = html;
+  window.updatePlanRouteSummary();
+};
+
+window.getSelectedPlanUids = function() {
+  var cbs = document.querySelectorAll('.plan-route-cb:checked');
+  var uids = [];
+  for (var i = 0; i < cbs.length; i++) { uids.push(cbs[i].value); }
+  return uids;
+};
+
+window.updatePlanRouteSummary = function() {
+  var el = document.getElementById('plan-route-summary');
+  if (!el) return;
+  var total = document.querySelectorAll('.plan-route-cb').length;
+  var sel = document.querySelectorAll('.plan-route-cb:checked').length;
+  el.textContent = '已选 ' + sel + ' / ' + total + ' 条航线';
+};
+
+// ── 全选/取消全选事件绑定 ──────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+  var btnAll = document.getElementById('btn-plan-select-all');
+  var btnNone = document.getElementById('btn-plan-deselect-all');
+  if (btnAll) btnAll.addEventListener('click', function() {
+    document.querySelectorAll('.plan-route-cb').forEach(function(cb) { cb.checked = true; });
+    if (window.updatePlanRouteSummary) window.updatePlanRouteSummary();
+  });
+  if (btnNone) btnNone.addEventListener('click', function() {
+    document.querySelectorAll('.plan-route-cb').forEach(function(cb) { cb.checked = false; });
+    if (window.updatePlanRouteSummary) window.updatePlanRouteSummary();
+  });
+});
+
+// ── 跨页面仿真状态同步 ─────────────────────────────────────────────
+window._simRunningCache = false;
+window.syncRunningState = async function() {
+  try {
+    var data = await window.apiGet('/api/sim/status');
+    window._simRunningCache = data.running === true;
+    return window._simRunningCache;
+  } catch(e) { return false; }
+};
+
 window.initCommon = function(activePath) {
   window.renderNavbar(activePath);
   window.getSocket();
+  window.syncRunningState();
 };
 
 })();

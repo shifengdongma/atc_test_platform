@@ -9,6 +9,7 @@ var logs = [];
 var paused = false;
 
 // ── WebSocket 日志接收 ─────────────────────────────────────────────
+// 仿真运行日志（来自 _add_log）
 onWsEvent('log', function(data) {
   if (paused) return;
   var types = getCheckedTypes();
@@ -17,6 +18,19 @@ onWsEvent('log', function(data) {
   var search = ($('#logs-search').value || '').toLowerCase();
   if (search && msg.toLowerCase().indexOf(search) < 0) return;
   addLogEntry(msg, 'sim_status');
+});
+
+// 系统日志（来自 log_streamer，含 Redis/Kafka/DB）
+onWsEvent('log_entry', function(data) {
+  if (paused) return;
+  var types = getCheckedTypes();
+  if (types.length === 0) return;
+  var logType = data.type || 'sim_status';
+  if (types.indexOf(logType) < 0) return;
+  var msg = data.message || '';
+  var search = ($('#logs-search').value || '').toLowerCase();
+  if (search && msg.toLowerCase().indexOf(search) < 0) return;
+  addLogEntry(msg, logType);
 });
 
 // ── 添加日志条目 ───────────────────────────────────────────────────

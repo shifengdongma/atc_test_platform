@@ -48,11 +48,84 @@ class LogStreamer:
             return
         self._running = True
         print("[LogStreamer] 日志采集已启动")
+        # 启动后台数据源监控线程
+        self._start_redis_monitor()
+        self._start_db_monitor()
 
     def stop(self) -> None:
         """停止日志采集。"""
         self._running = False
         print("[LogStreamer] 日志采集已停止")
+
+    # ── Redis 监控 ──────────────────────────────────────────────────
+
+    _redis_client = None
+    _last_route_count = 0
+    _last_airspace_count = 0
+
+    def set_redis_client(self, client) -> None:
+        """设置 Redis 客户端用于监控。"""
+        self._redis_client = client
+
+    def _start_redis_monitor(self) -> None:
+        """后台轮询 Redis 数据变更。"""
+        def _poll():
+            self.push("sim_status", "Redis/Kafka 监控线程已启动")
+            while self._running:
+                try:
+                    if self._redis_client:
+                        try:
+                            routes = self._redis_client.hgetall("BIZ_DATA:UAV_ROUTE")
+                            airspaces = self._redis_client.hgetall("BIZ_DATA:AIRSPACE")
+                            route_count = len(routes) if routes else 0
+                            air_count = len(airspaces) if airspaces else 0
+                            if route_count != self._last_route_count:
+                                self.push("redis_route",
+                                    f"飞行计划数量变更: {self._last_route_count} → {route_count} (BIZ_DATA:UAV_ROUTE)")
+                                self._last_route_count = route_count
+                            if air_count != self._last_airspace_count:
+                                self.push("redis_airspace",
+                                    f"空域数据数量变更: {self._last_airspace_count} → {air_count} (BIZ_DATA:AIRSPACE)")
+                                self._last_airspace_count = air_count
+                        except Exception:
+                            pass
+                except Exception as e:
+                    self.push("sim_status", f"Redis 监控异常: {e}")
+                time.sleep(10)  # 每 10 秒检查一次
+        threading.Thread(target=_poll, daemon=True, name="redis-monitor").start()
+
+    # ── 数据库任务日志监控 ──────────────────────────────────────────
+
+    _last_log_id = 0
+
+    def _start_db_monitor(self) -> None:
+        """后台轮询数据库 sim_task_logs 表。"""
+        def _poll():
+            time.sleep(5)  # 初始延迟
+            while self._running:
+                try:
+                    rows = query(LOG_TABLE, where=f"id > {self._last_log_id}", order_by="id ASC")
+                    for row in rows:
+                        self.push("db_run_data",
+                            f"[{row.get('task_type','')}] {row.get('message','')} [{row.get('status','')}]")
+                        if row.get("id", 0) > self._last_log_id:
+                            self._last_log_id = row["id"]
+                except Exception:
+                    pass
+                time.sleep(5)
+        threading.Thread(target=_poll, daemon=True, name="db-monitor").start()
+
+    # ── Kafka 遥测计数 ──────────────────────────────────────────────
+
+    def report_kafka_telemetry(self, count: int, topic: str = "uav_runtime_data") -> None:
+        """报告 Kafka 消息发送计数（由 SimulationManager 回调）。"""
+        if count > 0:
+            self.push("kafka_telemetry", f"发送 {count} 条遥测到 {topic}")
+
+    def report_kafka_trace(self, count: int) -> None:
+        """报告 Kafka trace 消费计数。"""
+        if count > 0:
+            self.push("kafka_trace", f"收到 {count} 条轨迹预测 (uav_runtime_trace)")
 
     def push(self, log_type: str, message: str) -> None:
         """推送一条日志。type 必须是 LOG_TYPES 中的 key。"""

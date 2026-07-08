@@ -191,7 +191,7 @@ def _telemetry_dict(uid: str, registered_code: str, samp: Dict[str, Any], now_ms
 class PlanRunner:
     """维护 planList，定时拉 Redis，每秒发送遥测，并消费 uav_runtime_trace。"""
 
-    def __init__(self) -> None:
+    def __init__(self, log_callback=None) -> None:
         self.redis_client = RedisClient(redis_ip, redis_port, redis_password)
         self.kafka_producer = KafkaProducerClient(
             kafka_url, bootstrap_servers_mirror=getattr(_env, "kafka_url2", None)
@@ -205,6 +205,18 @@ class PlanRunner:
         self._plans: Dict[str, RoutePlanSim] = {}
         self._lock = threading.Lock()
         self.running = True
+        self._log_callback = log_callback
+        self._threads: List[threading.Thread] = []
+
+    def _log(self, msg: str) -> None:
+        """日志输出：优先回调到前端，否则打印到 stdout。"""
+        if self._log_callback:
+            try:
+                self._log_callback(msg)
+            except Exception:
+                pass
+        else:
+            print(msg)
 
     def __del__(self) -> None:
         if getattr(self, "kafka_consumer", None):
@@ -408,6 +420,47 @@ class PlanRunner:
             except Exception as e:
                 print(f"消费 uav_runtime_trace 异常: {e}")
             time.sleep(0.05)
+
+    def start_background(self) -> None:
+        """非阻塞启动：首次拉取 Redis 计划，启动所有后台线程后立即返回。
+        供 web_server / sim_manager 等外部编排器调用。"""
+        self.running = True
+        self.merge_from_redis()
+
+        # watch 线程：监听 Redis 变动 + 60s 兜底轮询
+        watch_thread = threading.Thread(target=self._watch_redis_loop, daemon=True, name="plan-watch")
+        watch_thread.start()
+        self._threads.append(watch_thread)
+
+        # trace 消费线程
+        trace_thread = threading.Thread(target=self._consume_uav_runtime_trace, daemon=True, name="plan-trace")
+        trace_thread.start()
+        self._threads.append(trace_thread)
+
+        # tick 线程：每秒插值发送遥测
+        tick_thread = threading.Thread(target=self._tick_loop, daemon=True, name="plan-tick")
+        tick_thread.start()
+        self._threads.append(tick_thread)
+
+        self._log(f"Redis 计划插值模式已启动，当前 {len(self._plans)} 条活跃计划")
+
+    def stop(self) -> None:
+        """优雅停止所有后台线程并清理连接。"""
+        self.running = False
+        for t in self._threads:
+            t.join(timeout=3.0)
+        self._threads.clear()
+        if getattr(self, "kafka_consumer", None):
+            try:
+                self.kafka_consumer.close()
+            except Exception:
+                pass
+        if getattr(self, "kafka_producer", None):
+            try:
+                self.kafka_producer.close()
+            except Exception:
+                pass
+        self._log("Redis 计划插值模式已停止")
 
     def run(self) -> None:
         """首次立即拉 Redis，之后每分钟拉一次；后台消费 trace；主线程每秒发送遥测。"""

@@ -123,75 +123,192 @@ function initRun() {
   setTimeout(loadNoFlyZones, 800);
 }
 
+// ── 左侧面板 Tab 切换 ──────────────────────────────────────────────
+document.querySelectorAll('.left-tab').forEach(function(tab) {
+  tab.addEventListener('click', function() {
+    document.querySelectorAll('.left-tab').forEach(function(t) { t.classList.remove('active'); });
+    document.querySelectorAll('.left-tab-content').forEach(function(c) { c.classList.remove('active'); });
+    this.classList.add('active');
+    var target = document.getElementById('lefttab-' + this.dataset.lefttab);
+    if (target) target.classList.add('active');
+  });
+});
+
 // ── 定时任务 ───────────────────────────────────────────────────────
+var editingTaskId = null;
+
 async function loadScheduledTasks() {
-  var el = $('#sched-list');
+  var el = document.getElementById('sched-list');
   if (!el) return;
   try {
     var data = await apiGet('/api/schedule/tasks');
     if (!data.tasks || !data.tasks.length) {
-      el.innerHTML = '<div class="empty-hint">暂无定时任务</div>';
+      el.innerHTML = '<div class="empty-hint">暂无定时任务，点击"新建任务"创建</div>';
       return;
     }
     el.innerHTML = data.tasks.map(function(t) {
-      var status = t.enabled ? '<span class="current-badge">启用</span>' : '<span style="color:var(--danger);font-size:10px;">暂停</span>';
-      return '<div style="padding:4px 0;border-bottom:1px solid #1a2740;font-size:11px;">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-          '<span style="color:#82aaff;">' + escHtml(t.name||'') + '</span>' + status +
-        '</div>' +
-        '<div style="color:var(--text-dim);">' + escHtml(t.cron_expr||'') + ' | ' + escHtml(t.sim_mode||'') +
-          ' | 上次: ' + escHtml((t.last_run_at||'--').substring(0,16)) + '</div>' +
-        '<div style="margin-top:2px;">' +
+      var statusBadge = t.enabled ? '<span class="current-badge">启用</span>' : '<span style="color:var(--danger);font-size:10px;">暂停</span>';
+      var jsonInfo = '';
+      try {
+        var sp = JSON.parse(t.sim_params || '{}');
+        jsonInfo = ' | ' + (sp.data_file || sp.json_file || '默认');
+      } catch(e) {}
+      return '<div class="sched-card">' +
+        '<h4>' + escHtml(t.name||'') + '</h4>' +
+        '<div class="meta">⏱ ' + escHtml(t.cron_expr||'单次') + ' | 模式: ' + escHtml(t.sim_mode||'') + jsonInfo + '</div>' +
+        '<div class="meta">上次执行: ' + escHtml((t.last_run_at||'--').substring(0,16)) + ' | 下次: ' + escHtml((t.next_run_at||'--').substring(0,16)) + '</div>' +
+        '<div class="actions">' +
           (t.enabled ?
-            '<button class="btn-tiny" onclick="pauseTask(' + t.id + ')">⏸</button>' :
-            '<button class="btn-tiny" onclick="resumeTask(' + t.id + ')">▶</button>') +
-          '<button class="btn-tiny" onclick="runTaskNow(' + t.id + ')">⚡立即</button>' +
-          '<button class="btn-tiny" onclick="deleteTask(' + t.id + ')">🗑</button>' +
+            '<button class="btn-tiny" onclick="pauseTask(' + t.id + ')">⏸ 暂停</button>' :
+            '<button class="btn-tiny" onclick="resumeTask(' + t.id + ')">▶ 启用</button>') +
+          '<button class="btn-tiny" onclick="runTaskNow(' + t.id + ')">⚡ 立即执行</button>' +
+          '<button class="btn-tiny" onclick="editTask(' + t.id + ')">✏️ 编辑</button>' +
+          '<button class="btn-tiny" onclick="deleteTask(' + t.id + ')">🗑 删除</button>' +
         '</div>' +
+        '<div style="display:flex;align-items:center;gap:8px;">' + statusBadge + '</div>' +
       '</div>';
     }).join('');
   } catch(e) {}
 }
 
-window.pauseTask = async function(id) {
-  await apiPost('/api/schedule/tasks/' + id + '/pause');
-  showToast('已暂停', 'success'); loadScheduledTasks();
-};
-window.resumeTask = async function(id) {
-  await apiPost('/api/schedule/tasks/' + id + '/resume');
-  showToast('已恢复', 'success'); loadScheduledTasks();
-};
-window.runTaskNow = async function(id) {
-  var r = await apiPost('/api/schedule/tasks/' + id + '/run-now');
-  showToast(r.message||'已触发', r.success?'success':'error');
-};
-window.deleteTask = async function(id) {
-  if (!confirm('确定删除？')) return;
-  await fetch('/api/schedule/tasks/' + id, {method:'DELETE'});
-  showToast('已删除', 'success'); loadScheduledTasks();
+window.pauseTask = async function(id) { await apiPost('/api/schedule/tasks/' + id + '/pause'); showToast('已暂停','success'); loadScheduledTasks(); };
+window.resumeTask = async function(id) { await apiPost('/api/schedule/tasks/' + id + '/resume'); showToast('已恢复','success'); loadScheduledTasks(); };
+window.runTaskNow = async function(id) { var r = await apiPost('/api/schedule/tasks/' + id + '/run-now'); showToast(r.message||'已触发',r.success?'success':'error'); };
+window.deleteTask = async function(id) { if (!confirm('确定删除？')) return; await fetch('/api/schedule/tasks/' + id, {method:'DELETE'}); showToast('已删除','success'); loadScheduledTasks(); };
+
+// ── 弹窗控制 ───────────────────────────────────────────────────────
+function showSchedModal(title, data) {
+  editingTaskId = data ? data.id : null;
+  document.getElementById('sched-modal-title').textContent = title;
+  document.getElementById('sch-name').value = data ? (data.name||'') : '';
+  document.getElementById('sch-mode').value = data ? (data.sim_mode||'replay') : 'replay';
+  document.getElementById('sch-drones').value = 10;
+  document.getElementById('sch-duration').value = 5;
+  document.getElementById('sch-cron-expr').value = data ? (data.cron_expr||'*/30 * * * *') : '*/30 * * * *';
+  document.getElementById('sch-enabled').checked = data ? (data.enabled === 1) : true;
+
+  // 解析 sim_params
+  if (data && data.sim_params) {
+    try {
+      var sp = JSON.parse(data.sim_params);
+      document.getElementById('sch-drones').value = sp.target_drones || 10;
+      document.getElementById('sch-duration').value = sp.duration_min || 5;
+    } catch(e) {}
+  }
+  document.getElementById('sched-modal').classList.add('show');
+  refreshJsonFileList();
+}
+
+function hideSchedModal() {
+  document.getElementById('sched-modal').classList.remove('show');
+}
+
+document.getElementById('btn-sched-cancel').addEventListener('click', hideSchedModal);
+document.getElementById('sched-modal').addEventListener('click', function(e) {
+  if (e.target === this) hideSchedModal();
+});
+
+// ── JSON 文件列表加载 ──────────────────────────────────────────────
+async function refreshJsonFileList() {
+  var sel = document.getElementById('sch-json-file');
+  try {
+    var data = await apiGet('/api/data/db/files?page_size=100');
+    if (data.files && data.files.length) {
+      sel.innerHTML = '<option value="">— 使用默认文件 —</option>' +
+        data.files.map(function(f) {
+          return '<option value="' + f.id + '">' + escHtml(f.name) + ' [' + escHtml(f.category||'') + ', ' + (f.size_bytes? (f.size_bytes/1024).toFixed(1)+'KB' : '') + ']</option>';
+        }).join('');
+      document.getElementById('sch-file-info').textContent = '共 ' + data.total + ' 个文件';
+    } else {
+      sel.innerHTML = '<option value="">— 无可用文件，请先在"数据管理"页上传 —</option>';
+    }
+  } catch(e) { sel.innerHTML = '<option value="">加载失败</option>'; }
+}
+
+document.getElementById('btn-sch-refresh-files').addEventListener('click', refreshJsonFileList);
+
+// ── 时间类型切换 ────────────────────────────────────────────────────
+document.getElementById('sch-time-cron').addEventListener('change', function() {
+  document.getElementById('sch-cron-area').style.display = '';
+  document.getElementById('sch-once-area').style.display = 'none';
+});
+document.getElementById('sch-time-once').addEventListener('change', function() {
+  document.getElementById('sch-cron-area').style.display = 'none';
+  document.getElementById('sch-once-area').style.display = '';
+  // 默认明天此时
+  var d = new Date(Date.now() + 86400000);
+  document.getElementById('sch-once-date').value = d.toISOString().substring(0,10);
+});
+
+// ── Cron 快捷按钮 ───────────────────────────────────────────────────
+document.querySelectorAll('.cron-preset').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    document.getElementById('sch-cron-expr').value = this.dataset.cron;
+    document.querySelectorAll('.cron-preset').forEach(function(b) { b.style.background = ''; b.style.color = ''; });
+    this.style.background = 'var(--accent)'; this.style.color = '#fff';
+  });
+});
+
+// ── 新建按钮 ───────────────────────────────────────────────────────
+document.getElementById('btn-sched-new').addEventListener('click', function() {
+  showSchedModal('新建定时任务', null);
+});
+
+// ── 编辑按钮 ───────────────────────────────────────────────────────
+window.editTask = async function(id) {
+  try {
+    var data = await apiGet('/api/schedule/tasks');
+    var task = (data.tasks||[]).find(function(t) { return t.id === id; });
+    if (task) showSchedModal('编辑任务: ' + (task.name||''), task);
+  } catch(e) { showToast('加载失败', 'error'); }
 };
 
-// 新建任务弹窗（简化版：快捷 cron 选择器）
-$('#btn-sched-new').addEventListener('click', async function() {
-  var name = prompt('任务名称：', '自动仿真-' + new Date().toLocaleTimeString('zh-CN',{hour12:false}));
-  if (!name) return;
-  var cronOpts = ['*/30 * * * * (每30分钟)', '0 * * * * (每小时)', '0 */2 * * * (每2小时)', '0 9 * * * (每天9点)'];
-  var cronChoice = prompt('选择执行频率：\n1. 每30分钟\n2. 每小时\n3. 每2小时\n4. 每天9:00\n或输入自定义 cron 表达式', '1');
-  if (!cronChoice) return;
-  var cronMap = {'1':'*/30 * * * *','2':'0 * * * *','3':'0 */2 * * *','4':'0 9 * * *'};
-  var cronExpr = cronMap[cronChoice] || cronChoice;
+// ── 保存 ───────────────────────────────────────────────────────────
+document.getElementById('btn-sched-save').addEventListener('click', async function() {
+  var name = document.getElementById('sch-name').value.trim();
+  if (!name) { showToast('请输入任务名称', 'error'); return; }
+
+  var timeType = document.querySelector('input[name="sch-time-type"]:checked').value;
+  var cronExpr = timeType === 'once'
+    ? _onceToCron(document.getElementById('sch-once-date').value, document.getElementById('sch-once-time').value)
+    : document.getElementById('sch-cron-expr').value.trim();
+
+  // 收集 JSON 文件信息
+  var jsonFileId = document.getElementById('sch-json-file').value;
+  var jsonFileName = document.getElementById('sch-json-file').selectedOptions[0] ? document.getElementById('sch-json-file').selectedOptions[0].text : '';
+
+  var simParams = {
+    target_drones: parseInt(document.getElementById('sch-drones').value) || 10,
+    duration_min: parseInt(document.getElementById('sch-duration').value) || 5,
+    json_file_id: jsonFileId || '',
+    json_file_name: jsonFileName || '',
+  };
 
   var body = {
     name: name,
     cron_expr: cronExpr,
-    sim_mode: 'replay',
-    sim_params: JSON.stringify({target_drones:10, duration_min:5}),
-    enabled: 1,
+    sim_mode: document.getElementById('sch-mode').value,
+    sim_params: JSON.stringify(simParams),
+    enabled: document.getElementById('sch-enabled').checked ? 1 : 0,
   };
+  if (editingTaskId) body.id = editingTaskId;
+
   var r = await apiPost('/api/schedule/tasks', body);
-  showToast(r.message||'已创建', r.success?'success':'error');
-  loadScheduledTasks();
+  if (r.success) {
+    showToast(r.message||'已保存', 'success');
+    hideSchedModal();
+    loadScheduledTasks();
+  } else {
+    showToast(r.message||'保存失败', 'error');
+  }
 });
+
+// ── 单次执行时间 → cron 转换 ──────────────────────────────────────
+function _onceToCron(dateStr, timeStr) {
+  if (!dateStr || !timeStr) return '';
+  var parts = timeStr.split(':');
+  return parts[1] + ' ' + parts[0] + ' ' + dateStr.substring(8) + ' ' + dateStr.substring(5,7) + ' *';
+}
 
 // 首次加载
 setTimeout(loadScheduledTasks, 1500);

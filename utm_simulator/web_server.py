@@ -1403,11 +1403,33 @@ def _get_scheduler():
             params["mode"] = mode
             params["target_drones"] = params.get("target_drones", 10)
 
+            # 如果有指定的 JSON 文件 ID，从数据库加载并导出到 mock/ 目录
+            json_file_id = params.get("json_file_id", "")
+            if json_file_id:
+                try:
+                    import json_data_manager as jdm
+                    record = jdm.download_file(int(json_file_id))
+                    if record:
+                        # 写入 mock/ 目录供仿真使用
+                        mock_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mock")
+                        os.makedirs(mock_dir, exist_ok=True)
+                        fpath = os.path.join(mock_dir, record["name"])
+                        with open(fpath, "w", encoding="utf-8") as f:
+                            f.write(record["content"])
+                        # 设置 data_file 参数
+                        if mode in ("replay", "replay_once"):
+                            params["data_file"] = record["name"]
+                        elif mode == "scene":
+                            params["scene_files"] = [record["name"]]
+                        _add_log(f"[定时任务] 已从数据库加载文件: {record['name']}")
+                except Exception as e:
+                    _add_log(f"[定时任务] 加载 JSON 文件失败: {e}")
+
             _add_log(f"[定时任务] {task.get('name','')} 开始执行 (模式={mode})")
             try:
                 runner = SimulationRunner(params)
                 runner.start()
-                # 等待仿真运行（最多1小时）
+                # 等待仿真运行
                 wait = params.get("duration_min", 10) * 60
                 deadline = time.time() + min(wait, 3600)
                 while runner._running and time.time() < deadline:

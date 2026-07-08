@@ -75,6 +75,8 @@ _current_config: Dict[str, Any] = {
     "scene_interval": 1000,
     "timestamp_mode": "replace",  # replace / align / preserve
     "scene_loop": False,
+    # plan 模式参数
+    "plan_selected_uids": [],  # 用户选择的航线 UID 列表，空表示全部
     # replay_once 模式参数
     "data_file": "kafka_data.json",
     "route_file": "redis_route.json",
@@ -129,6 +131,8 @@ class SimulationRunner:
         self._sim_mgr: Optional[SimulationManager] = None
         # PlanRunner 实例（plan 模式，复用 run_plan.py 的独立线程模型）
         self._plan_runner = None
+        # plan 模式：用户选择的航线 UID 白名单
+        self._plan_selected_uids: Optional[set] = None
 
         # 检查连接状态
         try:
@@ -155,8 +159,14 @@ class SimulationRunner:
         """初始化 Redis 计划插值模式（复用 run_plan.py 的 PlanRunner 逻辑）。"""
         from tools.run_plan import PlanRunner as _PlanRunner
         self._plan_runner = _PlanRunner(log_callback=_add_log)
-        self._plan_runner.start_background()
-        _add_log("Redis 计划插值模式已初始化，后台线程已启动")
+        # 读取用户选择的航线 UID 列表
+        uids = self.config.get("plan_selected_uids", [])
+        selected = set(uids) if uids else None
+        self._plan_runner.start_background(selected_uids=selected)
+        if selected:
+            _add_log(f"Redis 计划插值模式已启动（已选 {len(selected)} 条航线），后台线程运行中")
+        else:
+            _add_log("Redis 计划插值模式已启动（全部航线），后台线程运行中")
 
     def _sim_loop(self) -> None:
         """仿真主循环（后台线程），通过 SimulationManager 或 PlanRunner 驱动。"""
@@ -405,7 +415,7 @@ def api_update_config():
         for key in ("mode", "target_drones", "nfz_enabled", "nfz_count",
                      "api_mode", "api_base_url",
                      "scene_interval", "timestamp_mode", "scene_loop",
-                     "data_file", "route_file"):
+                     "data_file", "route_file", "plan_selected_uids"):
             if key in data:
                 _current_config[key] = data[key]
     return jsonify({"success": True, "config": _current_config})
@@ -425,7 +435,7 @@ def api_start_sim():
     config = dict(_current_config)
     for key in ("mode", "target_drones", "nfz_enabled", "nfz_count",
                 "scene_files", "scene_interval", "timestamp_mode", "scene_loop",
-                "data_file", "route_file"):
+                "data_file", "route_file", "plan_selected_uids"):
         if key in data:
             config[key] = data[key]
 
@@ -476,7 +486,11 @@ def api_get_plans():
             break
         try:
             obj = json.loads(raw) if isinstance(raw, str) else raw
-            plans.append(obj)
+            fp_list = obj.get("flightPlanList", []) if isinstance(obj, dict) else []
+            plan_entry = dict(obj) if isinstance(obj, dict) else {}
+            plan_entry["_uid"] = uid  # Redis Hash field = 无人机 UID
+            plan_entry["_fpCount"] = len(fp_list)
+            plans.append(plan_entry)
         except (json.JSONDecodeError, TypeError):
             continue
 

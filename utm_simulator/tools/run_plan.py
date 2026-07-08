@@ -207,6 +207,7 @@ class PlanRunner:
         self.running = True
         self._log_callback = log_callback
         self._threads: List[threading.Thread] = []
+        self._selected_uids: Optional[Set[str]] = None  # 航线白名单过滤
 
     def _log(self, msg: str) -> None:
         """日志输出：优先回调到前端，否则打印到 stdout。"""
@@ -265,6 +266,9 @@ class PlanRunner:
         with self._lock:
             for uid, raw in data.items():
                 if not raw:
+                    continue
+                # 白名单过滤：若设置了 selected_uids，则仅处理列表中的 UID
+                if self._selected_uids is not None and uid not in self._selected_uids:
                     continue
                 try:
                     obj = json.loads(raw) if isinstance(raw, str) else raw
@@ -421,10 +425,15 @@ class PlanRunner:
                 print(f"消费 uav_runtime_trace 异常: {e}")
             time.sleep(0.05)
 
-    def start_background(self) -> None:
+    def start_background(self, selected_uids: Optional[Set[str]] = None) -> None:
         """非阻塞启动：首次拉取 Redis 计划，启动所有后台线程后立即返回。
-        供 web_server / sim_manager 等外部编排器调用。"""
+        供 web_server / sim_manager 等外部编排器调用。
+
+        Args:
+            selected_uids: 可选的白名单 UID 集合，仅注入这些航线；None 表示全部注入。
+        """
         self.running = True
+        self._selected_uids = selected_uids
         self.merge_from_redis()
 
         # watch 线程：监听 Redis 变动 + 60s 兜底轮询
@@ -442,7 +451,8 @@ class PlanRunner:
         tick_thread.start()
         self._threads.append(tick_thread)
 
-        self._log(f"Redis 计划插值模式已启动，当前 {len(self._plans)} 条活跃计划")
+        self._log(f"Redis 计划插值模式已启动，当前 {len(self._plans)} 条活跃计划" +
+                  (f"（已选 {len(selected_uids)} 条航线）" if selected_uids else "（全部航线）"))
 
     def stop(self) -> None:
         """优雅停止所有后台线程并清理连接。"""

@@ -1,0 +1,295 @@
+/* -*- coding: utf-8 -*- */
+/* utm_moc52 Web 可视化控制台样式 */
+
+/* ── 全局重置与变量 ─────────────────────────────────────────────── */
+:root {
+  --bg: #0f1923;
+  --bg-panel: #1a2736;
+  --bg-card: #213347;
+  --border: #2a3f56;
+  --text: #d4e4f7;
+  --text-dim: #7a93a8;
+  --accent: #00b4d8;
+  --accent-bright: #48cae4;
+  --success: #2ecc71;
+  --danger: #e74c3c;
+  --warning: #f39c12;
+  --radius: 6px;
+  --shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── 顶部导航栏 ─────────────────────────────────────────────────── */
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 20px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.topbar-left { display: flex; align-items: baseline; gap: 12px; }
+.topbar-left h1 { font-size: 18px; font-weight: 600; }
+.topbar-left .version { font-size: 11px; color: var(--text-dim); }
+.topbar-right { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.topbar-right .separator { color: var(--border); }
+
+.dot {
+  width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+}
+.dot.green  { background: var(--success); box-shadow: 0 0 6px var(--success); }
+.dot.red    { background: var(--danger); }
+.dot.yellow { background: var(--warning); }
+
+.badge {
+  padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
+}
+.badge.running  { background: rgba(46,204,113,0.2); color: var(--success); }
+.badge.stopped  { background: rgba(231,76,60,0.2); color: var(--danger); }
+.badge.starting { background: rgba(243,156,18,0.2); color: var(--warning); }
+
+/* ── 三面板布局 ─────────────────────────────────────────────────── */
+.dashboard {
+  display: grid;
+  grid-template-columns: 280px 1fr 1fr;
+  grid-template-rows: 1fr;
+  flex: 1;
+  gap: 12px;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.panel h2 {
+  font-size: 14px; padding: 10px 14px;
+  border-bottom: 1px solid var(--border); margin-bottom: 0;
+}
+
+/* ── 面板 A：参数配置 ────────────────────────────────────────────── */
+.panel-config .form-group {
+  padding: 8px 14px; border-bottom: 1px solid rgba(42,63,86,0.5);
+}
+.panel-config .form-group:last-child { border-bottom: none; }
+.panel-config label {
+  display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 4px;
+}
+.panel-config select,
+.panel-config input[type="number"] {
+  width: 100%; padding: 6px 8px; font-size: 13px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.panel-config select:focus,
+.panel-config input:focus {
+  outline: none; border-color: var(--accent);
+}
+.panel-config input[type="range"] {
+  width: 100%; accent-color: var(--accent);
+}
+.range-labels {
+  display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim);
+}
+.panel-config .sub-label {
+  display: inline; margin-right: 4px; font-size: 12px;
+}
+.readonly-info {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 6px 10px; font-size: 11px;
+}
+.readonly-info .info-row {
+  display: flex; gap: 6px; padding: 2px 0;
+}
+.readonly-info .info-row span { color: var(--text-dim); min-width: 40px; }
+.readonly-info code { color: var(--accent-bright); word-break: break-all; }
+
+.action-buttons {
+  padding: 10px 14px; display: flex; gap: 8px;
+}
+.btn {
+  padding: 8px 16px; border: none; border-radius: var(--radius);
+  font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s;
+}
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-start  { background: var(--success); color: #fff; }
+.btn-start:hover:not(:disabled)  { background: #27ae60; }
+.btn-stop   { background: var(--danger); color: #fff; }
+.btn-stop:hover:not(:disabled)   { background: #c0392b; }
+.btn-secondary { background: var(--bg-card); color: var(--text); border: 1px solid var(--border); }
+.btn-secondary:hover { border-color: var(--accent); }
+.btn-small { padding: 4px 10px; font-size: 11px; }
+
+.history-list {
+  list-style: none; font-size: 11px; max-height: 120px; overflow-y: auto;
+}
+.history-list li {
+  padding: 4px 8px; border-bottom: 1px solid rgba(42,63,86,0.3);
+  color: var(--text-dim);
+}
+.history-list .empty-hint { color: var(--text-dim); font-style: italic; }
+.history-list .success { color: var(--success); }
+.history-list .error   { color: var(--danger); }
+
+/* ── 面板 B：实时监控 ────────────────────────────────────────────── */
+.status-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 10px 14px;
+}
+.card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px 12px; text-align: center;
+}
+.card-label { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; }
+.card-value { font-size: 14px; font-weight: 600; }
+.card-value.big { font-size: 22px; }
+.card-value small { font-size: 11px; color: var(--text-dim); }
+
+.indicator {
+  width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px;
+}
+.indicator.green  { background: var(--success); }
+.indicator.red    { background: var(--danger); }
+.indicator.yellow { background: var(--warning); }
+
+/* 图表区 */
+.charts-row {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 14px;
+}
+.chart-box {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 8px; height: 140px;
+}
+.chart-box canvas { width: 100% !important; height: 100% !important; }
+
+/* 日志 */
+.log-panel { padding: 0 14px 10px; }
+.log-panel h3 { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+.log-stream {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 6px 10px;
+  font-family: "Consolas", "Courier New", monospace; font-size: 11px;
+  max-height: 180px; overflow-y: auto; line-height: 1.5;
+}
+.log-stream .log-line { padding: 1px 0; }
+.log-stream .log-empty { color: var(--text-dim); font-style: italic; }
+
+/* ── 数据生成 Tab 系统 ──────────────────────────────────────────── */
+.gen-tabs { display: flex; gap: 4px; padding: 8px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.gen-tab {
+  padding: 5px 12px; border: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--bg); color: var(--text-dim); cursor: pointer; font-size: 12px;
+  border-bottom: none; transition: all 0.2s;
+}
+.gen-tab:hover { color: var(--text); background: var(--bg-card); }
+.gen-tab.active { color: var(--accent); background: var(--bg-panel); border-color: var(--accent); }
+.gen-tab-content { display: none; padding: 8px 14px; max-height: 600px; overflow-y: auto; }
+.gen-tab-content.active { display: block; }
+
+.sub-tabs { display: flex; gap: 3px; margin-bottom: 8px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.sub-tab {
+  padding: 3px 10px; border: none; border-radius: var(--radius);
+  background: transparent; color: var(--text-dim); cursor: pointer; font-size: 11px;
+  transition: all 0.15s;
+}
+.sub-tab:hover { color: var(--text); background: var(--bg-card); }
+.sub-tab.active { color: var(--accent-bright); background: var(--bg-card); font-weight: 600; }
+.sub-tab-content { display: none; }
+.sub-tab-content.active { display: block; }
+
+/* ── 模式说明区 ──────────────────────────────────────────────────── */
+.mode-description {
+  font-size: 11px; color: var(--text-dim); margin-top: 4px; padding: 4px 8px;
+  background: var(--bg-card); border-radius: 3px; line-height: 1.4;
+  min-height: 1.2em;
+}
+
+/* ── 批量预设按钮网格 ────────────────────────────────────────────── */
+.batch-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.batch-btn {
+  padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); color: var(--text); cursor: pointer; font-size: 11px;
+  text-align: left; transition: all 0.15s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.batch-btn:hover { background: var(--bg-card); border-color: var(--accent); color: var(--accent); }
+
+/* ── 面板 C：地图 ────────────────────────────────────────────────── */
+.panel-map {
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+#map-container {
+  flex: 1; min-height: 300px; background: #0d1b2a;
+  position: relative; overflow: hidden;
+}
+.map-toolbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; background: var(--bg-card);
+  border-top: 1px solid var(--border); flex-shrink: 0;
+}
+.map-stats { font-size: 11px; color: var(--text-dim); margin-left: auto; }
+.map-legend {
+  padding: 4px 14px; font-size: 11px; color: var(--text-dim);
+  border-top: 1px solid var(--border); flex-shrink: 0; min-height: 0;
+}
+
+/* ── 响应式 ─────────────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .dashboard { grid-template-columns: 1fr; grid-template-rows: auto 1fr 1fr; }
+}
+
+/* ── 滚动条美化 ─────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+/* Leaflet 覆盖样式 */
+.leaflet-container { background: #1a2736 !important; }
+.leaflet-control-zoom a { background: var(--bg-card) !important; color: var(--text) !important; border-color: var(--border) !important; }
+
+/* ── 面板 Tab 切换 ───────────────────────────────── */
+.panel-tabs { display: flex; gap: 4px; margin-bottom: 14px; }
+.tab-btn { flex: 1; padding: 7px 12px; background: #1a2740; border: 1px solid #2a3a5c; color: #8899aa; cursor: pointer; font-size: 12px; border-radius: 4px 4px 0 0; }
+.tab-btn.active { background: #1e2d50; color: #4CAF50; border-bottom-color: #1e2d50; font-weight: bold; }
+
+/* ── 数据面板 ────────────────────────────────────── */
+.file-list { max-height: 200px; overflow-y: auto; background: #0d1b2a; border: 1px solid #2a3a5c; border-radius: 4px; padding: 4px; margin: 4px 0; }
+
+/* ── Plan 模式航线选择列表 ──────────────────────────── */
+.plan-route-list { max-height: 200px; overflow-y: auto; background: #0d1b2a; border: 1px solid #2a3a5c; border-radius: 4px; padding: 4px; margin: 4px 0; }
+.plan-route-item { display: flex; align-items: center; gap: 8px; padding: 5px 8px; cursor: pointer; border-bottom: 1px solid #1a2740; font-size: 12px; }
+.plan-route-item:hover { background: #1a3050; }
+.plan-route-item input[type="checkbox"] { accent-color: #4CAF50; cursor: pointer; }
+.plan-route-uid { font-family: 'Consolas','Monaco',monospace; color: #82aaff; font-weight: bold; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-route-info { color: #8899aa; font-size: 11px; white-space: nowrap; }
+.file-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; cursor: pointer; border-bottom: 1px solid #1a2740; font-size: 12px; }
+.file-item:hover { background: #1a3050; }
+.file-item.selected { background: #1a3a5c; border-left: 3px solid #4CAF50; }
+.file-item .fn { font-weight: bold; color: #4CAF50; }
+.file-item .fi { color: #8899aa; font-size: 11px; }
+.data-preview { max-height: 300px; overflow: auto; background: #0d1b2a; border: 1px solid #2a3a5c; border-radius: 4px; padding: 8px; margin: 4px 0; font-family: 'Consolas','Monaco',monospace; font-size: 11px; white-space: pre-wrap; word-break: break-all; color: #c0d0e0; }
+.gen-form .fr { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.gen-form .fr label { width: 80px; font-size: 12px; color: #8899aa; flex-shrink: 0; }
+.gen-form .fr input, .gen-form .fr select { flex: 1; padding: 4px 8px; background: #0d1b2a; border: 1px solid #2a3a5c; color: #c0d0e0; border-radius: 3px; font-size: 12px; }
+.btn-small { padding: 4px 10px; font-size: 11px; border-radius: 3px; cursor: pointer; background: #1a2740; border: 1px solid #2a3a5c; color: #8899aa; }
+.btn-small:hover { background: #2a3a5c; color: #c0d0e0; }

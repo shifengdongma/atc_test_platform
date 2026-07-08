@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UTM 模拟器控制台 — utm_moc52</title>
+  <!-- Leaflet CSS (本地) -->
+  <link rel="stylesheet" href="/static/lib/leaflet/leaflet.css" />
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <!-- Leaflet JS (本地) -->
+  <script src="/static/lib/leaflet/leaflet.js"></script>
+  <!-- Socket.IO -->
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <!-- 自定义样式 -->
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <!-- 顶部导航栏 -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <h1>🛩️ UTM 模拟器控制台</h1>
+      <span class="version">utm_moc52 v3.1</span>
+    </div>
+    <div class="topbar-right">
+      <span id="connection-dot" class="dot red" title="WebSocket 连接状态"></span>
+      <span id="connection-text">未连接</span>
+      <span class="separator">|</span>
+      <span id="sim-status-badge" class="badge stopped">已停止</span>
+    </div>
+  </header>
+
+  <!-- 三面板主体 -->
+  <main class="dashboard">
+    <!-- 面板 A：参数配置 -->
+    <aside class="panel panel-config" id="panel-config">
+      <h2>⚙️ 参数配置</h2>
+
+      <!-- 运行模式 -->
+      <div class="form-group">
+        <label for="mode-select">运行模式</label>
+        <select id="mode-select">
+          <option value="dynamic">🎮 动态仿真 — 实时生成计划+仿真计算遥测</option>
+          <option value="replay">🔁 预生成回放(循环) — mock目录JSON循环发射，永不停止</option>
+          <option value="replay_once">▶️ 预生成回放(单次) — 数据耗尽自动停止，输出精度报告</option>
+          <option value="scene">🎬 场景文件注入 — 选择JSON按间隔发射，可控时间戳</option>
+          <option value="plan">📐 Redis计划插值 — 从计划路线数学插值生成遥测</option>
+        </select>
+        <div id="mode-description" class="mode-description">实时生成飞行计划，Simulator引擎计算遥测，持续运行</div>
+      </div>
+
+      <!-- scene 模式参数（默认隐藏，选择 scene 模式时显示） -->
+      <div id="scene-params" style="display:none;">
+        <div class="form-group">
+          <label>场景文件</label>
+          <select id="scene-file-select" multiple style="width:100%;height:80px;background:#0d1b2a;color:#82aaff;border:1px solid #2a3a5c;font-size:12px;"></select>
+          <button id="btn-refresh-scene-files" class="btn btn-small" style="margin-top:4px;">🔄 刷新场景文件列表</button>
+        </div>
+        <div class="form-group">
+          <label for="scene-interval">发射间隔(ms)</label>
+          <input type="number" id="scene-interval" value="1000" min="100" max="10000" step="100" style="width:100%;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:4px 8px;border-radius:3px;">
+        </div>
+        <div class="form-group">
+          <label for="scene-timestamp-mode">时间戳模式</label>
+          <select id="scene-timestamp-mode" style="width:100%;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:4px 8px;border-radius:3px;">
+            <option value="replace">replace — 替换为当前时间</option>
+            <option value="align">align — 保留相对偏移，对齐首条</option>
+            <option value="preserve">preserve — 保留原始时间戳</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="scene-loop">
+            <input type="checkbox" id="scene-loop"> 循环发射（数据耗尽后重新开始）
+          </label>
+        </div>
+      </div>
+
+      <!-- replay/replay_once 模式参数（默认隐藏） -->
+      <div id="replay-params" style="display:none;">
+        <div class="form-group">
+          <label for="replay-data-file">遥测数据文件 (mock/)</label>
+          <select id="replay-data-file" style="width:100%;background:#0d1b2a;color:#82aaff;border:1px solid #2a3a5c;font-size:12px;"></select>
+        </div>
+        <div class="form-group">
+          <label for="replay-route-file">航线数据文件 (mock/)</label>
+          <select id="replay-route-file" style="width:100%;background:#0d1b2a;color:#82aaff;border:1px solid #2a3a5c;font-size:12px;"></select>
+          <button id="btn-refresh-replay-files" class="btn btn-small" style="margin-top:4px;">🔄 刷新文件列表</button>
+        </div>
+      </div>
+
+      <!-- plan 模式参数（默认隐藏，选择 plan 模式时显示） -->
+      <div id="plan-params" style="display:none;">
+        <div class="form-group">
+          <label>选择需要注入的航线</label>
+          <div class="mode-description" style="margin-top:2px;">
+            从 Redis <code>BIZ_DATA:UAV_ROUTE</code> 中读取的飞行计划列表，勾选需要注入的航线，未勾选的航线将被跳过。
+            请先在左侧地图工具栏点击 <b>"加载航线"</b> 按钮获取最新列表。
+          </div>
+          <div style="margin:6px 0;">
+            <button id="btn-plan-select-all" class="btn btn-small">✅ 全选</button>
+            <button id="btn-plan-deselect-all" class="btn btn-small">⬜ 取消全选</button>
+            <span id="plan-route-summary" style="font-size:11px;color:#82aaff;margin-left:8px;"></span>
+          </div>
+          <div id="plan-route-list" class="plan-route-list">
+            <div class="empty-hint">请先点击左侧地图工具栏"加载航线"按钮获取 Redis 航线列表</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 目标架数 -->
+      <div class="form-group">
+        <label for="target-drones">目标无人机架数 <span id="drones-value">1</span></label>
+        <input type="range" id="target-drones" min="1" max="5000" value="1" step="1">
+        <div class="range-labels">
+          <span>1</span><span>1000</span><span>3000</span><span>5000</span>
+        </div>
+      </div>
+
+      <!-- 禁飞区 -->
+      <div class="form-group">
+        <label for="nfz-enabled">
+          <input type="checkbox" id="nfz-enabled" checked> 生成禁飞区
+        </label>
+        <label for="nfz-count" class="sub-label">数量</label>
+        <input type="number" id="nfz-count" value="3" min="0" max="10" disabled>
+        <div class="mode-description" style="margin-top:2px;">仅在 🎮 动态仿真 模式下生效：随机生成禁飞区多边形写入 Redis <code>BIZ_DATA:AIRSPACE</code>，Dashboard 可展示空域管控区域。replay/plan/scene 模式不生成禁飞区。</div>
+      </div>
+
+      <!-- Redis/Kafka 连接信息（可编辑） -->
+      <div class="form-group">
+        <label>连接信息</label>
+        <div class="readonly-info">
+          <div class="info-row"><span>Redis IP:</span> <input type="text" id="cfg-redis-host" style="width:140px;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:2px 6px;border-radius:3px;font-size:12px;"></div>
+          <div class="info-row"><span>Redis Port:</span> <input type="text" id="cfg-redis-port" style="width:80px;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:2px 6px;border-radius:3px;font-size:12px;"></div>
+          <div class="info-row"><span>Kafka:</span> <input type="text" id="cfg-kafka-url" style="width:180px;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:2px 6px;border-radius:3px;font-size:12px;"></div>
+        </div>
+        <button id="btn-save-conn" class="btn btn-small" style="margin-top:4px;">💾 保存连接配置</button>
+        <span id="conn-save-result" style="font-size:11px;margin-left:6px;"></span>
+      </div>
+
+      <!-- API 模式开关 -->
+      <div class="form-group">
+        <label for="api-mode">
+          <input type="checkbox" id="api-mode"> 通过 ATC API 创建飞行任务
+        </label>
+        <div class="mode-description" style="margin-top:2px;">📋 <b>预留功能</b>：勾选后仿真将通过 <code>sim_api_bridge.py</code> 调用 ATC 后端 API（JWT 鉴权 → 导入航空器 → 申报飞行计划），而非直接生成数据。当前桥接层已创建但<b>尚未接入仿真流程</b>，勾选暂不生效。适用场景：需要经过真实 ATC 系统审批流程的集成测试。</div>
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="action-buttons">
+        <button id="btn-start" class="btn btn-start">▶ 启动仿真</button>
+        <button id="btn-stop"  class="btn btn-stop" disabled>⏹ 停止仿真</button>
+      </div>
+
+      <!-- 连接测试 -->
+      <div class="action-buttons" style="margin-top: 8px;">
+        <button id="btn-test-conn" class="btn btn-secondary">🔌 测试连接</button>
+        <span id="conn-test-result" style="font-size: 12px; margin-left: 8px;"></span>
+      </div>
+
+      <!-- 面板 Tab 切换 -->
+      <div class="panel-tabs">
+        <button class="tab-btn active" data-tab="tab-config">⚙️ 仿真配置</button>
+        <button class="tab-btn" data-tab="tab-data">📁 数据管理</button>
+      </div>
+
+      <!-- Tab: 仿真配置 -->
+      <div class="tab-content active" id="tab-config"></div>
+
+      <!-- 运行历史 -->
+      <div class="form-group" style="margin-top: 16px;">
+        <label>运行历史</label>
+        <ul id="history-list" class="history-list">
+          <li class="empty-hint">暂无运行记录</li>
+        </ul>
+      </div>
+    </aside>
+
+    <!-- 面板 A2：数据管理（Tab 切换） -->
+    <aside class="panel panel-config" id="panel-data" style="display:none;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <h2 style="margin:0;">📁 数据管理</h2>
+        <button id="btn-back-config" class="btn btn-small" style="padding:5px 14px;">⬅ 返回配置</button>
+      </div>
+
+      <!-- 文件浏览器 -->
+      <div class="form-group">
+        <label>mock/ 数据文件</label>
+        <button id="btn-refresh-files" class="btn btn-small" style="float:right;">🔄 刷新</button>
+        <div id="data-file-list" class="file-list">
+          <div class="empty-hint">点击刷新加载文件列表...</div>
+        </div>
+      </div>
+
+      <!-- 文件预览 -->
+      <div class="form-group">
+        <label>文件内容预览</label>
+        <div id="data-preview" class="data-preview">
+          <div class="empty-hint">选择文件以预览内容</div>
+        </div>
+      </div>
+
+      <!-- 数据生成 Tab 切换 -->
+      <div class="gen-tabs">
+        <button class="gen-tab active" data-gentab="basic">基础生成</button>
+        <button class="gen-tab" data-gentab="single">单机场景</button>
+        <button class="gen-tab" data-gentab="multi">多机场景</button>
+        <button class="gen-tab" data-gentab="batch">批量预设</button>
+      </div>
+
+      <!-- Tab: 基础生成 (create_data.py) -->
+      <div class="gen-tab-content active" id="gentab-basic">
+        <div class="form-group"><label>⚡ 快速生成模拟数据（Simulator引擎，同时生成routes+telemetry）</label></div>
+        <div class="gen-form">
+          <div class="form-row"><label>架数:</label><input type="number" id="gen-count" value="10" min="1" max="5000"></div>
+          <div class="form-row"><label>中心纬度:</label><input type="number" id="gen-lat" value="31.315" step="0.001"></div>
+          <div class="form-row"><label>中心经度:</label><input type="number" id="gen-lon" value="120.665" step="0.001"></div>
+          <div class="form-row"><label>半径(m):</label><input type="number" id="gen-radius" value="800" min="100" max="50000"></div>
+          <div class="form-row"><label>模式:</label><select id="gen-pattern"><option value="random">随机散点</option><option value="grid">网格分布</option><option value="radial">放射状</option></select></div>
+          <div class="form-row"><label>飞行时长(min):</label><input type="number" id="gen-duration" value="10" min="1" max="120"></div>
+          <button id="btn-generate" class="btn btn-start" style="width:100%;">⚡ 生成数据</button>
+          <span id="gen-result" style="font-size:12px;margin-top:4px;"></span>
+        </div>
+      </div>
+
+      <!-- Tab: 单机场景 (create_data_scene.py) -->
+      <div class="gen-tab-content" id="gentab-single">
+        <div class="sub-tabs">
+          <button class="sub-tab active" data-subtab="route">航线飞行</button>
+          <button class="sub-tab" data-subtab="deviate">偏离航路</button>
+          <button class="sub-tab" data-subtab="status">状态变更</button>
+        </div>
+        <!-- 航线飞行 -->
+        <div class="sub-tab-content active" id="subtab-route">
+          <div class="gen-form">
+            <div class="form-row"><label>UID:</label><input type="text" id="s-uid" value="UAV_TEST_001"></div>
+            <div class="form-row"><label>航线名(查DB):</label><input type="text" id="s-route-name" placeholder="可选"></div>
+            <div class="form-row"><label>途经点:</label><input type="text" id="s-points" placeholder="lon,lat,alt;lon,lat,alt" style="width:100%;"></div>
+            <div class="form-row"><label>起点经度:</label><input type="number" id="s-start-lon" step="0.0001" placeholder="或使用起终点"></div>
+            <div class="form-row"><label>起点纬度:</label><input type="number" id="s-start-lat" step="0.0001"></div>
+            <div class="form-row"><label>终点经度:</label><input type="number" id="s-end-lon" step="0.0001"></div>
+            <div class="form-row"><label>终点纬度:</label><input type="number" id="s-end-lat" step="0.0001"></div>
+            <div class="form-row"><label>高度(m):</label><input type="number" id="s-altitude" value="30" step="1"></div>
+            <div class="form-row"><label>速度(m/s):</label><input type="number" id="s-speed" value="15" step="0.1"></div>
+            <div class="form-row"><label>采样间隔(ms):</label><input type="number" id="s-interval" value="1000" step="100"></div>
+            <button id="btn-gen-single-route" class="btn btn-start" style="width:100%;">🛩️ 生成单机航线</button>
+            <span id="gen-single-result" style="font-size:12px;margin-top:4px;"></span>
+          </div>
+        </div>
+        <!-- 偏离航路 -->
+        <div class="sub-tab-content" id="subtab-deviate">
+          <div class="gen-form">
+            <div class="form-row"><label>UID:</label><input type="text" id="sd-uid" value="UAV_DEVIATE_001"></div>
+            <div class="form-row"><label>途经点:</label><input type="text" id="sd-points" placeholder="lon,lat,alt;lon,lat,alt" style="width:100%;"></div>
+            <div class="form-row"><label>起点经度:</label><input type="number" id="sd-start-lon" step="0.0001"></div>
+            <div class="form-row"><label>起点纬度:</label><input type="number" id="sd-start-lat" step="0.0001"></div>
+            <div class="form-row"><label>终点经度:</label><input type="number" id="sd-end-lon" step="0.0001"></div>
+            <div class="form-row"><label>终点纬度:</label><input type="number" id="sd-end-lat" step="0.0001"></div>
+            <div class="form-row"><label>高度(m):</label><input type="number" id="sd-altitude" value="30" step="1"></div>
+            <div class="form-row"><label>速度(m/s):</label><input type="number" id="sd-speed" value="15" step="0.1"></div>
+            <div class="form-row"><label>偏离量(度):</label><input type="number" id="sd-deviate-offset" value="0.001" step="0.0001"></div>
+            <div class="form-row"><label>偏离起始点:</label><input type="number" id="sd-deviate-start" value="5" min="0"></div>
+            <button id="btn-gen-single-deviate" class="btn btn-start" style="width:100%;">↗️ 生成偏离航线</button>
+            <span id="gen-deviate-result" style="font-size:12px;margin-top:4px;"></span>
+          </div>
+        </div>
+        <!-- 状态变更 -->
+        <div class="sub-tab-content" id="subtab-status">
+          <div class="gen-form">
+            <div class="form-row"><label>UID:</label><input type="text" id="ss-uid" value="UAV_STATUS_001"></div>
+            <div class="form-row"><label>途经点:</label><input type="text" id="ss-points" placeholder="lon,lat,alt;lon,lat,alt" style="width:100%;"></div>
+            <div class="form-row"><label>起点经度:</label><input type="number" id="ss-start-lon" step="0.0001"></div>
+            <div class="form-row"><label>起点纬度:</label><input type="number" id="ss-start-lat" step="0.0001"></div>
+            <div class="form-row"><label>终点经度:</label><input type="number" id="ss-end-lon" step="0.0001"></div>
+            <div class="form-row"><label>终点纬度:</label><input type="number" id="ss-end-lat" step="0.0001"></div>
+            <div class="form-row"><label>初始状态:</label><select id="ss-oper-status"><option value="2">飞行中</option><option value="1">已落地</option></select></div>
+            <div class="form-row"><label>变更时间(ms):</label><input type="number" id="ss-change-time" value="5000" step="1000"></div>
+            <div class="form-row"><label>变更后状态:</label><select id="ss-oper-status-changed"><option value="1">已落地</option><option value="2">飞行中</option></select></div>
+            <button id="btn-gen-status-change" class="btn btn-start" style="width:100%;">📊 生成状态变更数据</button>
+            <span id="gen-status-result" style="font-size:12px;margin-top:4px;"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: 多机场景 (create_data_scenes.py) -->
+      <div class="gen-tab-content" id="gentab-multi">
+        <div class="sub-tabs">
+          <button class="sub-tab active" data-subtab="parallel">平行飞行</button>
+          <button class="sub-tab" data-subtab="deviate-adv">偏离航路(高级)</button>
+          <button class="sub-tab" data-subtab="collision">碰撞预警</button>
+          <button class="sub-tab" data-subtab="alert">状态告警</button>
+        </div>
+        <!-- 平行飞行 -->
+        <div class="sub-tab-content active" id="subtab-parallel">
+          <div class="gen-form">
+            <div class="form-row"><label>架数:</label><input type="number" id="mp-count" value="30" min="1" max="2000"></div>
+            <div class="form-row"><label>中心纬度:</label><input type="number" id="mp-center-lat" value="40.818724" step="0.0001"></div>
+            <div class="form-row"><label>中心经度:</label><input type="number" id="mp-center-lng" value="85.070136" step="0.0001"></div>
+            <div class="form-row"><label>高度(m):</label><input type="number" id="mp-altitude" value="50" step="1"></div>
+            <div class="form-row"><label>速度(m/s):</label><input type="number" id="mp-speed" value="15" step="0.1"></div>
+            <div class="form-row"><label>航向(°):</label><input type="number" id="mp-heading" value="90" step="1"><small style="color:#7a93a8;">0=北 90=东</small></div>
+            <div class="form-row"><label>间距(m):</label><input type="number" id="mp-spacing" value="2000" step="100"></div>
+            <div class="form-row"><label>布局:</label><select id="mp-layout"><option value="hex">六边形</option><option value="line">直线</option></select></div>
+            <div class="form-row"><label>轨迹点数/机:</label><input type="number" id="mp-points" value="1200" step="100"></div>
+            <button id="btn-gen-parallel" class="btn btn-start" style="width:100%;">🚁 生成平行飞行数据</button>
+            <span id="gen-parallel-result" style="font-size:12px;margin-top:4px;"></span>
+          </div>
+        </div>
+        <!-- 偏离航路(高级) -->
+        <div class="sub-tab-content" id="subtab-deviate-adv">
+          <div class="gen-form">
+            <div class="form-row"><label>航线名(必填):</label><input type="text" id="da-route-name" value="铁门关至吐鲁番"></div>
+            <div class="form-row"><label>偏离量(m):</label><input type="number" id="da-deviate-offset" value="3000" step="100"></div>
+            <div class="form-row"><label>偏离起始(s):</label><input type="number" id="da-deviate-start" value="20" step="1"></div>
+            <div class="form-row"><label>过渡时长(s):</label><input type="number" id="da-deviate-transition" placeholder="自动计算" step="1"></div>
+            <div class="form-row"><label>偏离模式:</label><select id="da-deviate-mode"><option value="horizontal">水平</option><option value="vertical">垂直</option><option value="both">同时</option></select></div>
+            <div class="form-row"><label>高度偏离(m):</label><input type="number" id="da-alt-offset" value="0" step="10"></div>
+            <div class="form-row"><label>速度(m/s):</label><input type="number" id="da-speed" value="15" step="0.1"></div>
+            <button id="btn-gen-deviate-adv" class="btn btn-start" style="width:100%;">↗️ 生成高级偏离数据</button>
+            <span id="gen-deviate-adv-result" style="font-size:12px;margin-top:4px;"></span>
+          </div>
+        </div>
+        <!-- 碰撞预警 -->
+        <div class="sub-tab-content" id="subtab-collision">
+          <div class="gen-form">
+            <div class="form-row"><label>航线名(逗号分隔2条):</label><input type="text" id="col-route-names" value="跨顺义三河段,三河区航路"></div>
+            <div class="form-row"><label>无人机UID(逗号分隔2个):</label><input type="text" id="col-uids" value="CW000000000000000004,CH000000000000000003"></div>
+            <div class="form-row"><label>相遇阈值(m):</label><input type="number" id="col-meeting-threshold" value="10" step="1"></div>
+            <div class="form-row"><label>碰撞时间(s):</label><input type="number" id="col-collision-time" value="300" step="10"></div>
+            <button id="btn-gen-collision" class="btn btn-start" style="width:100%;">💥 生成碰撞预警场景</button>
+            <span id="gen-collision-result" style="font-size:12px;margin-top:4px;"></span>
+          </div>
+        </div>
+        <!-- 状态告警 -->
+        <div class="sub-tab-content" id="subtab-alert">
+          <div class="gen-form">
+            <div class="form-row"><label>架数:</label><input type="number" id="sa-count" value="1" min="1" max="100"></div>
+            <div class="form-row"><label>中心纬度:</label><input type="number" id="sa-center-lat" value="31.3689" step="0.0001"></div>
+            <div class="form-row"><label>中心经度:</label><input type="number" id="sa-center-lng" value="120.7418" step="0.0001"></div>
+            <div class="form-row"><label>高度(m):</label><input type="number" id="sa-altitude" value="50" step="1"></div>
+            <div class="form-row"><label>速度(m/s):</label><input type="number" id="sa-speed" value="15" step="0.1"></div>
+            <div class="form-row"><label>飞行时长(min):</label><input type="number" id="sa-flight-min" value="1" step="1"></div>
+            <div class="form-row"><label><input type="checkbox" id="sa-scene3"> 紧急后恢复(status=3)</label></div>
+            <div class="form-row"><label><input type="checkbox" id="sa-scene5"> 失联(status=5)</label></div>
+            <div class="form-row"><label><input type="checkbox" id="sa-scene35"> 紧急→失联(status=3→5)</label></div>
+            <button id="btn-gen-status-alert" class="btn btn-start" style="width:100%;">🚨 生成状态告警场景</button>
+            <span id="gen-status-alert-result" style="font-size:12px;margin-top:4px;"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: 批量预设 (create_data_scenes.py batch) -->
+      <div class="gen-tab-content" id="gentab-batch">
+        <div class="form-group"><label>📦 一键批量生成（11个全国区域预设）</label></div>
+        <div id="batch-preset-list" class="batch-grid">
+          <div class="empty-hint">加载预设列表中...</div>
+        </div>
+        <button id="btn-gen-batch-all" class="btn btn-start" style="width:100%;margin-top:8px;">🚀 一键生成全部预设</button>
+        <span id="gen-batch-result" style="font-size:12px;margin-top:4px;"></span>
+      </div>
+      <div class="form-group">
+        <label>📤 上传 JSON 文件</label>
+        <input type="file" id="file-upload" accept=".json" style="width:100%;">
+        <span id="upload-result" style="font-size:12px;"></span>
+      </div>
+
+      <!-- 用此数据启动 -->
+      <div class="action-buttons">
+        <label for="launch-replay-mode" style="display:block;margin-bottom:4px;">启动回放模式</label>
+        <select id="launch-replay-mode" style="width:100%;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:4px 8px;border-radius:3px;margin-bottom:6px;">
+          <option value="replay">🔁 循环回放（永不停止）</option>
+          <option value="replay_once">▶️ 单次回放（数据耗尽自动停止）</option>
+        </select>
+        <button id="btn-launch-data" class="btn btn-start" style="width:100%;">🚀 用选中数据启动回放</button>
+      </div>
+    </aside>
+
+    <!-- 面板 B：实时监控 -->
+    <section class="panel panel-monitor" id="panel-monitor">
+      <h2>📊 实时监控</h2>
+
+      <!-- 状态指示卡 -->
+      <div class="status-cards">
+        <div class="card">
+          <div class="card-label">Redis</div>
+          <div class="card-value">
+            <span id="ind-redis" class="indicator red"></span>
+            <span id="redis-status">未连接</span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-label">Kafka</div>
+          <div class="card-value">
+            <span id="ind-kafka" class="indicator red"></span>
+            <span id="kafka-status">未连接</span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-label">活跃无人机</div>
+          <div class="card-value big" id="drones-count">0</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Kafka 吞吐</div>
+          <div class="card-value big" id="kafka-tp">0 <small>条/秒</small></div>
+        </div>
+        <div class="card">
+          <div class="card-label">运行时长</div>
+          <div class="card-value big" id="uptime">00:00:00</div>
+        </div>
+        <div class="card">
+          <div class="card-label">错误计数</div>
+          <div class="card-value" id="error-count">0</div>
+        </div>
+      </div>
+
+      <!-- 趋势图表 -->
+      <div class="charts-row">
+        <div class="chart-box">
+          <canvas id="chart-drones"></canvas>
+        </div>
+        <div class="chart-box">
+          <canvas id="chart-kafka"></canvas>
+        </div>
+      </div>
+
+      <!-- 日志流 -->
+      <div class="log-panel">
+        <h3>📋 运行日志 <button id="btn-export-log" class="btn btn-small" style="margin-left:8px;">📥 导出</button></h3>
+        <div class="log-stream" id="log-stream">
+          <div class="log-empty">等待日志...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 面板 C：地图可视化 -->
+    <section class="panel panel-map" id="panel-map">
+      <h2>🗺️ 飞行计划可视化</h2>
+      <div id="map-container">
+        <div id="map-loading" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1000;color:#7a93a8;font-size:14px;pointer-events:none;">🗺️ 地图加载中...</div>
+      </div>
+      <div class="map-toolbar">
+        <button id="btn-load-plans" class="btn btn-small">🔄 加载航线</button>
+        <button id="btn-load-nfzs" class="btn btn-small">🚫 加载禁飞区</button>
+        <button id="btn-clear-map" class="btn btn-small">🗑️ 清除</button>
+        <span class="map-stats" id="map-stats">航线: 0 | 航点: 0 | 禁飞区: 0</span>
+      </div>
+      <div class="map-legend" id="map-legend"></div>
+    </section>
+  </main>
+
+  <!-- 前端脚本 -->
+  <script src="/static/js/charts.js"></script>
+  <script src="/static/js/map.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -124,9 +124,6 @@ function initRun() {
 }
 
 
-// 首次加载
-setTimeout(loadScheduledTasks, 1500);
-
 // 等待 Leaflet 等资源加载
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initRun);

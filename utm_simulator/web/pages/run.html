@@ -9,24 +9,6 @@
   <script src="/static/lib/leaflet/leaflet.js"></script>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <link rel="stylesheet" href="/static/css/style.css">
-  <style>
-    .left-tabs { display:flex; border-bottom:1px solid var(--border); margin-bottom:0; }
-    .left-tab { flex:1; padding:10px 0; text-align:center; cursor:pointer; font-size:13px; color:var(--text-dim); border-bottom:2px solid transparent; transition:all 0.2s; }
-    .left-tab:hover { color:var(--text); }
-    .left-tab.active { color:var(--accent-bright); border-bottom-color:var(--accent-bright); }
-    .left-tab-content { display:none; flex:1; overflow-y:auto; }
-    .left-tab-content.active { display:flex; flex-direction:column; }
-    .sched-card { background:var(--bg-card); border-radius:6px; padding:10px 12px; margin-bottom:6px; }
-    .sched-card h4 { font-size:13px; color:#82aaff; margin:0 0 4px 0; }
-    .sched-card .meta { font-size:11px; color:var(--text-dim); }
-    .sched-card .actions { margin-top:6px; display:flex; gap:4px; }
-
-    /* 定时任务弹窗 */
-    #sched-modal .modal { width:520px; }
-    #sched-modal .modal .form-row label { width:100px; }
-    #sched-modal .modal .form-row input,
-    #sched-modal .modal .form-row select { flex:1; padding:7px 10px; background:#0d1b2a; border:1px solid var(--border); color:var(--text); border-radius:4px; font-size:13px; }
-  </style>
 </head>
 <body>
   <header class="topbar">
@@ -44,50 +26,24 @@
   </header>
 
   <main class="dashboard-run">
-    <!-- 左侧面板 -->
-    <aside class="panel panel-monitor" id="panel-monitor" style="display:flex;flex-direction:column;overflow:hidden;">
-      <!-- 面板 Tab 切换 -->
-      <div class="left-tabs">
-        <button class="left-tab active" data-lefttab="monitor">📊 实时监控</button>
-        <button class="left-tab" data-lefttab="schedule">⏰ 定时任务</button>
+    <!-- 左侧：监控面板 -->
+    <aside class="panel panel-monitor" id="panel-monitor">
+      <h2>📊 实时监控</h2>
+      <div class="status-cards">
+        <div class="card"><div class="card-label">Redis</div><div class="card-value"><span id="ind-redis" class="indicator red"></span><span id="redis-status">未连接</span></div></div>
+        <div class="card"><div class="card-label">Kafka</div><div class="card-value"><span id="ind-kafka" class="indicator red"></span><span id="kafka-status">未连接</span></div></div>
+        <div class="card"><div class="card-label">活跃无人机</div><div class="card-value big" id="drones-count">0</div></div>
+        <div class="card"><div class="card-label">Kafka 吞吐</div><div class="card-value big" id="kafka-tp">0 <small>条/秒</small></div></div>
+        <div class="card"><div class="card-label">运行时长</div><div class="card-value big" id="uptime">00:00:00</div></div>
+        <div class="card"><div class="card-label">错误计数</div><div class="card-value" id="error-count">0</div></div>
       </div>
-
-      <!-- Tab 1: 实时监控 -->
-      <div class="left-tab-content active" id="lefttab-monitor">
-        <div style="padding:12px 14px;">
-          <div class="status-cards">
-            <div class="card"><div class="card-label">Redis</div><div class="card-value"><span id="ind-redis" class="indicator red"></span><span id="redis-status">未连接</span></div></div>
-            <div class="card"><div class="card-label">Kafka</div><div class="card-value"><span id="ind-kafka" class="indicator red"></span><span id="kafka-status">未连接</span></div></div>
-            <div class="card"><div class="card-label">活跃无人机</div><div class="card-value big" id="drones-count">0</div></div>
-            <div class="card"><div class="card-label">Kafka 吞吐</div><div class="card-value big" id="kafka-tp">0 <small>条/秒</small></div></div>
-            <div class="card"><div class="card-label">运行时长</div><div class="card-value big" id="uptime">00:00:00</div></div>
-            <div class="card"><div class="card-label">错误计数</div><div class="card-value" id="error-count">0</div></div>
-          </div>
-          <div class="charts-row">
-            <div class="chart-box"><canvas id="chart-drones"></canvas></div>
-            <div class="chart-box"><canvas id="chart-kafka"></canvas></div>
-          </div>
-        </div>
-        <div class="log-panel" style="flex:1;overflow:hidden;display:flex;flex-direction:column;">
-          <h3>📋 运行日志 <button id="btn-export-log" class="btn btn-small" style="margin-left:8px;">📥 导出</button></h3>
-          <div class="log-stream" id="log-stream" style="flex:1;"><div class="log-empty">等待日志...</div></div>
-        </div>
+      <div class="charts-row">
+        <div class="chart-box"><canvas id="chart-drones"></canvas></div>
+        <div class="chart-box"><canvas id="chart-kafka"></canvas></div>
       </div>
-
-      <!-- Tab 2: 定时任务 -->
-      <div class="left-tab-content" id="lefttab-schedule">
-        <div style="padding:12px 14px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-            <h3 style="margin:0;font-size:14px;">⏰ 定时任务</h3>
-            <button id="btn-sched-new" class="btn btn-small">➕ 新建任务</button>
-          </div>
-          <div class="mode-description" style="margin-bottom:10px;">
-            设置仿真模式、JSON 数据文件和执行时间，到指定时间系统将自动启动仿真。
-          </div>
-          <div id="sched-list" style="max-height:calc(100vh - 260px);overflow-y:auto;">
-            <div class="empty-hint">暂无定时任务，点击"新建任务"创建</div>
-          </div>
-        </div>
+      <div class="log-panel">
+        <h3>📋 运行日志 <button id="btn-export-log" class="btn btn-small" style="margin-left:8px;">📥 导出</button></h3>
+        <div class="log-stream" id="log-stream"><div class="log-empty">等待日志...</div></div>
       </div>
     </aside>
 
@@ -104,71 +60,6 @@
       <div id="map-legend" class="map-legend"></div>
     </section>
   </main>
-
-  <!-- 定时任务编辑弹窗 -->
-  <div class="modal-overlay" id="sched-modal">
-    <div class="modal">
-      <h3 id="sched-modal-title">新建定时任务</h3>
-      <div class="form-row">
-        <label>任务名称 *</label>
-        <input type="text" id="sch-name" placeholder="例如：每日航线注入">
-      </div>
-      <div class="form-row">
-        <label>仿真模式</label>
-        <select id="sch-mode">
-          <option value="replay">🔁 预生成回放(循环)</option>
-          <option value="replay_once">▶️ 预生成回放(单次)</option>
-          <option value="plan">📐 Redis计划插值</option>
-          <option value="dynamic">🎮 动态仿真</option>
-          <option value="scene">🎬 场景文件注入</option>
-        </select>
-      </div>
-      <div class="form-row">
-        <label>JSON 数据文件</label>
-        <select id="sch-json-file">
-          <option value="">— 使用默认文件（适用于 replay 模式）—</option>
-        </select>
-      </div>
-      <div style="display:flex;gap:8px;">
-        <button id="btn-sch-refresh-files" class="btn btn-small" style="margin-bottom:10px;">🔄 刷新文件列表</button>
-        <span id="sch-file-info" style="font-size:11px;color:var(--text-dim);line-height:28px;"></span>
-      </div>
-      <div class="form-row"><label>目标架数</label><input type="number" id="sch-drones" value="10" min="1" max="5000"></div>
-      <div class="form-row"><label>运行时长(分)</label><input type="number" id="sch-duration" value="5" min="1" max="1440"></div>
-      <div class="form-row" style="align-items:flex-start;">
-        <label>执行时间</label>
-        <div style="flex:1;">
-          <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
-            <input type="radio" name="sch-time-type" id="sch-time-cron" value="cron" checked>
-            <label for="sch-time-cron" style="font-size:12px;color:var(--text-dim);margin:0;">重复执行 (cron)</label>
-            <input type="radio" name="sch-time-type" id="sch-time-once" value="once">
-            <label for="sch-time-once" style="font-size:12px;color:var(--text-dim);margin:0;">单次执行</label>
-          </div>
-          <div id="sch-cron-area">
-            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;">
-              <button class="btn btn-small cron-preset" data-cron="*/30 * * * *">每30分钟</button>
-              <button class="btn btn-small cron-preset" data-cron="0 * * * *">每小时</button>
-              <button class="btn btn-small cron-preset" data-cron="0 */2 * * *">每2小时</button>
-              <button class="btn btn-small cron-preset" data-cron="0 9 * * *">每天9:00</button>
-              <button class="btn btn-small cron-preset" data-cron="0 9 * * 1-5">工作日9:00</button>
-            </div>
-            <input type="text" id="sch-cron-expr" value="*/30 * * * *" placeholder="自定义 cron 表达式" style="width:100%;">
-          </div>
-          <div id="sch-once-area" style="display:none;">
-            <input type="date" id="sch-once-date" style="width:100%;margin-bottom:6px;padding:7px 10px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;">
-            <input type="time" id="sch-once-time" value="09:00" style="width:100%;padding:7px 10px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;">
-          </div>
-        </div>
-      </div>
-
-      <div class="form-row"><label></label><label><input type="checkbox" id="sch-enabled" checked> 创建后立即启用</label></div>
-
-      <div class="btn-row" style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
-        <button id="btn-sched-cancel" class="btn btn-small">取消</button>
-        <button id="btn-sched-save" class="btn btn-start">保存</button>
-      </div>
-    </div>
-  </div>
 
   <script src="/static/js/common.js"></script>
   <script src="/static/js/charts.js"></script>

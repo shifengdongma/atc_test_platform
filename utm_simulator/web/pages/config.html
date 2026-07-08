@@ -7,6 +7,20 @@
   <link rel="stylesheet" href="/static/lib/leaflet/leaflet.css" />
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    .config-2col { display:grid; grid-template-columns:1fr 1fr; gap:20px; max-width:1200px; margin:0 auto; }
+    @media (max-width:900px) { .config-2col { grid-template-columns:1fr; } }
+    .task-card { background:var(--bg-card); border-radius:6px; padding:10px 12px; margin-bottom:6px; border-left:3px solid var(--accent); }
+    .task-card h4 { font-size:13px; color:#82aaff; margin:0 0 4px 0; }
+    .task-card .meta { font-size:11px; color:var(--text-dim); }
+    .task-card .actions { margin-top:6px; display:flex; gap:4px; }
+
+    #task-modal .modal { width:480px; }
+    #task-modal .modal .form-row { display:flex; gap:8px; margin-bottom:10px; align-items:center; }
+    #task-modal .modal .form-row label { width:90px; font-size:12px; color:var(--text-dim); flex-shrink:0; text-align:right; }
+    #task-modal .modal .form-row input,
+    #task-modal .modal .form-row select { flex:1; padding:7px 10px; background:#0d1b2a; border:1px solid var(--border); color:var(--text); border-radius:4px; font-size:13px; }
+  </style>
 </head>
 <body>
   <header class="topbar">
@@ -23,66 +37,146 @@
     </div>
   </header>
 
-  <main class="page-single">
-    <div class="panel panel-form">
-      <h2>⚙️ 仿真参数配置</h2>
+  <main class="page-wide">
+    <div class="config-2col">
 
-      <div class="form-group">
-        <label for="mode-select">运行模式</label>
-        <select id="mode-select">
-          <option value="dynamic">🎮 动态仿真 — 实时生成计划+仿真计算遥测</option>
-          <option value="replay">🔁 预生成回放(循环) — mock目录JSON循环发射</option>
-          <option value="replay_once">▶️ 预生成回放(单次) — 数据耗尽自动停止</option>
-          <option value="scene">🎬 场景文件注入 — 选择JSON按间隔发射</option>
-          <option value="plan">📐 Redis计划插值 — 从计划路线数学插值生成遥测</option>
-        </select>
-        <div id="mode-description" class="mode-description">实时生成飞行计划，Simulator引擎计算遥测，持续运行</div>
-      </div>
+      <!-- ★ 左栏：仿真参数配置 ★ -->
+      <div class="panel-form">
+        <h2>⚙️ 仿真参数配置</h2>
 
-      <div id="scene-params" style="display:none;"></div>
-      <div id="replay-params" style="display:none;"></div>
-      <div id="plan-params" style="display:none;"></div>
-
-      <div class="form-group">
-        <label for="target-drones">目标无人机架数 <span id="drones-value">1</span></label>
-        <input type="range" id="target-drones" min="1" max="5000" value="1" step="1">
-        <div class="range-labels"><span>1</span><span>1000</span><span>3000</span><span>5000</span></div>
-      </div>
-
-      <div class="form-group">
-        <label for="nfz-enabled"><input type="checkbox" id="nfz-enabled" checked> 生成禁飞区</label>
-        <label for="nfz-count" class="sub-label">数量</label>
-        <input type="number" id="nfz-count" value="3" min="0" max="10" disabled>
-        <div class="mode-description" style="margin-top:2px;">仅在 🎮 动态仿真 模式下生效</div>
-      </div>
-
-      <div class="form-group">
-        <label>连接信息</label>
-        <div class="readonly-info">
-          <div class="info-row"><span>Redis IP:</span> <input type="text" id="cfg-redis-host" style="width:140px;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:2px 6px;border-radius:3px;font-size:12px;"></div>
-          <div class="info-row"><span>Redis Port:</span> <input type="text" id="cfg-redis-port" style="width:80px;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:2px 6px;border-radius:3px;font-size:12px;"></div>
-          <div class="info-row"><span>Kafka:</span> <input type="text" id="cfg-kafka-url" style="width:180px;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:2px 6px;border-radius:3px;font-size:12px;"></div>
+        <div class="form-group">
+          <label for="mode-select">运行模式</label>
+          <select id="mode-select">
+            <option value="dynamic">🎮 动态仿真 — 实时生成计划+仿真计算遥测</option>
+            <option value="replay">🔁 预生成回放(循环) — mock目录JSON循环发射</option>
+            <option value="replay_once">▶️ 预生成回放(单次) — 数据耗尽自动停止</option>
+            <option value="scene">🎬 场景文件注入 — 选择JSON按间隔发射</option>
+            <option value="plan">📐 Redis计划插值 — 从计划路线数学插值生成遥测</option>
+          </select>
+          <div id="mode-description" class="mode-description"></div>
         </div>
-        <button id="btn-save-conn" class="btn btn-small" style="margin-top:4px;">💾 保存连接配置</button>
-        <span id="conn-save-result" style="font-size:11px;margin-left:6px;"></span>
+
+        <div id="scene-params" style="display:none;"></div>
+        <div id="replay-params" style="display:none;"></div>
+        <div id="plan-params" style="display:none;"></div>
+
+        <div class="form-group">
+          <label for="target-drones">目标无人机架数 <span id="drones-value">1</span></label>
+          <input type="range" id="target-drones" min="1" max="5000" value="1" step="1">
+          <div class="range-labels"><span>1</span><span>1000</span><span>3000</span><span>5000</span></div>
+        </div>
+
+        <div class="form-group">
+          <label for="nfz-enabled"><input type="checkbox" id="nfz-enabled" checked> 生成禁飞区</label>
+          <label for="nfz-count" class="sub-label">数量</label>
+          <input type="number" id="nfz-count" value="3" min="0" max="10" disabled>
+          <div class="mode-description" style="margin-top:2px;">仅在 🎮 动态仿真 模式下生效</div>
+        </div>
+
+        <div class="form-group">
+          <label>连接信息</label>
+          <div class="readonly-info">
+            <div class="info-row"><span>Redis:</span> <input type="text" id="cfg-redis-host" style="width:120px;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:2px 6px;border-radius:3px;font-size:12px;"> <span>:</span> <input type="text" id="cfg-redis-port" style="width:60px;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:2px 6px;border-radius:3px;font-size:12px;"></div>
+            <div class="info-row"><span>Kafka:</span> <input type="text" id="cfg-kafka-url" style="width:180px;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:2px 6px;border-radius:3px;font-size:12px;"></div>
+          </div>
+          <button id="btn-save-conn" class="btn btn-small" style="margin-top:4px;">💾 保存连接配置</button>
+          <span id="conn-save-result" style="font-size:11px;margin-left:6px;"></span>
+        </div>
+
+        <div class="action-buttons">
+          <button id="btn-start" class="btn btn-start">▶ 启动仿真</button>
+          <button id="btn-stop"  class="btn btn-stop" disabled>⏹ 停止仿真</button>
+        </div>
+
+        <div class="action-buttons" style="margin-top:8px;">
+          <button id="btn-test-conn" class="btn btn-secondary">🔌 测试连接</button>
+          <span id="conn-test-result" style="font-size:12px;margin-left:8px;"></span>
+        </div>
+
+        <div class="form-group" style="margin-top:16px;">
+          <label>运行历史</label>
+          <ul id="history-list" class="history-list"><li class="empty-hint">暂无运行记录</li></ul>
+        </div>
       </div>
 
-      <div class="action-buttons">
-        <button id="btn-start" class="btn btn-start">▶ 启动仿真</button>
-        <button id="btn-stop"  class="btn btn-stop" disabled>⏹ 停止仿真</button>
+      <!-- ★ 右栏：定时任务管理 ★ -->
+      <div class="panel-form">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+          <h2 style="margin:0;border:none;padding:0;">⏰ 定时任务</h2>
+          <button id="btn-task-new" class="btn btn-small">➕ 新建任务</button>
+        </div>
+        <div class="mode-description" style="margin-bottom:12px;">
+          像闹钟一样设定执行时间：选择仿真模式、JSON 数据文件、日期和时间，到点自动启动仿真。
+        </div>
+
+        <div id="task-list" style="max-height:500px;overflow-y:auto;">
+          <div class="empty-hint">暂无定时任务</div>
+        </div>
+
+        <!-- 执行历史 -->
+        <div class="form-group" style="margin-top:14px;">
+          <label>最近执行记录</label>
+          <div id="task-history" style="font-size:11px;color:var(--text-dim);max-height:120px;overflow-y:auto;">
+            <div class="empty-hint">—</div>
+          </div>
+        </div>
       </div>
 
-      <div class="action-buttons" style="margin-top:8px;">
-        <button id="btn-test-conn" class="btn btn-secondary">🔌 测试连接</button>
-        <span id="conn-test-result" style="font-size:12px;margin-left:8px;"></span>
-      </div>
-
-      <div class="form-group" style="margin-top:16px;">
-        <label>运行历史</label>
-        <ul id="history-list" class="history-list"><li class="empty-hint">暂无运行记录</li></ul>
-      </div>
     </div>
   </main>
+
+  <!-- 新建/编辑任务弹窗 -->
+  <div class="modal-overlay" id="task-modal">
+    <div class="modal">
+      <h3 id="task-modal-title">新建定时任务</h3>
+      <div class="form-row">
+        <label>任务名称 *</label>
+        <input type="text" id="tk-name" placeholder="例如：每日航线注入">
+      </div>
+      <div class="form-row">
+        <label>仿真模式</label>
+        <select id="tk-mode">
+          <option value="replay">🔁 预生成回放(循环)</option>
+          <option value="replay_once">▶️ 预生成回放(单次)</option>
+          <option value="plan">📐 Redis计划插值</option>
+          <option value="dynamic">🎮 动态仿真</option>
+          <option value="scene">🎬 场景文件注入</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>JSON 数据文件</label>
+        <select id="tk-json-file"><option value="">— 使用默认文件 —</option></select>
+      </div>
+      <div style="margin-bottom:10px;margin-left:98px;">
+        <button id="btn-tk-refresh-files" class="btn btn-small">🔄 刷新文件列表</button>
+      </div>
+      <div class="form-row"><label>目标架数</label><input type="number" id="tk-drones" value="10" min="1" max="5000"></div>
+      <div class="form-row"><label>运行时长(分)</label><input type="number" id="tk-duration" value="5" min="1" max="1440"></div>
+      <div class="form-row">
+        <label>执行日期 *</label>
+        <input type="date" id="tk-date" style="flex:1;">
+      </div>
+      <div class="form-row">
+        <label>执行时间 *</label>
+        <input type="time" id="tk-time" value="09:00" style="flex:1;">
+      </div>
+      <div class="form-row">
+        <label>重复方式</label>
+        <select id="tk-repeat">
+          <option value="once">仅一次</option>
+          <option value="daily">每天</option>
+          <option value="weekly">每周</option>
+          <option value="monthly">每月</option>
+        </select>
+      </div>
+      <div class="form-row"><label></label><label><input type="checkbox" id="tk-enabled" checked> 创建后立即启用</label></div>
+
+      <div class="btn-row" style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+        <button id="btn-task-cancel" class="btn btn-small">取消</button>
+        <button id="btn-task-save" class="btn btn-start">保存</button>
+      </div>
+    </div>
+  </div>
 
   <script src="/static/js/common.js"></script>
   <script src="/static/js/config.js"></script>

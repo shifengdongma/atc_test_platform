@@ -17,10 +17,13 @@
   <main class="page-wide">
     <div class="panel panel-form">
       <h2>📁 JSON 数据管理</h2>
+      <div class="mode-description" style="margin-bottom:8px;">
+        管理模拟数据 JSON 文件，支持数据库存储、分类检索、上传下载。mock/ 目录中的现有文件可一键导入。
+      </div>
 
       <!-- 工具栏 -->
       <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">
-        <input type="text" id="data-search" placeholder="🔍 搜索文件名..." style="flex:1;min-width:150px;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:6px 10px;border-radius:4px;font-size:13px;">
+        <input type="text" id="data-search" placeholder="🔍 搜索文件名/描述..." style="flex:1;min-width:150px;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:6px 10px;border-radius:4px;font-size:13px;">
         <select id="data-category" style="background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:6px 10px;border-radius:4px;font-size:13px;">
           <option value="">全部分类</option>
           <option value="route">航线数据</option>
@@ -29,27 +32,49 @@
           <option value="template">任务模板</option>
         </select>
         <button id="btn-data-refresh" class="btn btn-small">🔄 刷新</button>
-        <button id="btn-data-upload" class="btn btn-small">📤 上传</button>
-        <button id="btn-data-import-mock" class="btn btn-small">📥 导入 mock/</button>
-        <input type="file" id="data-upload-input" accept=".json" style="display:none;">
+        <button id="btn-data-upload" class="btn btn-small">📤 上传 JSON</button>
+        <button id="btn-data-import" class="btn btn-small">📥 导入 mock/</button>
+        <button id="btn-data-new" class="btn btn-small">➕ 新建</button>
+        <input type="file" id="file-upload-input" accept=".json" style="display:none;">
       </div>
 
       <!-- 文件列表 -->
-      <div id="data-table-container" style="max-height:400px;overflow-y:auto;">
-        <table id="data-table" class="data-table" style="width:100%;font-size:12px;">
-          <thead><tr><th>文件名</th><th>分类</th><th>大小</th><th>来源</th><th>时间</th><th>操作</th></tr></thead>
-          <tbody id="data-tbody"><tr><td colspan="6" class="empty-hint">加载中...</td></tr></tbody>
+      <div style="max-height:380px;overflow-y:auto;margin-bottom:8px;">
+        <table class="data-table" style="width:100%;font-size:12px;">
+          <thead><tr><th>ID</th><th>文件名</th><th>分类</th><th>大小</th><th>来源</th><th>时间</th><th>操作</th></tr></thead>
+          <tbody id="data-tbody"><tr><td colspan="7" class="empty-hint">加载中...</td></tr></tbody>
         </table>
       </div>
 
+      <!-- 分页 -->
+      <div id="data-pagination" style="display:flex;justify-content:center;gap:4px;margin-bottom:12px;"></div>
+
       <!-- 文件预览 -->
-      <div class="form-group" style="margin-top:12px;">
-        <label>文件内容预览</label>
-        <div id="data-preview" class="data-preview"><div class="empty-hint">选择文件以预览内容</div></div>
+      <div class="form-group">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <label>文件内容预览</label>
+          <div style="display:flex;gap:4px;">
+            <button id="btn-preview-download" class="btn btn-small" disabled>⬇ 下载</button>
+            <button id="btn-preview-export" class="btn btn-small" disabled>📤 导出到 mock/</button>
+          </div>
+        </div>
+        <div id="data-preview" class="data-preview" style="max-height:350px;"><div class="empty-hint">选择文件以预览内容</div></div>
       </div>
 
-      <!-- 分页 -->
-      <div id="data-pagination" style="display:flex;justify-content:center;gap:4px;margin-top:8px;"></div>
+      <!-- 编辑/新建弹窗 -->
+      <div id="edit-modal" class="modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:100;justify-content:center;align-items:center;">
+        <div class="modal" style="background:var(--bg-panel);border:1px solid var(--border);border-radius:8px;padding:20px;width:500px;max-height:80vh;overflow-y:auto;">
+          <h3 id="edit-modal-title">新建 JSON 文件</h3>
+          <div style="margin-bottom:10px;"><label style="font-size:12px;color:var(--text-dim);">文件名 *</label><input type="text" id="edit-name" style="width:100%;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:13px;"></div>
+          <div style="margin-bottom:10px;"><label style="font-size:12px;color:var(--text-dim);">分类</label><select id="edit-category" style="width:100%;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:13px;"><option value="telemetry">遥测数据</option><option value="route">航线数据</option><option value="scene">场景文件</option><option value="template">任务模板</option></select></div>
+          <div style="margin-bottom:10px;"><label style="font-size:12px;color:var(--text-dim);">描述</label><input type="text" id="edit-desc" style="width:100%;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:13px;"></div>
+          <div style="margin-bottom:10px;"><label style="font-size:12px;color:var(--text-dim);">JSON 内容</label><textarea id="edit-content" rows="12" style="width:100%;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:12px;font-family:Consolas,monospace;resize:vertical;"></textarea></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button id="btn-edit-cancel" class="btn btn-small">取消</button>
+            <button id="btn-edit-save" class="btn btn-start">保存</button>
+          </div>
+        </div>
+      </div>
     </div>
   </main>
 

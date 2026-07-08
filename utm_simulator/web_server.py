@@ -1182,6 +1182,113 @@ def api_env_import():
     return jsonify(result)
 
 
+# ==================== JSON 数据管理 API ==============================
+
+_json_mgr = None
+
+def _get_json_mgr():
+    global _json_mgr
+    if _json_mgr is None:
+        import json_data_manager as jdm
+        _json_mgr = jdm
+    return _json_mgr
+
+
+@app.route("/api/data/db/files", methods=["GET"])
+def api_db_list_files():
+    """分页查询数据库中的 JSON 文件。"""
+    mgr = _get_json_mgr()
+    category = request.args.get("category", "")
+    keyword = request.args.get("keyword", "")
+    page = request.args.get("page", 1, type=int)
+    page_size = request.args.get("page_size", 20, type=int)
+    result = mgr.list_files(category=category, keyword=keyword, page=page, page_size=page_size)
+    return jsonify(result)
+
+
+@app.route("/api/data/db/files/<int:file_id>", methods=["GET"])
+def api_db_get_file(file_id):
+    """获取文件详情。"""
+    mgr = _get_json_mgr()
+    record = mgr.get_file(file_id)
+    if not record:
+        return jsonify({"error": "文件不存在"}), 404
+    return jsonify(record)
+
+
+@app.route("/api/data/db/files", methods=["POST"])
+def api_db_save_file():
+    """新增或更新文件（JSON 内容或文件上传）。"""
+    mgr = _get_json_mgr()
+    data = request.get_json(silent=True) or {}
+    if not data.get("name") and not data.get("content"):
+        return jsonify({"success": False, "message": "文件名和内容不能同时为空"}), 400
+    try:
+        fid = mgr.save_file(data)
+        return jsonify({"success": True, "id": fid, "message": "已保存"})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/data/db/files/<int:file_id>", methods=["PUT"])
+def api_db_update_file(file_id):
+    """重命名/编辑文件。"""
+    mgr = _get_json_mgr()
+    data = request.get_json(silent=True) or {}
+    try:
+        mgr.update_file(file_id, data)
+        return jsonify({"success": True, "message": "已更新"})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/data/db/files/<int:file_id>", methods=["DELETE"])
+def api_db_delete_file(file_id):
+    """删除文件。"""
+    mgr = _get_json_mgr()
+    mgr.delete_file(file_id)
+    return jsonify({"success": True, "message": "已删除"})
+
+
+@app.route("/api/data/db/files/<int:file_id>/download", methods=["GET"])
+def api_db_download_file(file_id):
+    """下载文件内容为 JSON。"""
+    from flask import Response as _Response
+    mgr = _get_json_mgr()
+    record = mgr.download_file(file_id)
+    if not record:
+        return jsonify({"error": "文件不存在"}), 404
+    return _Response(
+        record["content"],
+        mimetype="application/json",
+        headers={"Content-Disposition": f"attachment; filename={record['name']}"},
+    )
+
+
+@app.route("/api/data/db/import", methods=["POST"])
+def api_db_import_mock():
+    """从 mock/ 目录批量导入到数据库。"""
+    mgr = _get_json_mgr()
+    result = mgr.import_from_mock()
+    _add_log(f"已从 mock/ 导入 {result['imported']} 个文件到数据库")
+    return jsonify(result)
+
+
+@app.route("/api/data/db/export/<int:file_id>", methods=["POST"])
+def api_db_export_mock(file_id):
+    """从数据库导出到 mock/ 目录。"""
+    mgr = _get_json_mgr()
+    result = mgr.export_to_mock(file_id)
+    return jsonify(result)
+
+
+@app.route("/api/data/db/categories", methods=["GET"])
+def api_db_categories():
+    """获取所有分类。"""
+    mgr = _get_json_mgr()
+    return jsonify({"categories": mgr.get_categories()})
+
+
 # ── WebSocket 事件 ────────────────────────────────────────────────
 
 @socketio.on("connect")

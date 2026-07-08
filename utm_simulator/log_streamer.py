@@ -13,7 +13,7 @@ import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
-from db_manager import query, query_all, _now
+from db_manager import query, query_all, _now, init_tables
 
 LOG_TABLE = "sim_task_logs"
 
@@ -27,6 +27,9 @@ LOG_TYPES = {
     "db_traffic": "数据库流量日志",
     "db_alarm": "数据库告警日志",
     "sim_status": "仿真状态",
+    "situation_uav": "态势-监视目标",
+    "situation_plan": "态势-飞行计划",
+    "situation_alarm": "态势-实时告警",
 }
 
 
@@ -100,6 +103,12 @@ class LogStreamer:
 
     def _start_db_monitor(self) -> None:
         """后台轮询数据库 sim_task_logs 表。"""
+        # 确保数据库表已创建
+        try:
+            init_tables()
+        except Exception as e:
+            print(f"[LogStreamer] 数据库表初始化失败: {e}")
+            return
         def _poll():
             time.sleep(5)  # 初始延迟
             while self._running:
@@ -110,8 +119,8 @@ class LogStreamer:
                             f"[{row.get('task_type','')}] {row.get('message','')} [{row.get('status','')}]")
                         if row.get("id", 0) > self._last_log_id:
                             self._last_log_id = row["id"]
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[LogStreamer] DB 监控查询异常: {e}")
                 time.sleep(5)
         threading.Thread(target=_poll, daemon=True, name="db-monitor").start()
 
@@ -127,8 +136,14 @@ class LogStreamer:
         if count > 0:
             self.push("kafka_trace", f"收到 {count} 条轨迹预测 (uav_runtime_trace)")
 
-    def push(self, log_type: str, message: str) -> None:
-        """推送一条日志。type 必须是 LOG_TYPES 中的 key。"""
+    def push(self, log_type: str, message: str, detail: Optional[Dict] = None) -> None:
+        """推送一条日志。type 必须是 LOG_TYPES 中的 key。
+
+        Args:
+            log_type: 日志类型（LOG_TYPES 的 key）
+            message: 摘要文本
+            detail: 可选的结构化详情字典（如 UAV 列表、告警列表等）
+        """
         if log_type not in LOG_TYPES:
             log_type = "sim_status"
 
@@ -138,6 +153,8 @@ class LogStreamer:
             "type_name": LOG_TYPES.get(log_type, log_type),
             "message": message,
         }
+        if detail is not None:
+            entry["detail"] = detail
 
         with self._lock:
             self._buffer.append(entry)
@@ -148,8 +165,8 @@ class LogStreamer:
         if self._callback:
             try:
                 self._callback(entry)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[LogStreamer] 推送回调失败: {e}")
 
     def push_sim_log(self, message: str) -> None:
         """推送仿真运行日志（兼容 _add_log）。"""
@@ -204,10 +221,14 @@ class LogStreamer:
             content = json.dumps(logs, ensure_ascii=False, indent=2)
             return {"format": "json", "content": content, "count": len(logs)}
         elif fmt == "csv":
-            lines = ["time,type,message"]
+            lines = ["time,type,type_name,message,detail"]
             for l in logs:
                 msg = l.get("message", "").replace('"', '""')
-                lines.append(f'{l.get("time","")},{l.get("type","")},"{msg}"')
+                type_name = l.get("type_name", "").replace('"', '""')
+                detail_str = ""
+                if l.get("detail"):
+                    detail_str = json.dumps(l["detail"], ensure_ascii=False).replace('"', '""')
+                lines.append(f'{l.get("time","")},{l.get("type","")},"{type_name}","{msg}","{detail_str}"')
             return {"format": "csv", "content": "\n".join(lines), "count": len(logs)}
         elif fmt == "txt":
             lines = []

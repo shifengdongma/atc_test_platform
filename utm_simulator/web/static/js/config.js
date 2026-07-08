@@ -69,8 +69,28 @@ function updateMode() {
   } else if (elMode.value === 'plan') {
     var pp = document.getElementById('plan-params');
     if (pp) pp.style.display = '';
+    // 加载航线列表供选择
+    loadPlanRouteList();
   }
 }
+
+// ── Plan 模式：加载航线列表 ─────────────────────────────────────────
+async function loadPlanRouteList() {
+  var list = document.getElementById('plan-route-list');
+  if (!list) return;
+  try {
+    var data = await apiGet('/api/sim/plans?limit=200');
+    if (typeof window.populatePlanRouteList === 'function') {
+      window.populatePlanRouteList(data.plans || []);
+    }
+  } catch(e) {
+    list.innerHTML = '<div class="empty-hint">加载航线失败，请检查服务连接</div>';
+  }
+}
+
+// Plan 模式刷新按钮
+var btnPlanRefresh = document.getElementById('btn-plan-refresh-routes');
+if (btnPlanRefresh) btnPlanRefresh.addEventListener('click', loadPlanRouteList);
 
 // ── 加载配置 ───────────────────────────────────────────────────────
 async function fetchConfig() {
@@ -121,7 +141,12 @@ elBtnStart.addEventListener('click', async function() {
     body.route_file = (document.getElementById('replay-route-file')||{}).value || 'redis_route.json';
   }
   if (mode === 'plan') {
-    body.plan_selected_uids = (typeof window.getSelectedPlanUids === 'function') ? window.getSelectedPlanUids() : [];
+    // 仅当航线列表已渲染时才发送选择；未渲染时发送 null（后端视为"全部航线"）
+    var hasCheckboxes = document.querySelectorAll('.plan-route-cb').length > 0;
+    if (hasCheckboxes && typeof window.getSelectedPlanUids === 'function') {
+      body.plan_selected_uids = window.getSelectedPlanUids();
+    }
+    // 无 checkbox 时不发送 plan_selected_uids，后端保持 None（全部航线）
   }
   var result = await apiPost('/api/sim/start', body);
   if (result.success) {

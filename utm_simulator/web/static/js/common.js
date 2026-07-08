@@ -165,7 +165,7 @@ window.populatePlanRouteList = function(plans) {
     var uid = p._uid || p.uniqueProductIdentificationCode || '未知';
     var fpCount = p._fpCount || 0;
     html += '<label class="plan-route-item">' +
-      '<input type="checkbox" class="plan-route-cb" value="' + window.escHtml(uid) + '" checked>' +
+      '<input type="checkbox" class="plan-route-cb" value="' + window.escHtml(uid) + '">' +
       '<span class="plan-route-uid">' + window.escHtml(uid) + '</span>' +
       '<span class="plan-route-info">' + fpCount + ' 个计划</span>' +
     '</label>';

@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "redis-inspector": {
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-redis"],
+      "env": {
+        "REDIS_HOST": "dolphin-test.kedacom.com",
+        "REDIS_PORT": "21003"
+      }
+    },
+    "filesystem": {
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "./mock", "./docs", "./flight_task_templates"]
+    }
+  }
+}

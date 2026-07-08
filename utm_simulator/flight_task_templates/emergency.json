@@ -1,0 +1,86 @@
+{
+  "_meta": {
+    "name": "应急救援",
+    "description": "模拟应急救援飞行场景，无人机快速响应，多条航线从不同方向飞往目标区域",
+    "type": "emergency",
+    "default_drone_count": 5
+  },
+  "task": {
+    "taskName": "应急救援-自动化测试",
+    "taskPurpose": "EMERGENCY",
+    "taskType": "PUBLIC_SERVICE",
+    "taskDescription": "通过 UTM 模拟器自动创建的应急救援测试任务，模拟多机协同救援"
+  },
+  "uasList": [
+    {
+      "uniqueProductIdentificationCode": "AVICWJ01Z1A2B3C4D5E6",
+      "realNameRegistrationSign": "UAS02EH18S21621",
+      "uasName": "救援无人机-001",
+      "uasTypeCode": "MULTI_ROTOR",
+      "uasProducer": "AVIC"
+    },
+    {
+      "uniqueProductIdentificationCode": "AVICWJ01F7G8H9J0K1L2",
+      "realNameRegistrationSign": "UAS02EH18S21622",
+      "uasName": "救援无人机-002",
+      "uasTypeCode": "MULTI_ROTOR",
+      "uasProducer": "AVIC"
+    },
+    {
+      "uniqueProductIdentificationCode": "AVICWJ01M3N4P5Q6R7S8",
+      "realNameRegistrationSign": "UAS02EH18S21623",
+      "uasName": "救援无人机-003",
+      "uasTypeCode": "FIXED_WING",
+      "uasProducer": "AVIC"
+    }
+  ],
+  "planTemplate": {
+    "flightPlanList": [
+      {
+        "flightPlanId": 1,
+        "flightTaskName": "应急救援-自动化测试",
+        "routeList": [
+          {
+            "sequence": 0,
+            "type": 2,
+            "segmentStartLon": 120.655,
+            "segmentStartLat": 31.305,
+            "segmentEndLon": 120.665,
+            "segmentEndLat": 31.315,
+            "segmentStartHeight": 0.0,
+            "segmentEndHeight": 150.0,
+            "segmentProtectHeight": 50.0,
+            "segmentProtectHeightType": 1,
+            "segmentWidth": 100.0
+          },
+          {
+            "sequence": 1,
+            "type": 2,
+            "segmentStartLon": 120.665,
+            "segmentStartLat": 31.315,
+            "segmentEndLon": 120.675,
+            "segmentEndLat": 31.320,
+            "segmentStartHeight": 150.0,
+            "segmentEndHeight": 150.0,
+            "segmentProtectHeight": 50.0,
+            "segmentProtectHeightType": 1,
+            "segmentWidth": 100.0
+          },
+          {
+            "sequence": 2,
+            "type": 4,
+            "segmentStartLon": 120.675,
+            "segmentStartLat": 31.320,
+            "segmentEndLon": 120.675,
+            "segmentEndLat": 31.320,
+            "segmentStartHeight": 150.0,
+            "segmentEndHeight": 150.0,
+            "segmentProtectHeight": 50.0,
+            "segmentProtectHeightType": 1,
+            "segmentWidth": 100.0
+          }
+        ]
+      }
+    ]
+  }
+}

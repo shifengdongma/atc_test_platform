@@ -86,7 +86,7 @@ _current_config: Dict[str, Any] = {
     "timestamp_mode": "replace",  # replace / align / preserve
     "scene_loop": False,
     # plan 模式参数
-    "plan_selected_uids": [],  # 用户选择的航线 UID 列表，空表示全部
+    "plan_selected_uids": None,  # 用户选择的航线 UID 列表，None=全部，[]=不执行任何，[...]=指定
     # replay_once 模式参数
     "data_file": "kafka_data.json",
     "route_file": "redis_route.json",
@@ -108,6 +108,21 @@ _runtime_state: Dict[str, Any] = {
 _sim_runner: Optional["SimulationRunner"] = None
 
 
+_situation_monitor = None
+
+
+def _get_situation_monitor():
+    """惰性导入态势监控采集器，在仿真启动时开始采集下游 ATC 态势数据。"""
+    global _situation_monitor
+    if _situation_monitor is None:
+        from situation_monitor import SituationMonitor
+        _situation_monitor = SituationMonitor(
+            base_url="wss://dkkgsit-test.testdolphin.com/la-atc-ws-backend/ws/stomp",
+            streamer=_get_streamer(),
+        )
+    return _situation_monitor
+
+
 # ── 日志辅助 ──────────────────────────────────────────────────────
 def _add_log(msg: str) -> None:
     """添加日志到运行时状态，保留最近 50 条。"""
@@ -120,8 +135,8 @@ def _add_log(msg: str) -> None:
     # 同步推送到日志采集器
     try:
         _get_streamer().push_sim_log(msg)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[web_server] 推送日志到 streamer 失败: {e}")
 
 
 def _get_streamer():
@@ -192,11 +207,19 @@ class SimulationRunner:
         from tools.run_plan import PlanRunner as _PlanRunner
         self._plan_runner = _PlanRunner(log_callback=_add_log)
         # 读取用户选择的航线 UID 列表
-        uids = self.config.get("plan_selected_uids", [])
-        selected = set(uids) if uids else None
+        # None = 未做选择（全部航线），[] = 明确取消全选（不执行任何航线），[...] = 指定航线
+        uids = self.config.get("plan_selected_uids", None)
+        if uids is not None and len(uids) == 0:
+            selected = set()   # 用户明确取消全选 → 空集合，不注入任何航线
+        elif uids is not None and len(uids) > 0:
+            selected = set(uids)
+        else:
+            selected = None    # uids is None → 全部航线
         self._plan_runner.start_background(selected_uids=selected)
-        if selected:
+        if selected is not None and len(selected) > 0:
             _add_log(f"Redis 计划插值模式已启动（已选 {len(selected)} 条航线），后台线程运行中")
+        elif selected is not None and len(selected) == 0:
+            _add_log("Redis 计划插值模式已启动（未选择任何航线），后台线程运行中")
         else:
             _add_log("Redis 计划插值模式已启动（全部航线），后台线程运行中")
 
@@ -399,6 +422,12 @@ class SimulationRunner:
 
         socketio.emit("status_change", {"event": "starting", "message": f"仿真启动中 (模式: {self.mode})"})
         _add_log(f"仿真启动: 模式={self.mode}, 目标架数={self.target_drones}")
+
+        # 启动态势监控采集（连接 ATC WebSocket，采集监视目标/飞行计划/告警数据）
+        try:
+            _get_situation_monitor().start()
+        except Exception as e:
+            print(f"[web_server] 态势监控启动失败: {e}")
 
         self._thread = threading.Thread(target=self._sim_loop, daemon=True)
         self._thread.start()

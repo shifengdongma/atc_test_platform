@@ -92,7 +92,7 @@ Write-Host "[INFO] conda env: $EnvName" -ForegroundColor Cyan
 Write-Host "[INFO] python: $PythonExe" -ForegroundColor Cyan
 
 # ============================================================
-# 3. Check / install dependencies
+# 3. Check / install dependencies (批量检查，一次 conda run)
 # ============================================================
 $RequiredPkgs = @(
     @{Name="flask"; Pip="flask"},
@@ -102,18 +102,33 @@ $RequiredPkgs = @(
     @{Name="pydantic"; Pip="pydantic"},
     @{Name="pytest"; Pip="pytest"},
     @{Name="pytest_cov"; Pip="pytest-cov"},
-    @{Name="requests"; Pip="requests"}
+    @{Name="requests"; Pip="requests"},
+    @{Name="websocket"; Pip="websocket-client"}
 )
-$MissingPkgs = @()
 
+# 构建批量 import 脚本 → 写入临时文件，避免 -c 传参过长/转义问题
+$CheckScript = "import sys; missing=[]`n"
 foreach ($pkg in $RequiredPkgs) {
-    $null = & $CondaExe run -n $EnvName python -c "import $($pkg.Name)" 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        $MissingPkgs += $pkg.Pip
-    }
+    $CheckScript += "try:`n"
+    $CheckScript += "    import $($pkg.Name)`n"
+    $CheckScript += "    print('  OK: $($pkg.Name)')`n"
+    $CheckScript += "except ImportError:`n"
+    $CheckScript += "    missing.append('$($pkg.Pip)')`n"
+    $CheckScript += "    print('  MISS: $($pkg.Pip)')`n"
 }
+$CheckScript += "if missing:`n    print('__MISSING__:' + ','.join(missing))`n"
 
-if ($MissingPkgs.Count -gt 0) {
+$CheckFile = Join-Path $env:TEMP "utm_dep_check_$PID.py"
+Set-Content -Path $CheckFile -Value $CheckScript -Encoding UTF8
+
+Write-Host "[INFO] Checking dependencies (batch)..." -ForegroundColor Cyan
+$CheckOutput = & $CondaExe run -n $EnvName python $CheckFile 2>&1
+Remove-Item $CheckFile -ErrorAction SilentlyContinue
+Write-Host $CheckOutput
+
+$MissingLine = $CheckOutput | Select-String "__MISSING__:"
+if ($MissingLine) {
+    $MissingPkgs = ($MissingLine -replace ".*__MISSING__:", "").Split(",")
     Write-Host "[INFO] Installing missing packages: $($MissingPkgs -join ', ')" -ForegroundColor Yellow
     & $CondaExe run -n $EnvName pip install $MissingPkgs 2>&1
     if ($LASTEXITCODE -ne 0) {

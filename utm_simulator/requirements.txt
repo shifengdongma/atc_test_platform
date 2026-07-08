@@ -4,3 +4,4 @@ async-timeout>=4.0.2
 shortuuid>=1.0.0
 PyYAML>=6.0
 orjson>=3.8.0
+websocket-client>=1.6.0

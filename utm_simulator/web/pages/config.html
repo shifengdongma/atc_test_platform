@@ -53,7 +53,19 @@
 
         <div id="scene-params" style="display:none;"></div>
         <div id="replay-params" style="display:none;"></div>
-        <div id="plan-params" style="display:none;"></div>
+        <div id="plan-params" style="display:none;">
+          <div class="form-group">
+            <label>选择要仿真的航线 <span id="plan-route-summary"></span></label>
+            <div id="plan-route-list" class="plan-route-list">
+              <div class="empty-hint">请先加载航线数据 — 切换到"仿真执行"页点击"加载航线"，或在此刷新</div>
+            </div>
+            <div style="margin-top:4px;display:flex;gap:4px;">
+              <button id="btn-plan-select-all" class="btn btn-small">全选</button>
+              <button id="btn-plan-deselect-all" class="btn btn-small">取消全选</button>
+              <button id="btn-plan-refresh-routes" class="btn btn-small">🔄 刷新航线列表</button>
+            </div>
+          </div>
+        </div>
 
         <div class="form-group">
           <label for="target-drones">目标无人机架数 <span id="drones-value">1</span></label>

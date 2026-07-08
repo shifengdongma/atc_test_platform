@@ -1,0 +1,99 @@
+{
+  "_meta": {
+    "name": "巡检巡查",
+    "description": "模拟巡检巡查飞行场景，无人机沿电力线路/管道等线状目标飞行巡查",
+    "type": "patrol",
+    "default_drone_count": 10
+  },
+  "task": {
+    "taskName": "电力巡检-自动化测试",
+    "taskPurpose": "PATROL",
+    "taskType": "PUBLIC_SERVICE",
+    "taskDescription": "通过 UTM 模拟器自动创建的电力巡检测试任务"
+  },
+  "uasList": [
+    {
+      "uniqueProductIdentificationCode": "EH18S216M1N2P3Q4R5S6",
+      "realNameRegistrationSign": "UAS02EH18S21601",
+      "uasName": "巡检无人机-001",
+      "uasTypeCode": "MULTI_ROTOR",
+      "uasProducer": "EHANG"
+    },
+    {
+      "uniqueProductIdentificationCode": "EH18S216T7U8V9W0X1Y2",
+      "realNameRegistrationSign": "UAS02EH18S21602",
+      "uasName": "巡检无人机-002",
+      "uasTypeCode": "MULTI_ROTOR",
+      "uasProducer": "EHANG"
+    },
+    {
+      "uniqueProductIdentificationCode": "EH18S216Z3A4B5C6D7E8",
+      "realNameRegistrationSign": "UAS02EH18S21603",
+      "uasName": "巡检无人机-003",
+      "uasTypeCode": "MULTI_ROTOR",
+      "uasProducer": "EHANG"
+    }
+  ],
+  "planTemplate": {
+    "flightPlanList": [
+      {
+        "flightPlanId": 1,
+        "flightTaskName": "电力巡检-自动化测试",
+        "routeList": [
+          {
+            "sequence": 0,
+            "type": 2,
+            "segmentStartLon": 120.660,
+            "segmentStartLat": 31.310,
+            "segmentEndLon": 120.665,
+            "segmentEndLat": 31.315,
+            "segmentStartHeight": 0.0,
+            "segmentEndHeight": 80.0,
+            "segmentProtectHeight": 50.0,
+            "segmentProtectHeightType": 1,
+            "segmentWidth": 50.0
+          },
+          {
+            "sequence": 1,
+            "type": 2,
+            "segmentStartLon": 120.665,
+            "segmentStartLat": 31.315,
+            "segmentEndLon": 120.670,
+            "segmentEndLat": 31.320,
+            "segmentStartHeight": 80.0,
+            "segmentEndHeight": 80.0,
+            "segmentProtectHeight": 50.0,
+            "segmentProtectHeightType": 1,
+            "segmentWidth": 50.0
+          },
+          {
+            "sequence": 2,
+            "type": 2,
+            "segmentStartLon": 120.670,
+            "segmentStartLat": 31.320,
+            "segmentEndLon": 120.675,
+            "segmentEndLat": 31.325,
+            "segmentStartHeight": 80.0,
+            "segmentEndHeight": 80.0,
+            "segmentProtectHeight": 50.0,
+            "segmentProtectHeightType": 1,
+            "segmentWidth": 50.0
+          },
+          {
+            "sequence": 3,
+            "type": 2,
+            "segmentStartLon": 120.675,
+            "segmentStartLat": 31.325,
+            "segmentEndLon": 120.670,
+            "segmentEndLat": 31.315,
+            "segmentStartHeight": 80.0,
+            "segmentEndHeight": 0.0,
+            "segmentProtectHeight": 50.0,
+            "segmentProtectHeightType": 1,
+            "segmentWidth": 50.0
+          }
+        ]
+      }
+    ]
+  }
+}

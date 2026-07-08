@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://utm-simulator/schemas/airspace_schema.json",
+  "title": "UTM Airspace / NFZ Schema",
+  "description": "Redis BIZ_DATA:AIRSPACE hash value schema — airspace and no-fly zone data",
+  "type": "object",
+  "required": ["airspaceId"],
+  "properties": {
+    "airspaceId": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "spcNo": { "type": "string", "maxLength": 128 },
+    "name": { "type": "string", "maxLength": 256 },
+    "typeCode": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "status": { "type": "integer", "minimum": 0, "maximum": 1 },
+    "times": { "type": "array", "items": { "type": "object" } },
+    "usagePurpose": { "type": "string", "maxLength": 256 },
+    "lowestHeight": { "type": "number", "minimum": -500, "maximum": 20000 },
+    "highestHeight": { "type": "number", "minimum": -500, "maximum": 20000 },
+    "capacity": { "type": "integer", "minimum": 0 },
+    "monitorAbility": { "type": "integer", "minimum": 0, "maximum": 10 },
+    "polygon": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["Polygon"] },
+        "coordinates": { "type": "array" }
+      }
+    }
+  }
+}

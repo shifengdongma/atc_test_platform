@@ -1,0 +1,7 @@
+{
+  "redis_ip": "dolphin-test.kedacom.com",
+  "redis_port": "21003",
+  "redis_password": "s4^dJ5^xM6^e",
+  "kafka_url": "10.165.19.213:30011",
+  "kafka_url2": ""
+}

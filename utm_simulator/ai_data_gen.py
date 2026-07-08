@@ -170,15 +170,6 @@ class AIDataGenerator:
             except Exception:
                 pass
             return {"success": False, "error": f"API 错误: {err_str}"}
-            err_msg = str(e)
-            try:
-                err_detail = resp.json()
-                err_msg = err_detail.get("error", {}).get("message", str(e))
-            except Exception:
-                pass
-            return {"success": False, "error": f"API 错误: {err_msg}"}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
 
         choice = result.get("choices", [{}])[0]
         content = choice.get("message", {}).get("content", "")

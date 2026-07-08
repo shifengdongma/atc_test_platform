@@ -1,0 +1,100 @@
+{
+  "_meta": {
+    "name": "物流配送",
+    "description": "模拟物流配送飞行场景，多架无人机从配送中心出发，沿预定航线飞行",
+    "type": "logistics",
+    "default_drone_count": 20
+  },
+  "task": {
+    "taskName": "物流配送-自动化测试",
+    "taskPurpose": "LOGISTICS",
+    "taskType": "COMMERCIAL",
+    "taskDescription": "通过 UTM 模拟器自动创建的物流配送测试任务"
+  },
+  "uasList": [
+    {
+      "uniqueProductIdentificationCode": "DJI1MAV101A2B3C4D5E6",
+      "realNameRegistrationSign": "UAS01DJI1MAV001",
+      "uasName": "物流无人机-001",
+      "uasTypeCode": "MULTI_ROTOR",
+      "uasProducer": "DJI"
+    },
+    {
+      "uniqueProductIdentificationCode": "DJI1MAV1F7G8H9J0K1L2",
+      "realNameRegistrationSign": "UAS01DJI1MAV002",
+      "uasName": "物流无人机-002",
+      "uasTypeCode": "MULTI_ROTOR",
+      "uasProducer": "DJI"
+    },
+    {
+      "uniqueProductIdentificationCode": "DJI1MAV2M3N4P5Q6R7S8",
+      "realNameRegistrationSign": "UAS01DJI1MAV003",
+      "uasName": "物流无人机-003",
+      "uasTypeCode": "MULTI_ROTOR",
+      "uasProducer": "DJI"
+    },
+    {
+      "uniqueProductIdentificationCode": "DJI1MAV2T9U0V1W2X3Y4",
+      "realNameRegistrationSign": "UAS01DJI1MAV004",
+      "uasName": "物流无人机-004",
+      "uasTypeCode": "MULTI_ROTOR",
+      "uasProducer": "DJI"
+    },
+    {
+      "uniqueProductIdentificationCode": "DJI1MAV3Z5A6B7C8D9E0",
+      "realNameRegistrationSign": "UAS01DJI1MAV005",
+      "uasName": "物流无人机-005",
+      "uasTypeCode": "MULTI_ROTOR",
+      "uasProducer": "DJI"
+    }
+  ],
+  "planTemplate": {
+    "flightPlanList": [
+      {
+        "flightPlanId": 1,
+        "flightTaskName": "物流配送-自动化测试",
+        "routeList": [
+          {
+            "sequence": 0,
+            "type": 2,
+            "segmentStartLon": 120.665,
+            "segmentStartLat": 31.315,
+            "segmentEndLon": 120.675,
+            "segmentEndLat": 31.320,
+            "segmentStartHeight": 0.0,
+            "segmentEndHeight": 100.0,
+            "segmentProtectHeight": 50.0,
+            "segmentProtectHeightType": 1,
+            "segmentWidth": 100.0
+          },
+          {
+            "sequence": 1,
+            "type": 2,
+            "segmentStartLon": 120.675,
+            "segmentStartLat": 31.320,
+            "segmentEndLon": 120.685,
+            "segmentEndLat": 31.318,
+            "segmentStartHeight": 100.0,
+            "segmentEndHeight": 100.0,
+            "segmentProtectHeight": 50.0,
+            "segmentProtectHeightType": 1,
+            "segmentWidth": 100.0
+          },
+          {
+            "sequence": 2,
+            "type": 2,
+            "segmentStartLon": 120.685,
+            "segmentStartLat": 31.318,
+            "segmentEndLon": 120.680,
+            "segmentEndLat": 31.310,
+            "segmentStartHeight": 100.0,
+            "segmentEndHeight": 0.0,
+            "segmentProtectHeight": 50.0,
+            "segmentProtectHeightType": 1,
+            "segmentWidth": 100.0
+          }
+        ]
+      }
+    ]
+  }
+}

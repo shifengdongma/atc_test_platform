@@ -117,6 +117,23 @@ def _add_log(msg: str) -> None:
         if len(_runtime_state["logs"]) > 50:
             _runtime_state["logs"] = _runtime_state["logs"][-50:]
     socketio.emit("log", {"message": msg})
+    # 同步推送到日志采集器
+    try:
+        _get_streamer().push_sim_log(msg)
+    except Exception:
+        pass
+
+
+def _get_streamer():
+    """惰性导入 log_streamer 单例，绑定 WebSocket 推送。"""
+    import log_streamer as _ls
+    s = _ls.get_streamer()
+    if s._callback is None:
+        def _ws_push(entry):
+            socketio.emit("log_entry", entry)
+        s._callback = _ws_push
+        s.push("sim_status", "日志采集服务已就绪")
+    return s
 
 
 # ==================== SimulationRunner ============================
@@ -1454,6 +1471,60 @@ def api_schedule_history(task_id):
     sch = _get_scheduler()
     history = sch.get_history(task_id)
     return jsonify({"history": history})
+
+
+# ==================== 日志流 API =====================================
+
+@app.route("/api/logs", methods=["GET"])
+def api_logs_query():
+    """查询历史日志。"""
+    types_str = request.args.get("types", "")
+    types = [t.strip() for t in types_str.split(",") if t.strip()] if types_str else None
+    keyword = request.args.get("keyword", "")
+    limit = request.args.get("limit", 200, type=int)
+    since = request.args.get("since", "")
+
+    streamer = _get_streamer()
+    logs = streamer.get_logs(types=types, keyword=keyword, limit=limit, since=since)
+    counts = streamer.get_counts()
+    return jsonify({"logs": logs, "counts": counts})
+
+
+@app.route("/api/logs/export", methods=["POST"])
+def api_logs_export():
+    """导出日志。"""
+    data = request.get_json(silent=True) or {}
+    types_str = data.get("types", "")
+    types = [t.strip() for t in types_str.split(",") if t.strip()] if types_str else None
+    fmt = data.get("format", "json")
+    keyword = data.get("keyword", "")
+
+    from flask import Response as _Response
+    streamer = _get_streamer()
+    result = streamer.export_logs(types=types, fmt=fmt, keyword=keyword)
+
+    mime_map = {"json": "application/json", "csv": "text/csv", "txt": "text/plain"}
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    return _Response(
+        result.get("content", ""),
+        mimetype=mime_map.get(fmt, "text/plain"),
+        headers={"Content-Disposition": f"attachment; filename=sim-logs-{ts}.{fmt}"},
+    )
+
+
+@app.route("/api/logs/clear", methods=["POST"])
+def api_logs_clear():
+    """清空日志缓冲区。"""
+    streamer = _get_streamer()
+    streamer.clear()
+    return jsonify({"success": True, "message": "日志已清空"})
+
+
+@app.route("/api/logs/types", methods=["GET"])
+def api_logs_types():
+    """获取日志类型列表。"""
+    from log_streamer import LOG_TYPES
+    return jsonify({"types": LOG_TYPES})
 
 
 # ── WebSocket 事件 ────────────────────────────────────────────────

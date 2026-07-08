@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>系统日志 — UTM 模拟器</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left"><h1>🛩️ UTM 模拟器控制台</h1><span class="version">utm_moc52 v3.1</span></div>
+    <nav class="topbar-nav" id="top-nav"></nav>
+    <div class="topbar-right"><span id="connection-dot" class="dot red"></span><span id="connection-text">未连接</span></div>
+  </header>
+
+  <main class="dashboard-logs">
+    <!-- 左侧：日志过滤器 -->
+    <aside class="panel panel-config" style="max-width:240px;">
+      <h2>📋 日志类型</h2>
+      <div id="log-type-filters">
+        <label class="plan-route-item"><input type="checkbox" class="log-type-cb" value="redis_route" checked> <span class="plan-route-uid">Redis 航线变更</span></label>
+        <label class="plan-route-item"><input type="checkbox" class="log-type-cb" value="redis_airspace" checked> <span class="plan-route-uid">Redis 空域变更</span></label>
+        <label class="plan-route-item"><input type="checkbox" class="log-type-cb" value="kafka_telemetry" checked> <span class="plan-route-uid">Kafka 遥测</span></label>
+        <label class="plan-route-item"><input type="checkbox" class="log-type-cb" value="kafka_trace" checked> <span class="plan-route-uid">Kafka 轨迹预测</span></label>
+        <label class="plan-route-item"><input type="checkbox" class="log-type-cb" value="db_run_data"> <span class="plan-route-uid">DB 运行日志</span></label>
+        <label class="plan-route-item"><input type="checkbox" class="log-type-cb" value="db_traffic"> <span class="plan-route-uid">DB 流量日志</span></label>
+        <label class="plan-route-item"><input type="checkbox" class="log-type-cb" value="db_alarm"> <span class="plan-route-uid">DB 告警日志</span></label>
+        <label class="plan-route-item"><input type="checkbox" class="log-type-cb" value="sim_status" checked> <span class="plan-route-uid">仿真状态</span></label>
+      </div>
+      <div style="margin-top:12px;">
+        <button id="btn-logs-export-json" class="btn btn-small" style="width:100%;">📥 导出 JSON</button>
+        <button id="btn-logs-export-csv" class="btn btn-small" style="width:100%;margin-top:4px;">📥 导出 CSV</button>
+      </div>
+    </aside>
+
+    <!-- 右侧：日志流 -->
+    <section class="panel" style="flex:1;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <h2 style="margin:0;">📋 实时日志</h2>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="text" id="logs-search" placeholder="🔍 关键字过滤..." style="background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:4px 8px;border-radius:4px;font-size:12px;width:160px;">
+          <button id="btn-logs-pause" class="btn btn-small">⏸ 暂停</button>
+          <button id="btn-logs-clear" class="btn btn-small">🧹 清空</button>
+          <span id="logs-stats" style="font-size:11px;color:#8899aa;"></span>
+        </div>
+      </div>
+      <div id="logs-stream" class="log-stream" style="height:calc(100vh - 120px);overflow-y:auto;font-family:'Consolas',monospace;font-size:12px;">
+        <div class="log-empty">等待日志数据...</div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/js/common.js"></script>
+  <script src="/static/js/logs.js"></script>
+  <script>initCommon('/logs');</script>
+</body>
+</html>

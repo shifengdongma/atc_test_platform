@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>数据管理 — UTM 模拟器</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left"><h1>🛩️ UTM 模拟器控制台</h1><span class="version">utm_moc52 v3.1</span></div>
+    <nav class="topbar-nav" id="top-nav"></nav>
+    <div class="topbar-right"><span id="connection-dot" class="dot red"></span><span id="connection-text">未连接</span></div>
+  </header>
+
+  <main class="page-wide">
+    <div class="panel panel-form">
+      <h2>📁 JSON 数据管理</h2>
+
+      <!-- 工具栏 -->
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">
+        <input type="text" id="data-search" placeholder="🔍 搜索文件名..." style="flex:1;min-width:150px;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:6px 10px;border-radius:4px;font-size:13px;">
+        <select id="data-category" style="background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:6px 10px;border-radius:4px;font-size:13px;">
+          <option value="">全部分类</option>
+          <option value="route">航线数据</option>
+          <option value="telemetry">遥测数据</option>
+          <option value="scene">场景文件</option>
+          <option value="template">任务模板</option>
+        </select>
+        <button id="btn-data-refresh" class="btn btn-small">🔄 刷新</button>
+        <button id="btn-data-upload" class="btn btn-small">📤 上传</button>
+        <button id="btn-data-import-mock" class="btn btn-small">📥 导入 mock/</button>
+        <input type="file" id="data-upload-input" accept=".json" style="display:none;">
+      </div>
+
+      <!-- 文件列表 -->
+      <div id="data-table-container" style="max-height:400px;overflow-y:auto;">
+        <table id="data-table" class="data-table" style="width:100%;font-size:12px;">
+          <thead><tr><th>文件名</th><th>分类</th><th>大小</th><th>来源</th><th>时间</th><th>操作</th></tr></thead>
+          <tbody id="data-tbody"><tr><td colspan="6" class="empty-hint">加载中...</td></tr></tbody>
+        </table>
+      </div>
+
+      <!-- 文件预览 -->
+      <div class="form-group" style="margin-top:12px;">
+        <label>文件内容预览</label>
+        <div id="data-preview" class="data-preview"><div class="empty-hint">选择文件以预览内容</div></div>
+      </div>
+
+      <!-- 分页 -->
+      <div id="data-pagination" style="display:flex;justify-content:center;gap:4px;margin-top:8px;"></div>
+    </div>
+  </main>
+
+  <script src="/static/js/common.js"></script>
+  <script src="/static/js/data.js"></script>
+  <script>initCommon('/data');</script>
+</body>
+</html>

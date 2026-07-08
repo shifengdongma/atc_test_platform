@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>仿真配置 — UTM 模拟器</title>
+  <link rel="stylesheet" href="/static/lib/leaflet/leaflet.css" />
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <h1>🛩️ UTM 模拟器控制台</h1>
+      <span class="version">utm_moc52 v3.1</span>
+    </div>
+    <nav class="topbar-nav" id="top-nav"></nav>
+    <div class="topbar-right">
+      <span id="connection-dot" class="dot red"></span>
+      <span id="connection-text">未连接</span>
+      <span class="separator">|</span>
+      <span id="sim-status-badge" class="badge stopped">已停止</span>
+    </div>
+  </header>
+
+  <main class="page-single">
+    <div class="panel panel-form">
+      <h2>⚙️ 仿真参数配置</h2>
+
+      <div class="form-group">
+        <label for="mode-select">运行模式</label>
+        <select id="mode-select">
+          <option value="dynamic">🎮 动态仿真 — 实时生成计划+仿真计算遥测</option>
+          <option value="replay">🔁 预生成回放(循环) — mock目录JSON循环发射</option>
+          <option value="replay_once">▶️ 预生成回放(单次) — 数据耗尽自动停止</option>
+          <option value="scene">🎬 场景文件注入 — 选择JSON按间隔发射</option>
+          <option value="plan">📐 Redis计划插值 — 从计划路线数学插值生成遥测</option>
+        </select>
+        <div id="mode-description" class="mode-description">实时生成飞行计划，Simulator引擎计算遥测，持续运行</div>
+      </div>
+
+      <div id="scene-params" style="display:none;"></div>
+      <div id="replay-params" style="display:none;"></div>
+      <div id="plan-params" style="display:none;"></div>
+
+      <div class="form-group">
+        <label for="target-drones">目标无人机架数 <span id="drones-value">1</span></label>
+        <input type="range" id="target-drones" min="1" max="5000" value="1" step="1">
+        <div class="range-labels"><span>1</span><span>1000</span><span>3000</span><span>5000</span></div>
+      </div>
+
+      <div class="form-group">
+        <label for="nfz-enabled"><input type="checkbox" id="nfz-enabled" checked> 生成禁飞区</label>
+        <label for="nfz-count" class="sub-label">数量</label>
+        <input type="number" id="nfz-count" value="3" min="0" max="10" disabled>
+        <div class="mode-description" style="margin-top:2px;">仅在 🎮 动态仿真 模式下生效</div>
+      </div>
+
+      <div class="form-group">
+        <label>连接信息</label>
+        <div class="readonly-info">
+          <div class="info-row"><span>Redis IP:</span> <input type="text" id="cfg-redis-host" style="width:140px;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:2px 6px;border-radius:3px;font-size:12px;"></div>
+          <div class="info-row"><span>Redis Port:</span> <input type="text" id="cfg-redis-port" style="width:80px;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:2px 6px;border-radius:3px;font-size:12px;"></div>
+          <div class="info-row"><span>Kafka:</span> <input type="text" id="cfg-kafka-url" style="width:180px;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:2px 6px;border-radius:3px;font-size:12px;"></div>
+        </div>
+        <button id="btn-save-conn" class="btn btn-small" style="margin-top:4px;">💾 保存连接配置</button>
+        <span id="conn-save-result" style="font-size:11px;margin-left:6px;"></span>
+      </div>
+
+      <div class="action-buttons">
+        <button id="btn-start" class="btn btn-start">▶ 启动仿真</button>
+        <button id="btn-stop"  class="btn btn-stop" disabled>⏹ 停止仿真</button>
+      </div>
+
+      <div class="action-buttons" style="margin-top:8px;">
+        <button id="btn-test-conn" class="btn btn-secondary">🔌 测试连接</button>
+        <span id="conn-test-result" style="font-size:12px;margin-left:8px;"></span>
+      </div>
+
+      <div class="form-group" style="margin-top:16px;">
+        <label>运行历史</label>
+        <ul id="history-list" class="history-list"><li class="empty-hint">暂无运行记录</li></ul>
+      </div>
+    </div>
+  </main>
+
+  <script src="/static/js/common.js"></script>
+  <script src="/static/js/config.js"></script>
+  <script>initCommon('/config');</script>
+</body>
+</html>

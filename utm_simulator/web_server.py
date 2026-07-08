@@ -382,8 +382,45 @@ class SimulationRunner:
 
 @app.route("/")
 def index():
-    """SPA 主页面入口。"""
-    return send_from_directory("web", "index.html")
+    """首页重定向到仿真配置页。"""
+    from flask import redirect as _redirect
+    return _redirect("/config")
+
+
+@app.route("/config")
+def page_config():
+    """仿真配置页。"""
+    return send_from_directory("web/pages", "config.html")
+
+
+@app.route("/run")
+def page_run():
+    """仿真执行页。"""
+    return send_from_directory("web/pages", "run.html")
+
+
+@app.route("/generate")
+def page_generate():
+    """模拟数据生成页。"""
+    return send_from_directory("web/pages", "generate.html")
+
+
+@app.route("/data")
+def page_data():
+    """JSON 数据管理页。"""
+    return send_from_directory("web/pages", "data.html")
+
+
+@app.route("/env")
+def page_env():
+    """环境变量管理页。"""
+    return send_from_directory("web/pages", "env.html")
+
+
+@app.route("/logs")
+def page_logs():
+    """系统日志页。"""
+    return send_from_directory("web/pages", "logs.html")
 
 
 @app.route("/api/sim/status", methods=["GET"])

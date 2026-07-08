@@ -46,6 +46,15 @@ body {
 .topbar-right { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .topbar-right .separator { color: var(--border); }
 
+/* ── 导航菜单 ──────────────────────────────────────────────────── */
+.topbar-nav { display: flex; gap: 2px; }
+.topbar-nav .nav-item {
+  color: var(--text-dim); text-decoration: none; padding: 4px 12px;
+  border-radius: 4px; font-size: 13px; transition: all 0.2s;
+}
+.topbar-nav .nav-item:hover { color: var(--text); background: var(--bg-card); }
+.topbar-nav .nav-item.active { color: var(--accent-bright); background: rgba(0,180,216,0.12); }
+
 .dot {
   width: 10px; height: 10px; border-radius: 50%; display: inline-block;
 }
@@ -293,3 +302,29 @@ body {
 .gen-form .fr input, .gen-form .fr select { flex: 1; padding: 4px 8px; background: #0d1b2a; border: 1px solid #2a3a5c; color: #c0d0e0; border-radius: 3px; font-size: 12px; }
 .btn-small { padding: 4px 10px; font-size: 11px; border-radius: 3px; cursor: pointer; background: #1a2740; border: 1px solid #2a3a5c; color: #8899aa; }
 .btn-small:hover { background: #2a3a5c; color: #c0d0e0; }
+
+/* ── 多页面布局 ─────────────────────────────────────── */
+.page-single { flex: 1; display: flex; justify-content: center; padding: 20px; overflow-y: auto; }
+.page-single .panel-form { max-width: 560px; width: 100%; }
+.page-wide { flex: 1; padding: 20px; overflow-y: auto; }
+.page-wide .panel-form { max-width: 800px; margin: 0 auto; }
+.dashboard-run { display: grid; grid-template-columns: 380px 1fr; flex: 1; gap: 12px; padding: 12px; overflow: hidden; }
+.dashboard-logs { display: flex; flex: 1; gap: 12px; padding: 12px; overflow: hidden; }
+
+/* ── 数据表格 ────────────────────────────────────────── */
+.data-table { border-collapse: collapse; }
+.data-table th { position: sticky; top: 0; background: #1a3050; color: #82aaff; font-weight: 600; padding: 8px 10px; text-align: left; font-size: 11px; border-bottom: 2px solid #2a3f56; z-index: 1; }
+.data-table td { padding: 6px 10px; border-bottom: 1px solid #1a2740; color: #c0d0e0; }
+.data-table tr:hover td { background: #1a3050; }
+.data-table .btn-tiny { padding: 2px 8px; font-size: 10px; border-radius: 3px; cursor: pointer; background: #1a2740; border: 1px solid #2a3a5c; color: #8899aa; margin-right: 3px; }
+.data-table .btn-tiny:hover { background: #2a3a5c; color: #c0d0e0; }
+
+/* ── 地图工具栏 ──────────────────────────────────────── */
+.map-toolbar { display: flex; gap: 4px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+
+/* ── 响应式 ──────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .dashboard-run { grid-template-columns: 1fr; }
+  .dashboard-logs { flex-direction: column; }
+  .topbar-nav { flex-wrap: wrap; }
+}

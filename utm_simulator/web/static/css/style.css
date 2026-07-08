@@ -345,6 +345,48 @@ body {
 /* ── 地图工具栏 ──────────────────────────────────────── */
 .map-toolbar { display: flex; gap: 4px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
 
+/* ── 内联任务表单（config 页右栏）─────────────────────── */
+.task-inline-form {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+.task-inline-form .form-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.task-inline-form .form-row label {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  min-width: 60px;
+}
+.task-inline-form .form-row input[type="text"],
+.task-inline-form .form-row input[type="number"],
+.task-inline-form .form-row input[type="date"],
+.task-inline-form .form-row input[type="time"],
+.task-inline-form .form-row select {
+  padding: 5px 8px;
+  font-size: 12px;
+  background: #0d1b2a;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+}
+.task-inline-form .form-row input:focus,
+.task-inline-form .form-row select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* ── 地图加载动画 ─────────────────────────────────────── */
+@keyframes map-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ── 响应式 ──────────────────────────────────────────── */
 @media (max-width: 900px) {
   .dashboard-run { grid-template-columns: 1fr; }

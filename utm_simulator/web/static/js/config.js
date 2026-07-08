@@ -171,7 +171,6 @@ function renderHistory() {
 }
 
 // ── 定时任务管理 ─────────────────────────────────────────────────────
-var editingTaskId = null;
 
 async function loadTaskList() {
   var el = document.getElementById('task-list');
@@ -226,38 +225,57 @@ window.editTask = async function(id) {
   try {
     var resp = await apiGet('/api/schedule/tasks');
     var t = (resp.tasks||[]).find(function(x){return x.id===id;});
-    if (t) showTaskModal('编辑', t);
+    if (!t) return;
+    // 填充内联表单
+    editingTaskId = t.id;
+    document.getElementById('task-form-title').textContent = '✏️ 编辑定时任务: ' + (t.name||'');
+    document.getElementById('tk-name').value = t.name||'';
+    document.getElementById('tk-mode').value = t.sim_mode||'replay';
+    document.getElementById('tk-edit-id').value = t.id;
+    document.getElementById('tk-enabled').checked = (t.enabled===1);
+    document.getElementById('btn-task-cancel-edit').style.display = '';
+    try {
+      var sp = JSON.parse(t.sim_params||'{}');
+      document.getElementById('tk-drones').value = sp.target_drones||10;
+    } catch(e) {}
+    // 从 cron_expr 解析日期时间
+    var parts = (t.cron_expr||'').split(' ');
+    if (parts.length >= 4) {
+      document.getElementById('tk-time').value = parts[1]+':'+parts[0];
+      document.getElementById('tk-date').value = '2026-'+parts[3]+'-'+parts[2];
+    }
+    refreshTaskJsonFiles();
+    // 滚动到表单顶部
+    document.getElementById('task-inline-form').scrollIntoView({ behavior: 'smooth' });
   } catch(e) {}
 };
 
-// ── 弹窗 ──────────────────────────────────────────────────────────
-function showTaskModal(title, data) {
-  editingTaskId = data ? data.id : null;
-  document.getElementById('task-modal-title').textContent = (title||'新建') + '定时任务';
-  document.getElementById('tk-name').value = data ? (data.name||'') : '';
-  document.getElementById('tk-mode').value = data ? (data.sim_mode||'replay') : 'replay';
-  document.getElementById('tk-drones').value = 10;
-  document.getElementById('tk-duration').value = 5;
-  document.getElementById('tk-repeat').value = 'once';
-  document.getElementById('tk-enabled').checked = data ? (data.enabled===1) : true;
-  // 默认明天此时
-  var d = new Date(Date.now() + 86400000);
-  document.getElementById('tk-date').value = d.toISOString().substring(0,10);
-  document.getElementById('tk-time').value = '09:00';
+// ── 内联表单逻辑 ──────────────────────────────────────────────────
+var editingTaskId = null;
 
-  if (data) {
-    try { var sp = JSON.parse(data.sim_params||'{}'); document.getElementById('tk-drones').value = sp.target_drones||10; document.getElementById('tk-duration').value = sp.duration_min||5; } catch(e) {}
-    // 从 cron_expr 反解析日期时间
-    var parts = (data.cron_expr||'').split(' ');
-    if (parts.length >= 4) { document.getElementById('tk-time').value = parts[1]+':'+parts[0]; document.getElementById('tk-date').value = '2026-'+parts[3]+'-'+parts[2]; }
-  }
-  document.getElementById('task-modal').classList.add('show');
-  refreshTaskJsonFiles();
+function resetTaskForm() {
+  document.getElementById('task-form-title').textContent = '➕ 新建定时任务';
+  document.getElementById('tk-name').value = '';
+  document.getElementById('tk-mode').value = 'replay';
+  document.getElementById('tk-drones').value = 10;
+  document.getElementById('tk-date').value = '';
+  document.getElementById('tk-time').value = '09:00';
+  document.getElementById('tk-repeat').value = 'once';
+  document.getElementById('tk-enabled').checked = true;
+  document.getElementById('tk-edit-id').value = '';
+  document.getElementById('tk-json-file').value = '';
+  document.getElementById('btn-task-cancel-edit').style.display = 'none';
+  editingTaskId = null;
 }
 
-function hideTaskModal() { document.getElementById('task-modal').classList.remove('show'); }
-document.getElementById('btn-task-cancel').addEventListener('click', hideTaskModal);
-document.getElementById('task-modal').addEventListener('click', function(e){ if(e.target===this) hideTaskModal(); });
+document.getElementById('btn-task-cancel-edit').addEventListener('click', resetTaskForm);
+
+// 默认日期设为明天
+(function() {
+  var d = new Date(Date.now() + 86400000);
+  var el = document.getElementById('tk-date');
+  if (el) el.value = d.toISOString().substring(0, 10);
+})();
 
 // ── JSON 文件列表 ────────────────────────────────────────────────
 async function refreshTaskJsonFiles() {
@@ -273,7 +291,9 @@ async function refreshTaskJsonFiles() {
 document.getElementById('btn-tk-refresh-files').addEventListener('click', refreshTaskJsonFiles);
 
 // ── 新建/保存 ────────────────────────────────────────────────────
-document.getElementById('btn-task-new').addEventListener('click', function(){ showTaskModal('新建', null); });
+// 内联表单 — 用户直接在右上角表单填写即可创建新任务
+var btnNew = document.getElementById('btn-task-new');
+if (btnNew) btnNew.addEventListener('click', resetTaskForm);
 
 document.getElementById('btn-task-save').addEventListener('click', async function() {
   var name = document.getElementById('tk-name').value.trim();
@@ -295,17 +315,18 @@ document.getElementById('btn-task-save').addEventListener('click', async functio
     sim_mode: document.getElementById('tk-mode').value,
     sim_params: JSON.stringify({
       target_drones: parseInt(document.getElementById('tk-drones').value)||10,
-      duration_min: parseInt(document.getElementById('tk-duration').value)||5,
+      duration_min: 5,
       json_file_id: sel.value||'',
       json_file_name: sel.selectedOptions[0]?sel.selectedOptions[0].text:'',
       repeat: repeat,
     }),
     enabled: document.getElementById('tk-enabled').checked?1:0,
   };
-  if (editingTaskId) body.id = editingTaskId;
+  var editId = document.getElementById('tk-edit-id').value;
+  if (editId) body.id = parseInt(editId);
 
   var r = await apiPost('/api/schedule/tasks', body);
-  if (r.success) { showToast(r.message||'已保存','success'); hideTaskModal(); loadTaskList(); }
+  if (r.success) { showToast(r.message||'已保存','success'); resetTaskForm(); loadTaskList(); }
   else { showToast(r.message||'保存失败','error'); }
 });
 

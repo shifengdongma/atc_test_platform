@@ -517,6 +517,11 @@ body {
 .alarm-item-type { color: var(--warning); }
 .alarm-item-msg { color: var(--text-dim); }
 
+/* ── 告警状态区分 ─────────────────────────────────────── */
+.alarm-item-loading { color: var(--warning); font-style: italic; }
+.alarm-item-empty { color: var(--success); }
+.alarm-item-error { color: var(--danger); }
+
 /* ── 刷新按钮动画 ────────────────────────────────────── */
 @keyframes btn-spin { to { transform: rotate(360deg); } }
 .btn-refresh { min-width: 70px; }
@@ -536,9 +541,152 @@ body {
   vertical-align: middle;
 }
 
+/* ── 工具脚本标注 ──────────────────────────────────────── */
+.script-tag {
+  display: inline-block;
+  background: #162231;
+  border: 1px solid #2a3f56;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-family: "Consolas", "Source Code Pro", "Courier New", monospace;
+  font-size: 11px;
+  color: #5d9dc9;
+  white-space: nowrap;
+  margin-top: 4px;
+}
+.script-tag::before { content: "📄 "; font-size: 10px; }
+.script-tag-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.script-tag-line span { color: #7a93a8; }
+.gen-script-info {
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  background: #111d2a;
+  border-left: 3px solid #2a3f56;
+  border-radius: 0 4px 4px 0;
+  font-size: 11px;
+  color: #7a93a8;
+}
+.gen-script-info code {
+  background: #162231;
+  color: #5d9dc9;
+  padding: 1px 5px;
+  border-radius: 2px;
+  font-family: "Consolas", "Source Code Pro", "Courier New", monospace;
+  font-size: 11px;
+}
+
+/* ── 左侧侧边栏 + 主内容布局 ──────────────────────────── */
+.app-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+#left-sidebar {
+  width: 200px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow-y: auto;
+}
+.sidebar-header {
+  padding: 12px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-item {
+  display: block;
+  padding: 10px 14px;
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 13px;
+  transition: all 0.15s;
+  border-left: 3px solid transparent;
+}
+.sidebar-item:hover {
+  color: var(--text);
+  background: var(--bg-card);
+}
+.sidebar-item.active {
+  color: var(--accent-bright);
+  background: rgba(0,180,216,0.1);
+  border-left-color: var(--accent);
+}
+
+/* ── 三栏布局（合并的仿真执行页） ───────────────────── */
+.dashboard-3col {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  flex: 1;
+  gap: 12px;
+  padding: 12px;
+  overflow: hidden;
+}
+.dashboard-3col > .panel {
+  overflow-y: auto;
+}
+
+/* ── 环境选择器 ───────────────────────────────────── */
+.env-selector select {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 12px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.env-selector select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.env-current {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+/* ── 占位页面 ─────────────────────────────────────── */
+.placeholder-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--text-dim);
+}
+.placeholder-page .placeholder-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+.placeholder-page h2 {
+  font-size: 20px;
+  margin-bottom: 8px;
+  color: var(--text);
+  border-bottom: none;
+  padding: 0;
+}
+.placeholder-page p {
+  font-size: 14px;
+}
+
 /* ── 响应式 ──────────────────────────────────────────── */
 @media (max-width: 900px) {
   .dashboard-run { grid-template-columns: 1fr; }
+  .dashboard-3col { grid-template-columns: 1fr; }
   .dashboard-logs { flex-direction: column; }
   .topbar-nav { flex-wrap: wrap; }
+  #left-sidebar { width: 60px; }
+  .sidebar-item { padding: 8px 6px; font-size: 11px; text-align: center; }
+  .sidebar-header { font-size: 10px; padding: 8px 4px; text-align: center; }
 }

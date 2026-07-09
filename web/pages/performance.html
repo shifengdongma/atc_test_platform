@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>性能 — UTM 模拟器</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <h1>🛩️ UTM 模拟器控制台</h1>
+      <span class="version">utm_moc52 v3.1</span>
+    </div>
+    <nav class="topbar-nav" id="top-nav"></nav>
+    <div class="topbar-right">
+      <span id="connection-dot" class="dot red"></span>
+      <span id="connection-text">未连接</span>
+    </div>
+  </header>
+
+  <div class="app-layout">
+    <aside id="left-sidebar"></aside>
+    <main class="placeholder-page">
+      <div class="placeholder-icon">📈</div>
+      <h2>性能监控</h2>
+      <p>功能开发中，敬请期待...</p>
+    </main>
+  </div>
+
+  <script src="/static/js/common.js"></script>
+  <script>initCommon('/performance');</script>
+</body>
+</html>

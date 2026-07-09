@@ -24,6 +24,13 @@ _root = os.path.dirname(os.path.abspath(__file__))
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
+# 公共模块路径（database/ common/ 已从 utm_simulator/ 移出到项目根目录）
+_database_path = os.path.join(_root, '..', 'database')
+_common_path = os.path.join(_root, '..', 'common')
+for _p in (_database_path, _common_path):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 from flask import Flask, jsonify, request, send_from_directory
 from flask_socketio import SocketIO, emit
 
@@ -62,7 +69,7 @@ KAFKA_TRACE_TOPIC = "uav_runtime_trace"
 DEFAULT_TARGET_DRONES = 1
 
 # ── Flask 应用初始化 ───────────────────────────────────────────────
-app = Flask(__name__, static_folder="web/static", static_url_path="/static")
+app = Flask(__name__, static_folder="../web/static", static_url_path="/static")
 app.config["SECRET_KEY"] = "utm_moc52_web_secret"
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
@@ -228,10 +235,49 @@ class SimulationRunner:
         self._running = True
         self._start_time = time.time()
 
-        if self.mode in ("dynamic", "replay"):
+        if self.mode == "dynamic":
             # 使用 SimulationManager 统一编排（桥接日志到前端）
             self._sim_mgr = SimulationManager(self._app_cfg, log_callback=_add_log)
             self._sim_mgr.start(mode=self.mode, target_drones=self.target_drones)
+
+            with _lock:
+                _runtime_state["redis_connected"] = self._sim_mgr.redis.client is not None
+                _runtime_state["kafka_connected"] = self._sim_mgr.kafka_producer.is_connected()
+
+            while self._running and self._sim_mgr._running:
+                try:
+                    status = self._sim_mgr.get_status()
+                    with _lock:
+                        _runtime_state.update({
+                            "active_drones": status["active_drones"],
+                            "kafka_msg_per_sec": status["kafka_msg_per_sec"],
+                            "uptime_sec": status["uptime_sec"],
+                            "errors": status["errors"],
+                        })
+                        # 合并日志
+                        for log_entry in status.get("logs", []):
+                            if log_entry not in _runtime_state["logs"]:
+                                _runtime_state["logs"].append(log_entry)
+                                if len(_runtime_state["logs"]) > 50:
+                                    _runtime_state["logs"] = _runtime_state["logs"][-50:]
+                    self._push_status()
+                except Exception as e:
+                    _add_log(f"状态查询错误: {e}")
+                time.sleep(1.0)
+
+            # 停止 SimulationManager
+            if self._sim_mgr:
+                self._sim_mgr.stop()
+
+        elif self.mode == "replay":
+            # 使用 SimulationManager 统一编排，传入用户选择的文件参数
+            self._sim_mgr = SimulationManager(self._app_cfg, log_callback=_add_log)
+            self._sim_mgr.start(
+                mode=self.mode,
+                target_drones=self.target_drones,
+                replay_data_file=self.config.get("data_file"),
+                replay_route_file=self.config.get("route_file"),
+            )
 
             with _lock:
                 _runtime_state["redis_connected"] = self._sim_mgr.redis.client is not None
@@ -270,7 +316,7 @@ class SimulationRunner:
             data_file = self.config.get("data_file", "kafka_data.json")
             route_file = self.config.get("route_file", "redis_route.json")
             try:
-                mock_dir = os.path.join(_root, "mock")
+                mock_dir = os.path.join(_root, "..", "data", "mock")
                 _rk.KAFKA_DATA_JSON_PATH = os.path.join(mock_dir, data_file)
                 _rk.REDIS_ROUTE_JSON_PATH = os.path.join(mock_dir, route_file)
                 ds = _rk.DataSource()
@@ -453,45 +499,70 @@ class SimulationRunner:
 
 @app.route("/")
 def index():
-    """首页重定向到仿真配置页。"""
+    """首页重定向到仿真执行页。"""
     from flask import redirect as _redirect
-    return _redirect("/config")
+    return _redirect("/run")
 
 
 @app.route("/config")
 def page_config():
-    """仿真配置页。"""
-    return send_from_directory("web/pages", "config.html")
+    """仿真配置页 — 已合并到 /run，重定向。"""
+    from flask import redirect as _redirect
+    return _redirect("/run")
 
 
 @app.route("/run")
 def page_run():
-    """仿真执行页。"""
-    return send_from_directory("web/pages", "run.html")
+    """仿真执行页（合并配置+监控+地图）。"""
+    return send_from_directory("../web/pages", "run.html")
+
+
+@app.route("/schedule")
+def page_schedule():
+    """定时任务管理页。"""
+    return send_from_directory("../web/pages", "schedule.html")
 
 
 @app.route("/generate")
 def page_generate():
     """模拟数据生成页。"""
-    return send_from_directory("web/pages", "generate.html")
+    return send_from_directory("../web/pages", "generate.html")
 
 
 @app.route("/data")
 def page_data():
     """JSON 数据管理页。"""
-    return send_from_directory("web/pages", "data.html")
+    return send_from_directory("../web/pages", "data.html")
 
 
 @app.route("/env")
 def page_env():
     """环境变量管理页。"""
-    return send_from_directory("web/pages", "env.html")
+    return send_from_directory("../web/pages", "env.html")
 
 
 @app.route("/logs")
 def page_logs():
     """系统日志页。"""
-    return send_from_directory("web/pages", "logs.html")
+    return send_from_directory("../web/pages", "logs.html")
+
+
+@app.route("/performance")
+def page_performance():
+    """性能监控页（占位）。"""
+    return send_from_directory("../web/pages", "performance.html")
+
+
+@app.route("/ha")
+def page_ha():
+    """高可用管理页（占位）。"""
+    return send_from_directory("../web/pages", "ha.html")
+
+
+@app.route("/basicdata")
+def page_basicdata():
+    """基础数据管理页（占位）。"""
+    return send_from_directory("../web/pages", "basicdata.html")
 
 
 @app.route("/api/sim/status", methods=["GET"])
@@ -700,7 +771,7 @@ def api_save_config():
 @app.route("/api/data/files", methods=["GET"])
 def api_list_data_files():
     """列出 mock/ 目录下可用的 JSON 数据文件。"""
-    mock_dir = os.path.join(_root, "mock")
+    mock_dir = os.path.join(_root, "..", "data", "mock")
     if not os.path.exists(mock_dir):
         return jsonify({"files": [], "error": "mock/ 目录不存在"})
 
@@ -740,7 +811,7 @@ def api_list_data_files():
 @app.route("/api/data/files/<filename>", methods=["GET"])
 def api_get_data_file(filename: str):
     """查看 JSON 文件内容（分页）。"""
-    mock_dir = os.path.join(_root, "mock")
+    mock_dir = os.path.join(_root, "..", "data", "mock")
     path = os.path.join(mock_dir, filename)
 
     # 安全检查：禁止路径穿越
@@ -880,7 +951,7 @@ def api_generate_data():
             })
 
         # 保存到 mock/ 目录
-        mock_dir = os.path.join(_root, "mock")
+        mock_dir = os.path.join(_root, "..", "data", "mock")
         os.makedirs(mock_dir, exist_ok=True)
         ts = int(time.time())
         kafka_file = os.path.join(mock_dir, f"kafka_data_gen_{ts}.json")
@@ -914,7 +985,7 @@ def api_upload_data():
         return jsonify({"success": False, "error": "仅支持 .json 文件"}), 400
 
     try:
-        mock_dir = os.path.join(_root, "mock")
+        mock_dir = os.path.join(_root, "..", "data", "mock")
         os.makedirs(mock_dir, exist_ok=True)
         save_path = os.path.join(mock_dir, file.filename)
         file.save(save_path)
@@ -943,7 +1014,7 @@ def api_launch_replay():
     route_file = data.get("route_file", "redis_route.json")
     target_drones = data.get("target_drones", None)
 
-    mock_dir = os.path.join(_root, "mock")
+    mock_dir = os.path.join(_root, "..", "data", "mock")
     data_path = os.path.join(mock_dir, data_file)
     route_path = os.path.join(mock_dir, route_file)
 
@@ -1440,7 +1511,7 @@ def _get_scheduler():
                     record = jdm.download_file(int(json_file_id))
                     if record:
                         # 写入 mock/ 目录供仿真使用
-                        mock_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mock")
+                        mock_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "mock")
                         os.makedirs(mock_dir, exist_ok=True)
                         fpath = os.path.join(mock_dir, record["name"])
                         with open(fpath, "w", encoding="utf-8") as f:

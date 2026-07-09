@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>仿真执行 — UTM 模拟器</title>
+  <link rel="stylesheet" href="/static/lib/leaflet/leaflet.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="/static/lib/leaflet/leaflet.js"></script>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    @keyframes map-spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <h1>🛩️ UTM 模拟器控制台</h1>
+      <span class="version">utm_moc52 v3.1</span>
+    </div>
+    <nav class="topbar-nav" id="top-nav"></nav>
+    <div class="topbar-right">
+      <span id="connection-dot" class="dot red"></span>
+      <span id="connection-text">未连接</span>
+      <span class="separator">|</span>
+      <span id="sim-status-badge" class="badge stopped">已停止</span>
+    </div>
+  </header>
+
+  <div class="app-layout">
+    <aside id="left-sidebar"></aside>
+
+    <main class="dashboard-3col">
+      <!-- ★ 左栏：仿真参数配置 ★ -->
+      <aside class="panel panel-config">
+        <h2>⚙️ 仿真参数配置</h2>
+
+        <div class="form-group">
+          <label for="mode-select">运行模式</label>
+          <select id="mode-select">
+            <option value="dynamic">🎮 动态仿真 — 实时生成计划+仿真计算遥测</option>
+            <option value="replay">🔁 预生成回放(循环) — mock目录JSON循环发射</option>
+            <option value="replay_once">▶️ 预生成回放(单次) — 数据耗尽自动停止</option>
+            <option value="scene">🎬 场景文件注入 — 选择JSON按间隔发射</option>
+            <option value="plan">📐 Redis计划插值 — 从计划路线数学插值生成遥测</option>
+          </select>
+          <div id="mode-description" class="mode-description"></div>
+          <div class="script-tag-line">
+            <span>🔧 调用脚本:</span><code id="mode-script-tag" class="script-tag">simulation_core.py (Simulator → sim_manager.py)</code>
+          </div>
+        </div>
+
+        <div id="scene-params" style="display:none;">
+          <div class="form-group">
+            <label>场景文件</label>
+            <select id="scene-file-select" multiple style="width:100%;height:60px;background:#0d1b2a;color:#82aaff;border:1px solid #2a3a5c;font-size:12px;"></select>
+            <button id="btn-refresh-scene-files" class="btn btn-small" style="margin-top:4px;">🔄 刷新场景文件列表</button>
+          </div>
+          <div class="form-group">
+            <label for="scene-interval">发射间隔(ms)</label>
+            <input type="number" id="scene-interval" value="1000" min="100" max="10000" step="100" style="width:100%;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:4px 8px;border-radius:3px;">
+          </div>
+          <div class="form-group">
+            <label for="scene-timestamp-mode">时间戳模式</label>
+            <select id="scene-timestamp-mode" style="width:100%;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:4px 8px;border-radius:3px;">
+              <option value="replace">replace — 替换为当前时间</option>
+              <option value="align">align — 保留相对偏移，对齐首条</option>
+              <option value="preserve">preserve — 保留原始时间戳</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="scene-loop">
+              <input type="checkbox" id="scene-loop"> 循环发射（数据耗尽后重新开始）
+            </label>
+          </div>
+        </div>
+
+        <div id="replay-params" style="display:none;">
+          <div class="form-group">
+            <label for="replay-data-file">遥测数据文件 (mock/)</label>
+            <select id="replay-data-file" style="width:100%;background:#0d1b2a;color:#82aaff;border:1px solid #2a3a5c;font-size:12px;"></select>
+          </div>
+          <div class="form-group">
+            <label for="replay-route-file">航线数据文件 (mock/)</label>
+            <select id="replay-route-file" style="width:100%;background:#0d1b2a;color:#82aaff;border:1px solid #2a3a5c;font-size:12px;"></select>
+            <button id="btn-refresh-replay-files" class="btn btn-small" style="margin-top:4px;">🔄 刷新文件列表</button>
+          </div>
+        </div>
+
+        <div id="plan-params" style="display:none;">
+          <div class="form-group">
+            <label>选择要仿真的航线 <span id="plan-route-summary"></span></label>
+            <div id="plan-route-list" class="plan-route-list">
+              <div class="empty-hint">请先在右侧地图中加载航线，或在此刷新</div>
+            </div>
+            <div style="margin-top:4px;display:flex;gap:4px;">
+              <button id="btn-plan-select-all" class="btn btn-small">全选</button>
+              <button id="btn-plan-deselect-all" class="btn btn-small">取消全选</button>
+              <button id="btn-plan-refresh-routes" class="btn btn-small">🔄 刷新航线列表</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="target-drones">目标无人机架数 <span id="drones-value">1</span></label>
+          <input type="range" id="target-drones" min="1" max="5000" value="1" step="1">
+          <div class="range-labels"><span>1</span><span>1000</span><span>3000</span><span>5000</span></div>
+        </div>
+
+        <div class="form-group">
+          <label for="nfz-enabled"><input type="checkbox" id="nfz-enabled" checked> 生成禁飞区</label>
+          <label for="nfz-count" class="sub-label">数量</label>
+          <input type="number" id="nfz-count" value="3" min="0" max="10" disabled>
+          <div class="mode-description" style="margin-top:2px;">仅在 🎮 动态仿真 模式下生效</div>
+        </div>
+
+        <!-- ★ 环境选择器（替代连接信息） ★ -->
+        <div class="form-group">
+          <label for="env-select">选择仿真环境</label>
+          <div class="env-selector" style="padding:0;border-bottom:none;">
+            <select id="env-select">
+              <option value="">— 选择环境 —</option>
+            </select>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+            <button id="btn-env-activate" class="btn btn-small">🔘 激活选中环境</button>
+            <span id="env-status" style="font-size:11px;color:var(--text-dim);"></span>
+          </div>
+          <div class="env-current" id="env-current-info"></div>
+        </div>
+
+        <div class="action-buttons">
+          <button id="btn-start" class="btn btn-start">▶ 启动仿真</button>
+          <button id="btn-stop" class="btn btn-stop" disabled>⏹ 停止仿真</button>
+        </div>
+
+        <div class="action-buttons" style="margin-top:0;">
+          <button id="btn-test-conn" class="btn btn-secondary">🔌 测试连接</button>
+          <span id="conn-test-result" style="font-size:12px;margin-left:8px;"></span>
+        </div>
+
+        <div class="form-group">
+          <label>运行历史</label>
+          <ul id="history-list" class="history-list"><li class="empty-hint">暂无运行记录</li></ul>
+        </div>
+      </aside>
+
+      <!-- ★ 中栏：实时监控 + 运行日志 ★ -->
+      <section class="panel" style="display:flex;flex-direction:column;overflow:hidden;">
+        <h2>📊 实时监控</h2>
+        <div class="status-cards">
+          <div class="card"><div class="card-label">Redis</div><div class="card-value"><span id="ind-redis" class="indicator red"></span><span id="redis-status">未连接</span></div></div>
+          <div class="card"><div class="card-label">Kafka</div><div class="card-value"><span id="ind-kafka" class="indicator red"></span><span id="kafka-status">未连接</span></div></div>
+          <div class="card"><div class="card-label">活跃无人机</div><div class="card-value big" id="drones-count">0</div></div>
+          <div class="card"><div class="card-label">Kafka 吞吐</div><div class="card-value big" id="kafka-tp">0 <small>条/秒</small></div></div>
+          <div class="card"><div class="card-label">运行时长</div><div class="card-value big" id="uptime">00:00:00</div></div>
+          <div class="card"><div class="card-label">错误计数</div><div class="card-value" id="error-count">0</div></div>
+        </div>
+        <div class="charts-row">
+          <div class="chart-box"><canvas id="chart-drones"></canvas></div>
+          <div class="chart-box"><canvas id="chart-kafka"></canvas></div>
+        </div>
+
+        <!-- ★ 运行日志（类似系统日志的结构） ★ -->
+        <div class="log-panel" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;">
+          <h3 style="display:flex;justify-content:space-between;align-items:center;">
+            <span>📋 运行日志</span>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <label style="font-size:10px;color:var(--text-dim);"><input type="checkbox" class="run-log-type-cb" value="sim_status" checked> 状态</label>
+              <label style="font-size:10px;color:var(--text-dim);"><input type="checkbox" class="run-log-type-cb" value="redis_route" checked> 航线</label>
+              <label style="font-size:10px;color:var(--text-dim);"><input type="checkbox" class="run-log-type-cb" value="kafka_telemetry" checked> Kafka</label>
+              <label style="font-size:10px;color:var(--text-dim);"><input type="checkbox" class="run-log-type-cb" value="other" checked> 其他</label>
+              <button id="btn-export-log" class="btn btn-small">📥 导出</button>
+              <button id="btn-clear-log" class="btn btn-small">🧹 清空</button>
+            </div>
+          </h3>
+          <div class="log-stream" id="log-stream" style="flex:1;max-height:none;">
+            <div class="log-empty">等待日志...</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ★ 右栏：飞行计划可视化 ★ -->
+      <section class="panel panel-map">
+        <h2>🗺️ 飞行计划可视化</h2>
+        <div class="map-toolbar">
+          <button id="btn-load-plans" class="btn btn-small">📡 加载航线</button>
+          <button id="btn-load-nfzs" class="btn btn-small">🚫 加载禁飞区</button>
+          <button id="btn-clear-map" class="btn btn-small">🧹 清除</button>
+          <span id="map-stats" style="font-size:12px;color:#8899aa;margin-left:8px;"></span>
+        </div>
+        <div id="map-container">
+          <div id="map-loading" style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;color:#8899aa;font-size:14px;z-index:1000;position:relative;">
+            <div style="width:32px;height:32px;border:3px solid #2a3f56;border-top-color:#00b4d8;border-radius:50%;animation:map-spin 0.8s linear infinite;margin-bottom:10px;"></div>
+            🗺️ 地图加载中...
+          </div>
+        </div>
+        <div id="map-legend" class="map-legend"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/js/common.js"></script>
+  <script src="/static/js/charts.js"></script>
+  <script src="/static/js/map.js"></script>
+  <script src="/static/js/run.js"></script>
+  <script>initCommon('/run');</script>
+</body>
+</html>

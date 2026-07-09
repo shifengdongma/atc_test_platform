@@ -728,3 +728,411 @@ http://localhost:5000
 | 新增数据库表 | 1（sim_system_logs） |
 | 状态 | ✅ 已完成，语法验证通过 |
 
+---
+
+### 2026-07-09: 系统日志板块 2 项 Bug 修复 — 告警详情 + 飞行计划计数
+
+> 上一轮修复（7/8）未能彻底解决 Issue 3（告警无详情）和 Issue 2（飞行计划计数不准），本轮定位到共同根因——JWT Token 缓存永不过期。
+
+#### 根因分析
+
+两个 bug 共同根因：`SituationMonitor._get_token()` 首次获取 JWT Token 后永久缓存在 `self._jwt_token`，过期后不刷新。`Jwt_Token_get.py` 模块级 `_token_cache` 有完善的过期检测（`exp > time.time() + 60`），但 `_get_token()` 只在首次调用时进入 `get_jwt_token()`，之后直接返回缓存，完全绕过模块级缓存机制。
+
+Token 过期后：
+- WebSocket 连接仍存活（已建立的长连接），`alarmStatistic`/`flowStatistic` 消息正常到达
+- 但 `_fetch_alert_details()` 和 `_fetch_plan_details()` 两个 REST API 调用全部静默失败返回 `None`
+- 前端显示 "（无告警详情，来自 alarmStatistic 计数）"，飞行计划数仅反映 WS 统计数（与 Redis 不一致）
+
+附加问题：
+- `alarmStatistic` 去重逻辑在 API 调用前就更新 `_last_alarm_count`，API 失败后同计数消息被跳过，永不重试
+- REST API 失败仅 `print()` 到控制台，前端无任何提示
+
+#### 修改文件
+
+**`utm_simulator/situation_monitor.py`**（修改）— 核心修复：
+- 新增 `_parse_token_exp()` 静态方法，解析 JWT exp 时间戳
+- 改写 `_get_token()`：返回缓存前检查 `exp > time.time() + 60`，过期则清除缓存并重新调用 `Jwt_Token_get.get_jwt_token()`（利用其模块级缓存+自动刷新）
+- 修复 `alarmStatistic` 去重：仅 API 调用成功时更新 `_last_alarm_count`，失败时保持旧值允许下次重试
+- `_fetch_alert_details()` 失败时推送错误日志到 `LogStreamer.push("sim_status", msg)`
+- `_fetch_plan_details()` 拆分为 API 优先 + Redis 兜底两级：
+  - `_fetch_plan_details_from_api()` — 调用 `POST /flight/plan/realtimePlanPage`
+  - `_fetch_plan_details_from_redis()` — 直接读取 Redis `BIZ_DATA:UAV_ROUTE` Hash，解析 `flightPlanList[]`
+- flowStatistic 处理器增加 Redis 交叉校验：若实际计划数 > WS 统计数，标记 `countMismatch: true`
+- 新增文件头导入：`from redis_client import RedisClient`、`import env as _env`
+
+**`utm_simulator/web/static/js/logs.js`**（修改）— 前端状态优化：
+- `renderAlarmTab()`: 区分三种告警状态：
+  - 有 `warnings` 数据 → 正常渲染告警详情
+  - `alarmStatistic` 来源且 `total > 0` 但无 `warnings` → "⏳ 告警详情获取中…（REST API 请求）"
+  - `alarmStatistic` 来源且 `total == 0` → "当前无告警 ✅"
+- `renderPlanTab()`: 新增计数不匹配提示：
+  - `countMismatch` 为 true → "⚠️ 实际计划: N 条"
+  - `totalCount` 有值但无 `plans` → "(计划列表 API 不可用)"
+
+**`utm_simulator/web/static/css/style.css`**（修改）— 样式补充：
+- 新增 `.alarm-item-loading`（warning 色斜体）、`.alarm-item-empty`（success 色）、`.alarm-item-error`（danger 色）三个告警状态 CSS 类
+
+#### 本次汇总
+
+| 操作 | 文件数 |
+|------|--------|
+| 修改 | 3（situation_monitor.py, logs.js, style.css） |
+| 新增 Python 方法 | 3（_parse_token_exp, _fetch_plan_details_from_api, _fetch_plan_details_from_redis） |
+| 重写 Python 方法 | 2（_get_token, _fetch_plan_details） |
+| 修复 Bug | 2 个（告警详情缺失 + 飞行计划计数不准） |
+| 状态 | ✅ 已完成，待验证 |
+
+---
+
+### 2026-07-09: 系统架构文档 v4.0 生成
+
+> 更新 `docs/系统架构文档.md` 从 v3.1（仅覆盖 utm_simulator 仿真核心）到 v4.0（覆盖全部三个子系统）
+
+#### 文档扩展内容
+
+| 章节 | 内容 |
+|------|------|
+| 系统架构总览 | 新增 Web 控制台 + 态势监控 + 日志流 完整架构图 |
+| 目录与文件架构 | 从 ~30 文件扩展到 ~160 文件完整清单（utm_simulator + atc_api_autotest + atc_ha_test） |
+| 核心数据流 | 新增态势监控数据流（STOMP→situation_monitor→log_streamer→前端）+ HA测试数据流 |
+| 前端架构 | 新增 6 页面路由表 + 10 JS 模块职责矩阵 + WebSocket 通信协议 |
+| 后端架构 | 新增运行时对象生命周期图、数据管理层（4表SQLite）、API桥接与AI集成 |
+| 仿真运行模式 | 新增三种模式对比表 + 数据生成工具链 |
+| 测试框架 | 新增 API自动化测试架构层次 + HA测试标准流程 + 双集群基础设施对照表 |
+| 基础设施与依赖 | 新增 10 个外部系统连接信息表 + Python依赖清单 |
+| 关键技术决策 | 新增 8 项技术决策说明（STOMP自实现/JWT双缓存/API+Redis兜底/复合键去重等） |
+| 常用命令速查 | 新增涵盖仿真/测试/工具/诊断的完整命令参考 |
+
+#### 本次汇总
+
+| 操作 | 文件数 |
+|------|--------|
+| 重写 | 1（docs/系统架构文档.md） |
+| 版本 | v3.1 → v4.0 |
+| 状态 | ✅ 已完成 |
+
+---
+
+### 2026-07-09: 修复四种仿真模式无法选择JSON数据并启动
+
+> 来源计划: `C:\Users\keda\.claude\plans\redis-json-polished-stream.md`
+> 问题: 五种仿真模式中仅 `plan`（Redis计划插值）能正常工作，其余 `dynamic`/`replay`/`replay_once`/`scene` 四种均无法正确选择 JSON 模拟数据并启动
+
+#### 根因分析
+
+**`dynamic` 模式** — `sim_manager.py` 与 `simulation_core.py` API 不匹配（7 处错误）：
+
+| # | 错误代码 | 问题 |
+|---|---------|------|
+| 1 | `self.simulator.generate_plan(drone_ids, count)` | `generate_plan()` 签名只接受 `type="plan"`（1 个字符串参数），不接受 2 个位置参数。且返回单个 FlightPlan 非列表 |
+| 2 | `plan.uniqueProductIdentificationCode` | FlightPlan 无此属性，正确为 `plan.aircraft.uid.decode("utf-8")` |
+| 3 | `self.simulator.remove_finished()` | Simulator 无此方法，`step()` 内部管理 `last_finished_uids` |
+| 4 | `self.simulator.active_count` | 无此属性，正确为 `len(self.simulator.agents)` |
+| 5 | `_telemetry_list_to_kafka()` 直接遍历 `t.uniqueProductIdentificationCode` | `step()` 返回 `[{"current": TelemetryData, "history": [...]}]` 格式，需从 `item["current"]` 提取，且字段在 `t.location.lon/lat/alt` 非扁平 |
+| 6 | `nfz.airspaceId` | DynamicNoFlyZone 无此属性，正确为 `nfz.uid` |
+| 7 | `UAV_IDENTIFIERS[:target_drones]` 传给 `generate_plan()` | `generate_plan()` 自行从 `ACTIVE_UAV_IDENTIFIERS` 选取标识符，不接受外部传入 |
+
+**`replay` 模式** — 双重缺失：
+1. `web_server.py:234` 调用 `SimulationManager.start()` 时未传入 `replay_data_file`/`replay_route_file`，用户选择被忽略
+2. `config.html` 中 `replay-params` div 为空，缺失文件选择器 `<select>` 元素
+
+**`replay_once`/`scene` 模式** — 前端缺失：
+1. `config.html` 中 `scene-params` 和 `replay-params` div 均为空占位（原只存在于 `index.html`）
+2. `config.js` 缺少 `refreshSceneFileList()`/`refreshReplayFileList()` 函数（原只存在于 `app.js`，而 `config.html` 不加载 `app.js`）
+
+**附带修复** — task history 404：
+1. `config.js:207` `loadTaskHistory([])` — `[]` 在 JS 中为 truthy，`([]||'0')` = `[]`，`[].toString()` = `""` → URL 双斜杠 `/api/schedule/tasks//history` → 404
+
+#### 修改文件
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-09 | `utm_simulator/sim_manager.py` | 修改 (~90 行) | ✅ 完成 | `_init_dynamic_mode`/`_tick_dynamic`/`_telemetry_list_to_kafka`/`_nfz_to_json`/`_init_replay_mode` 共 5 个方法修复 |
+| 2026-07-09 | `utm_simulator/web_server.py` | 修改 (~41 行) | ✅ 完成 | `_sim_loop()` 分离 dynamic/replay 分支，replay 传入 file 参数 |
+| 2026-07-09 | `utm_simulator/web/pages/config.html` | 修改 (~38 行) | ✅ 完成 | `scene-params` + `replay-params` 填充完整选择器 HTML |
+| 2026-07-09 | `utm_simulator/web/static/js/config.js` | 修改 (~47 行) | ✅ 完成 | 新增 `refreshSceneFileList`/`refreshReplayFileList` + `updateMode()` 调用 + task history 修复 |
+
+#### `sim_manager.py` 修复详解
+
+**`_init_dynamic_mode()`** (line 310-342) — 重写：
+```python
+# 修复前: 传入不存在参数，期望返回列表
+drone_ids = UAV_IDENTIFIERS[:sim_cfg.target_drones]
+plans = self.simulator.generate_plan(drone_ids, sim_cfg.target_drones)  # TypeError!
+for plan in plans:
+    uid = plan.uniqueProductIdentificationCode  # AttributeError!
+
+# 修复后: 循环调用，正确提取 UID
+generated = 0
+for _ in range(sim_cfg.target_drones):
+    plan = self.simulator.generate_plan()
+    uid = plan.aircraft.uid.decode("utf-8")
+    route_json = self._plan_to_route_json(plan)
+    self.redis.hset(REDIS_FLIGHT_PLAN_KEY, uid, route_json)
+    generated += 1
+```
+
+**`_tick_dynamic()`** (line 426-463) — 重写：
+- `self.simulator.remove_finished()` → `self.simulator.last_finished_uids`（step() 内部自动管理）
+- `self.simulator.active_count` → `len(self.simulator.agents)`
+- 补充无人机: `generate_plan()` 循环调用
+
+**`_telemetry_list_to_kafka()`** (line 629-657) — 重写：
+```python
+# 修复前: 把 dict 当 TelemetryData 用
+for t in telemetry_list:
+    msg["uniqueProductIdentificationCode"] = t.uniqueProductIdentificationCode  # 不存在
+    msg["longitude"] = t.longitude  # 在 t.location.lon 里
+
+# 修复后: 从包装字典提取 TelemetryData
+for item in telemetry_list:
+    t = item["current"]
+    uid_str = t.uid.decode("utf-8").rstrip("\x00")
+    msg["uniqueProductIdentificationCode"] = uid_str
+    msg["longitude"] = t.location.lon
+    msg["latitude"] = t.location.lat
+    msg["geodeticAltitude"] = t.location.alt
+```
+
+**`_nfz_to_json()`** (line 612-627) — 修复字段映射：
+- `nfz.airspaceId` → `nfz.uid.decode("utf-8")`
+- `nfz.typeCode` → `nfz.type`
+- `nfz.lowestHeight`/`highestHeight` → `nfz.geometry.min_alt`/`max_alt`
+- `nfz.times` → 从 `start_time`/`end_time` 构造
+
+#### 本次汇总
+
+| 操作 | 文件数 |
+|------|--------|
+| 修改 | 4 |
+| 修复 Bug | 4 个模式（dynamic/replay/replay_once/scene）|
+| 附带修复 | 1 个（task history 404） |
+| 修复 API 调用错误 | 7 处（sim_manager.py 中） |
+| 新增 JS 函数 | 2 个（refreshSceneFileList/refreshReplayFileList） |
+| 状态 | ✅ 已完成，待验证 |
+
+---
+
+### 2026-07-09: 系统架构文档目录全覆盖 + Docker 容器化部署配置
+
+> 来源: 用户需求
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-09 | `docs/系统架构文档.md` | 修改（v4.0→v5.0） | ✅ 完成 | 三、目录与文件架构 覆盖全项目15个顶层目录 |
+| 2026-07-09 | `docker/Dockerfile` | 重写 | ✅ 完成 | `docker build -f docker/Dockerfile ..` 语法正确 |
+| 2026-07-09 | `docker/docker-compose.yml` | 重写 | ✅ 完成 | 服务定义/端口/挂载/环境变量/健康检查/日志轮转 |
+| 2026-07-09 | `docker/.env.example` | 新建 | ✅ 完成 | 安全模板，无真实凭证 |
+| 2026-07-09 | `docker/.dockerignore` | 新建 | ✅ 完成 | 排除 env.py/缓存/归档/文档/.git |
+| 2026-07-09 | `docker/entrypoint.sh` | 新建 | ✅ 完成 | Redis/Kafka连通性检测+SIGTERM优雅退出 |
+| 2026-07-09 | `docker/env.conf` | 修改 | ✅ 完成 | 移除真实Redis/Kafka密码，标记已弃用 |
+| 2026-07-09 | `docker/run.py` | 删除 | ✅ 完成 | 空文件，功能由 entrypoint.sh 替代 |
+| 2026-07-09 | `docker/README.md` | 新建 | ✅ 完成 | 部署操作手册（环境变量/快速部署/验证步骤） |
+
+**本次汇总**：
+
+| 操作 | 文件数 |
+|------|--------|
+| 修改 | 3（架构文档、Dockerfile、docker-compose.yml、env.conf） |
+| 新建 | 4（.env.example、.dockerignore、entrypoint.sh、README.md） |
+| 删除 | 1（run.py） |
+
+**核心成果**：
+1. ✅ 系统架构文档"三、目录和文件结构"从覆盖 3 个模块扩展到全项目 **15 个顶层目录 + 根级配置文件**，标注 `★`核心/`[旧]`历史/`[待归档]` 状态
+2. ✅ `docker/` 从 4 个简陋占位文件升级为 **7 文件完整部署套件**：多阶段 Dockerfile（Python 3.11-slim + Flask + Socket.IO）、docker-compose（端口/挂载/环境变量/健康检查/日志轮转）、入口脚本（连通性检测+优雅退出）、.dockerignore（排除敏感+非必要文件）
+3. ✅ 安全处理：清除 `env.conf` 中 2 组真实 Redis 密码 + Dockerfile 不 COPY env.py（通过宿主机挂载注入）
+
+---
+
+### 2026-07-09: 项目文件架构优化 — Web前端/数据文件独立 + 路径全量修正
+
+> 来源: 用户需求 + `docs/初始系统架构文档.md`
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-09 | `web/` 顶层目录（含 pages/ static/ lib/） | 新建 + 移动 | ✅ 完成 | 20个前端文件从 `utm_simulator/web/` 移出 |
+| 2026-07-09 | `data/mock/` 顶层目录 | 新建 + 移动 | ✅ 完成 | 5个JSON数据文件从 `utm_simulator/mock/` 移出 |
+| 2026-07-09 | `data/templates/` 顶层目录 | 新建 + 移动 | ✅ 完成 | 3个模板从 `utm_simulator/flight_task_templates/` 移出 |
+| 2026-07-09 | `data/uploads/` 顶层目录 | 新建 | ✅ 完成 | 预留上传JSON存储目录 |
+| 2026-07-09 | `utm_simulator/web_server.py` | 修改 | ✅ 完成 | static_folder + send_from_directory + mock_dir 等 15+处路径修正 |
+| 2026-07-09 | `utm_simulator/json_data_manager.py` | 修改 | ✅ 完成 | _MOCK_DIR 路径修正 |
+| 2026-07-09 | `utm_simulator/web_data_gen_bridge.py` | 修改 | ✅ 完成 | _mock_path() + 默认输出路径修正 |
+| 2026-07-09 | `utm_simulator/sim_manager.py` | 修改 | ✅ 完成 | mock_dir 路径修正 |
+| 2026-07-09 | `utm_simulator/sim_api_bridge.py` | 修改 | ✅ 完成 | template_dir 路径修正（2处） |
+| 2026-07-09 | `utm_simulator/tools/create_data.py` | 修改 | ✅ 完成 | MOCK_DIR 路径修正 |
+| 2026-07-09 | `utm_simulator/tools/run_kafka.py` | 修改 | ✅ 完成 | MOCK_DIR 路径修正 |
+| 2026-07-09 | `utm_simulator/tools/run_kafka_alive.py` | 修改 | ✅ 完成 | MOCK_DIR 路径修正 |
+| 2026-07-09 | `utm_simulator/tools/nfzs.py` | 修改 | ✅ 完成 | MOCK_DIR 路径修正 |
+| 2026-07-09 | `utm_simulator/tools/check_hash_id_collision.py` | 修改 | ✅ 完成 | MOCK_DIR 路径修正 |
+| 2026-07-09 | `utm_simulator/tools/create_data_scenes.py` | 修改 | ✅ 完成 | 批量配置+argparse默认值 全量路径修正 |
+| 2026-07-09 | `docker/Dockerfile` | 修改 | ✅ 完成 | 增加 COPY web/ data/ |
+| 2026-07-09 | `docker/docker-compose.yml` | 修改 | ✅ 完成 | 增加 ../data:/app/data 卷挂载 |
+| 2026-07-09 | `docker/.dockerignore` | 修改 | ✅ 完成 | mock/ 排除限定为 utm_simulator/mock/ |
+
+**本次汇总**：
+
+| 操作 | 文件数 |
+|------|--------|
+| 新建目录 | 4（web/pages/, web/static/, data/mock/, data/templates/, data/uploads/） |
+| 移动文件 | ~25（web前端20个 + mock JSON 5个 + 模板3个 + HTML 3个） |
+| 修改 Python | 11（web_server + 3个管理器 + 6个tools脚本 + bridge） |
+| 修改配置 | 3（Dockerfile + docker-compose.yml + .dockerignore） |
+| 状态 | ✅ 已完成，路径解析 + 模块导入验证通过 |
+
+**核心成果**：
+1. ✅ 将 `utm_simulator/` 恢复为接近原始架构的仿真核心目录，Web前端独立为顶层 `web/` 模块
+2. ✅ 创建 `data/` 顶层目录（mock/ + templates/ + uploads/），统一管理所有JSON数据文件
+3. ✅ 全量修正 11 个 Python 文件中 30+ 处硬编码路径，通过 `conda run` 验证所有模块导入正常
+4. ✅ Docker 部署同步更新：Dockerfile COPY 新目录 + docker-compose 卷挂载 data/ 持久化
+
+---
+
+### 2026-07-09: 第二轮架构优化 — Python 模块解耦移出（database/common/services）
+
+> 来源: 用户需求 + `docs/SYSTEM_ARCHITECTURE.md` 初始架构对比分析
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-09 | `database/` 顶层目录（含 `__init__.py`） | 新建 + 移动 | ✅ 完成 | 5个DB模块 + data.db 从 utm_simulator/ 移出 |
+| 2026-07-09 | `common/` 顶层目录（含 `__init__.py`） | 新建 + 移动 | ✅ 完成 | 6个公共模块从 utm_simulator/ 移出 |
+| 2026-07-09 | `services/ai/` 顶层目录（含 `__init__.py`） | 新建 + 移动 | ✅ 完成 | ai_data_gen.py 移出 |
+| 2026-07-09 | `data/schemas/` 目录 | 新建 + 移动 | ✅ 完成 | 4个JSON Schema文件从 utm_simulator/schemas/ 移出 |
+| 2026-07-09 | `utm_simulator/web_server.py` | 修改 | ✅ 完成 | 添加 database/ common/ 到 sys.path |
+| 2026-07-09 | `utm_simulator/sim_manager.py` | 修改 | ✅ 完成 | 添加 database/ common/ 到 sys.path |
+| 2026-07-09 | `utm_simulator/cli.py` | 修改 | ✅ 完成 | 添加 database/ common/ 到 sys.path |
+| 2026-07-09 | `utm_simulator/ai_integration.py` | 修改 | ✅ 完成 | 添加 database/ common/ 到 sys.path |
+| 2026-07-09 | `utm_simulator/tests/conftest.py` | 修改 | ✅ 完成 | 添加 database/ common/ 到 sys.path |
+| 2026-07-09 | `common/config.py` | 修改 | ✅ 完成 | env.py 查找路径增加 `../utm_simulator/env.py` |
+| 2026-07-09 | `database/env_manager.py` | 修改 | ✅ 完成 | config.json→`../common/config.json`，env.py→`../utm_simulator/env.py` |
+| 2026-07-09 | `docker/Dockerfile` | 修改 | ✅ 完成 | 增加 COPY database/ common/ services/ |
+| 2026-07-09 | `docker/.dockerignore` | 修改 | ✅ 完成 | 为 database/data.db 添加 `!` 例外规则 |
+
+**不可移出文件（10个）及原因**：
+
+| 文件 | 保留原因 |
+|------|---------|
+| `sim_manager.py` | 深度导入 RedisClient/KafkaProducerClient/Simulator |
+| `web_server.py` | 导入 sim_manager/RedisClient/KafkaProducerClient |
+| `situation_monitor.py` | 导入 redis_client/env |
+| `web_data_gen_bridge.py` | 通过命名空间钩子调用 tools/ 脚本 |
+| `cli.py` | 导入 sim_manager/redis_client/kafka_proc |
+| `sim_api_bridge.py` | 导入 redis_client + 外部 atc_api_autotest |
+| `ai_integration.py` | 导入 redis_client/kafka_proc |
+| `test_e2e_sim.py` | 导入 sim_api_bridge/redis_client/kafka_proc |
+| `simulation_core0609.py` | 旧版参考副本（simulation_core v3.0之前） |
+| `kafka_proc_1.0.py` | 旧版参考副本（kafka_proc v1.0） |
+
+**本次汇总**：
+
+| 操作 | 文件数 |
+|------|--------|
+| 新建目录 | 4（database/, common/, services/ai/, data/schemas/） |
+| 移动文件 | 14（5个database模块 + 6个common模块 + 4个JSON schema + 1个AI + data.db） |
+| 创建 `__init__.py` | 4（database, common, services, services/ai） |
+| 修改 Python | 7（web_server, sim_manager, cli, ai_integration, conftest, config, env_manager） |
+| 修改配置 | 2（Dockerfile, .dockerignore） |
+| 状态 | ✅ 已完成，10个模块全部导入验证通过 |
+
+**核心成果**：
+1. ✅ `utm_simulator/` 已恢复至与 `SYSTEM_ARCHITECTURE.md` 初始架构基本一致：仅保留仿真核心 + 10个深度耦合的不可移出模块
+2. ✅ 提取 3 个独立顶层模块：`database/`（持久化）、`common/`（基础设施）、`services/ai/`（AI服务）
+3. ✅ 全量修正 7 个文件导入路径 + 2 个文件内部路径，`conda run` 验证 10 个模块全部导入正常
+4. ✅ 不可移出的 10 个文件均有明确的耦合原因分析，不做强行拆分
+
+---
+
+### 2026-07-09: 页面重构 — 定时任务独立 + 仿真配置/执行合并 + 新增3个占位页 + 左侧导航栏
+
+> 来源计划: `C:\Users\keda\.claude\plans\1-2-2-1-rustling-thompson.md`
+> 需求: 页面架构重组，9个功能模块，左+顶双导航
+
+#### 1. 导航基础改造
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-09 | `web/static/js/common.js` | 修改 | ✅ 完成 | NAV_PAGES 从6项更新为9项；新增 `renderSidebar()` 函数；`initCommon()` 同时调用顶栏+侧边栏渲染 |
+| 2026-07-09 | `web/static/css/style.css` | 修改 (~80行追加) | ✅ 完成 | 新增 `.app-layout` 水平flex布局、`#left-sidebar`/`.sidebar-header`/`.sidebar-item` 侧边栏样式、`.dashboard-3col` 三栏等宽grid、`.placeholder-page` 居中占位样式、`.env-selector` 环境选择器样式；响应式适配 |
+
+**NAV_PAGES 新旧对照**：
+
+| 序号 | 旧 | 新 |
+|------|-----|-----|
+| 1 | `/config` 仿真配置 | `/run` 仿真执行 |
+| 2 | `/run` 仿真执行 | `/schedule` 定时任务 ★ |
+| 3 | `/generate` 数据生成 | `/generate` 数据生成 |
+| 4 | `/data` 数据管理 | `/data` 数据管理 |
+| 5 | `/env` 环境管理 | `/basicdata` 基础数据 ★ |
+| 6 | `/logs` 系统日志 | `/performance` 性能 ★ |
+| 7 | — | `/ha` 高可用 ★ |
+| 8 | — | `/env` 环境管理 |
+| 9 | — | `/logs` 系统日志 |
+
+#### 2. 后端路由调整
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-09 | `utm_simulator/web_server.py` | 修改 | ✅ 完成 | `/`→`/run`；`/config` 改为重定向到 `/run`；新增 `/schedule`、`/performance`、`/ha`、`/basicdata` 共4个页面路由 |
+
+#### 3. 定时任务独立页面
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-09 | `web/pages/schedule.html` | 新建 | ✅ 完成 | 双栏布局（左:内联表单 + 右:任务列表+执行历史），含侧边栏 |
+| 2026-07-09 | `web/static/js/schedule.js` | 新建 (~150行) | ✅ 完成 | 从 config.js 提取：任务CRUD（loadTaskList/editTask/deleteTask/pauseTask/resumeTask/runTaskNow）、表单保存/重置、JSON文件列表刷新、执行历史 |
+
+#### 4. 仿真配置 + 仿真执行合并为三栏"仿真执行"页
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-09 | `web/pages/run.html` | 重写 (~200行) | ✅ 完成 | **三栏等宽布局**：左(仿真参数配置+环境选择器)、中(实时监控+运行日志含类型过滤)、右(飞行计划可视化地图)；删除原有"连接信息"(Redis/Kafka输入框+保存按钮) |
+| 2026-07-09 | `web/static/js/run.js` | 重写 (~360行) | ✅ 完成 | **合并 config.js + run.js**：模式切换(5种)+参数联动+启停控制+环境选择器(loadEnvSelector/激活按钮)+状态监控(updateMonitor)+趋势图(addChartData)+地图(loadFlightPlans/loadNoFlyZones)+运行日志(含类型过滤checkbox)+WebSocket双事件合并 |
+
+**run.js 关键合并逻辑**：
+- `fetchConfig()` — 加载后端当前配置（模式/架数/禁飞区）
+- `loadEnvSelector()` — 从 `/api/env/list` 加载环境列表填充下拉框
+- `addLog(msg, type)` — 日志带类型标记，`renderFilteredLogs()` 根据checkbox过滤显示（sim_status/redis_route/kafka_telemetry/other）
+- `setRunningState()` — 启停时禁用模式选择器/参数面板/所有表单控件
+- 删除原有的 `btn-save-conn`（保存连接配置）和 `cfg-redis-host`/`cfg-redis-port`/`cfg-kafka-url` DOM引用
+
+#### 5. 3个占位页面
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-09 | `web/pages/performance.html` | 新建 | ✅ 完成 | 占位页（📈 性能监控 — 功能开发中） |
+| 2026-07-09 | `web/pages/ha.html` | 新建 | ✅ 完成 | 占位页（🔁 高可用管理 — 功能开发中） |
+| 2026-07-09 | `web/pages/basicdata.html` | 新建 | ✅ 完成 | 占位页（🗄️ 基础数据管理 — 功能开发中） |
+
+#### 6. 现有页面添加左侧导航栏
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-09 | `web/pages/generate.html` | 修改 | ✅ 完成 | 添加 `<div class="app-layout"><aside id="left-sidebar">` 包装 |
+| 2026-07-09 | `web/pages/data.html` | 修改 | ✅ 完成 | 添加 `<div class="app-layout"><aside id="left-sidebar">` 包装 |
+| 2026-07-09 | `web/pages/env.html` | 修改 | ✅ 完成 | 添加 `<div class="app-layout"><aside id="left-sidebar">` 包装 |
+| 2026-07-09 | `web/pages/logs.html` | 修改 | ✅ 完成 | 添加 `<div class="app-layout"><aside id="left-sidebar">` 包装 |
+
+#### 7. 旧配置页简化
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-09 | `web/pages/config.html` | 简化 | ✅ 完成 | 替换为 meta-refresh 跳转页，自动跳转至 `/run` |
+
+### 本次汇总
+
+| 操作 | 文件数 |
+|------|--------|
+| 新建 | 5（schedule.html/js + 3个占位页） |
+| 修改 | 8（common.js + style.css + web_server.py + config.html + 4个页面侧边栏） |
+| 重写 | 2（run.html + run.js） |
+| 新增页面路由 | 4 个 |
+| 新增导航项 | 3 个（定时任务/基础数据/性能/高可用，合并后净增3） |
+| 删除功能 | 1 个（"连接信息" Redis/Kafka 输入框+保存按钮 → 改为环境选择器下拉框） |
+| 状态 | ✅ 已完成，待验证 |
+
+**关键架构变更**：
+1. ✅ 页面从 6 个增加到 9 个功能模块（仿真执行/定时任务/数据生成/数据管理/基础数据/性能/高可用/环境管理/系统日志）
+2. ✅ 双导航系统：顶部横向导航栏 + 左侧纵向导航栏（·sidebar 200px宽，暗色主题统一风格）
+3. ✅ 仿真配置 + 仿真执行合并为统一三栏页面，删除连接信息直接输入，改为环境选择器（复用 /api/env/list 和 /api/env/{id}/activate）
+4. ✅ 定时任务从配置页右栏独立为完整功能页面
+5. ✅ 3个新板块（性能/高可用/基础数据）预留路由+页面+导航，待后续开发
+

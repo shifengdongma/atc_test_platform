@@ -86,12 +86,15 @@ window.offWsEvent = function(event, callback) {
 
 // ── 导航栏渲染 ────────────────────────────────────────────────────
 var NAV_PAGES = [
-  { href: '/config',    icon: '⚙️', label: '仿真配置' },
-  { href: '/run',       icon: '▶️', label: '仿真执行' },
-  { href: '/generate',  icon: '📊', label: '数据生成' },
-  { href: '/data',      icon: '📁', label: '数据管理' },
-  { href: '/env',       icon: '🔧', label: '环境管理' },
-  { href: '/logs',      icon: '📋', label: '系统日志' },
+  { href: '/run',        icon: '▶️', label: '仿真执行' },
+  { href: '/schedule',   icon: '⏰', label: '定时任务' },
+  { href: '/generate',   icon: '📊', label: '数据生成' },
+  { href: '/data',       icon: '📁', label: '数据管理' },
+  { href: '/basicdata',  icon: '🗄️', label: '基础数据' },
+  { href: '/performance',icon: '📈', label: '性能' },
+  { href: '/ha',         icon: '🔁', label: '高可用' },
+  { href: '/env',        icon: '🔧', label: '环境管理' },
+  { href: '/logs',       icon: '📋', label: '系统日志' },
 ];
 
 window.renderNavbar = function(activePath) {
@@ -104,6 +107,19 @@ window.renderNavbar = function(activePath) {
     html += '<a class="' + cls + '" href="' + p.href + '">' + p.icon + ' ' + p.label + '</a>';
   }
   nav.innerHTML = html;
+};
+
+// ── 左侧侧边栏渲染 ──────────────────────────────────────────────────
+window.renderSidebar = function(activePath) {
+  var sidebar = document.getElementById('left-sidebar');
+  if (!sidebar) return;
+  var html = '<div class="sidebar-header">📋 功能模块</div>';
+  for (var i = 0; i < NAV_PAGES.length; i++) {
+    var p = NAV_PAGES[i];
+    var cls = (p.href === activePath) ? 'sidebar-item active' : 'sidebar-item';
+    html += '<a class="' + cls + '" href="' + p.href + '">' + p.icon + ' ' + p.label + '</a>';
+  }
+  sidebar.innerHTML = html;
 };
 
 // ── 连接状态检查 ──────────────────────────────────────────────────
@@ -215,6 +231,7 @@ window.syncRunningState = async function() {
 
 window.initCommon = function(activePath) {
   window.renderNavbar(activePath);
+  window.renderSidebar(activePath);
   window.getSocket();
   window.syncRunningState();
 };

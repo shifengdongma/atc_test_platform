@@ -822,6 +822,66 @@ def api_save_config():
         return jsonify({"success": False, "message": f"写入文件失败: {e}"}), 500
 
 
+# ── 数据文件格式检测（Task: 数据管理显示适用模式） ─────────────
+
+def _detect_file_format(content_str: str) -> Dict[str, Any]:
+    """分析 JSON 文件内容，返回格式类型和兼容的仿真模式。
+
+    Returns:
+        {"format": "telemetry"|"flight_plan"|"redis_route"|"unknown",
+         "format_label": 中文格式名,
+         "compatible_modes": ["scene","replay","replay_once","plan"...]}
+    """
+    result = {"format": "unknown", "format_label": "未知格式", "compatible_modes": []}
+    if not content_str or not content_str.strip():
+        return result
+
+    try:
+        data = json.loads(content_str)
+    except (json.JSONDecodeError, TypeError):
+        return result
+
+    # 检测1: redis_route 格式 [{"key": "...", "value": {...}}]
+    if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+        first = data[0]
+        if "key" in first and "value" in first:
+            result["format"] = "redis_route"
+            result["format_label"] = "Redis航线"
+            result["compatible_modes"] = ["plan", "replay"]
+            return result
+
+        # 检测2: telemetry 格式 (有 longitude + latitude)
+        if "longitude" in first and "latitude" in first:
+            # 同时检查是否有 flightPlanList
+            has_plan = "flightPlanList" in first
+            result["format"] = "telemetry"
+            result["format_label"] = "遥测轨迹" + (" + 飞行计划" if has_plan else "")
+            result["compatible_modes"] = ["scene", "replay", "replay_once"]
+            if has_plan:
+                result["compatible_modes"].append("plan")
+            return result
+
+        # 检测3: flight_plan 格式 (有 flightPlanList 但无 longitude)
+        if "flightPlanList" in first:
+            result["format"] = "flight_plan"
+            result["format_label"] = "飞行计划"
+            result["compatible_modes"] = ["plan", "replay"]
+            return result
+
+    # 检测4: dict 格式的 redis_route
+    if isinstance(data, dict):
+        # 可能是单个 flight plan
+        if "flightPlanList" in data:
+            result["format"] = "flight_plan"
+            result["format_label"] = "飞行计划(单条)"
+            result["compatible_modes"] = ["plan", "replay"]
+            return result
+
+    # 未知格式 — 允许用户尝试所有模式
+    result["compatible_modes"] = ["scene", "replay", "replay_once", "plan"]
+    return result
+
+
 # ── 数据文件管理 API（Task 1: 前端数据可视化增强） ─────────────
 
 @app.route("/api/data/files", methods=["GET"])
@@ -838,20 +898,24 @@ def api_list_data_files():
             size = os.path.getsize(path)
             try:
                 with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+                    # 只读取前 64KB 用于格式检测，避免大文件 OOM
+                    content = f.read(65536)
+                    data = json.loads(content)
                 if isinstance(data, list):
                     records = len(data)
                     sample_keys = list(data[0].keys())[:5] if data else []
                 elif isinstance(data, dict):
-                    # redis_route.json 之类的是 dict
                     records = len(data)
                     sample_keys = list(data.keys())[:5]
                 else:
                     records = 0
                     sample_keys = []
+                # 格式检测
+                fmt_info = _detect_file_format(content)
             except Exception:
                 records = -1
                 sample_keys = []
+                fmt_info = {"format": "unknown", "format_label": "解析失败", "compatible_modes": []}
 
             files.append({
                 "name": name,
@@ -859,6 +923,9 @@ def api_list_data_files():
                 "size_kb": round(size / 1024, 1),
                 "records": records,
                 "sample_keys": sample_keys,
+                "format": fmt_info["format"],
+                "format_label": fmt_info["format_label"],
+                "compatible_modes": fmt_info["compatible_modes"],
             })
 
     return jsonify({"files": sorted(files, key=lambda f: f["name"])})
@@ -1472,6 +1539,13 @@ def api_db_list_files():
     page = request.args.get("page", 1, type=int)
     page_size = request.args.get("page_size", 20, type=int)
     result = mgr.list_files(category=category, keyword=keyword, page=page, page_size=page_size)
+    # 为每个文件附加格式检测信息（仅取内容前 64KB）
+    for f in result.get("files", []):
+        content = f.get("content", "") or ""
+        fmt = _detect_file_format(content[:65536])
+        f["format"] = fmt["format"]
+        f["format_label"] = fmt["format_label"]
+        f["compatible_modes"] = fmt["compatible_modes"]
     return jsonify(result)
 
 

@@ -16,7 +16,7 @@ async function loadFiles(page) {
   var cat = $('#data-category').value;
   var kw = $('#data-search').value.trim();
   var tbody = $('#data-tbody');
-  tbody.innerHTML = '<tr><td colspan="7" class="empty-hint">加载中...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="8" class="empty-hint">加载中...</td></tr>';
 
   try {
     var params = '?page=' + page + '&page_size=20';
@@ -25,16 +25,22 @@ async function loadFiles(page) {
     var data = await apiGet('/api/data/db/files' + params);
 
     if (!data.files || !data.files.length) {
-      tbody.innerHTML = '<tr><td colspan="7" class="empty-hint">暂无数据，点击"导入 mock/"或"新建"</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" class="empty-hint">暂无数据，点击"导入 mock/"或"新建"</td></tr>';
       $('#data-pagination').innerHTML = '';
       return;
     }
 
     tbody.innerHTML = data.files.map(function(f) {
+      var modes = f.compatible_modes || [];
+      var modeBadges = modes.length ? modes.map(function(m) {
+        var labels = {scene:'🎬场景',replay:'🔁回放',replay_once:'▶️单次',plan:'📐计划'};
+        return '<span class="mode-badge mode-' + m + '">' + (labels[m]||m) + '</span>';
+      }).join(' ') : '<span class="mode-badge mode-unknown">通用</span>';
       return '<tr>' +
         '<td>' + f.id + '</td>' +
         '<td style="font-family:Consolas,monospace;color:#4CAF50;cursor:pointer;" onclick="previewFile(' + f.id + ')">' + escHtml(f.name||'') + '</td>' +
         '<td>' + escHtml(f.category||'-') + '</td>' +
+        '<td style="font-size:10px;">' + modeBadges + '</td>' +
         '<td>' + (f.size_bytes ? formatSize(f.size_bytes) : '-') + '</td>' +
         '<td>' + escHtml(f.created_by||'-') + '</td>' +
         '<td style="font-size:10px;">' + escHtml((f.updated_at||f.created_at||'').substring(0,10)) + '</td>' +

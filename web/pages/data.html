@@ -29,11 +29,8 @@
         <input type="text" id="data-search" placeholder="🔍 搜索文件名/描述..." style="flex:1;min-width:150px;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:6px 10px;border-radius:4px;font-size:13px;">
         <select id="data-category" style="background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:6px 10px;border-radius:4px;font-size:13px;">
           <option value="">全部分类</option>
-          <option value="route">航线数据</option>
-          <option value="telemetry">遥测数据</option>
-          <option value="scene">场景文件</option>
-          <option value="template">任务模板</option>
         </select>
+        <button id="btn-category-manage" class="btn btn-small" title="管理分类">📂 分类</button>
         <button id="btn-data-refresh" class="btn btn-small">🔄 刷新</button>
         <button id="btn-data-upload" class="btn btn-small">📤 上传 JSON</button>
         <button id="btn-data-import" class="btn btn-small">📥 导入 mock/</button>
@@ -44,8 +41,8 @@
       <!-- 文件列表 -->
       <div style="max-height:380px;overflow-y:auto;margin-bottom:8px;">
         <table class="data-table" style="width:100%;font-size:12px;">
-          <thead><tr><th>ID</th><th>文件名</th><th>分类</th><th>大小</th><th>来源</th><th>时间</th><th>操作</th></tr></thead>
-          <tbody id="data-tbody"><tr><td colspan="7" class="empty-hint">加载中...</td></tr></tbody>
+          <thead><tr><th>ID</th><th>文件名</th><th>分类</th><th>适用模式</th><th>大小</th><th>来源</th><th>时间</th><th>操作</th></tr></thead>
+          <tbody id="data-tbody"><tr><td colspan="8" class="empty-hint">加载中...</td></tr></tbody>
         </table>
       </div>
 
@@ -59,9 +56,27 @@
           <div style="display:flex;gap:4px;">
             <button id="btn-preview-download" class="btn btn-small" disabled>⬇ 下载</button>
             <button id="btn-preview-export" class="btn btn-small" disabled>📤 导出到 mock/</button>
+            <button id="btn-preview-close" class="btn btn-small">✕ 关闭预览</button>
           </div>
         </div>
         <div id="data-preview" class="data-preview" style="max-height:350px;"><div class="empty-hint">选择文件以预览内容</div></div>
+      </div>
+
+      <!-- 分类管理弹窗 -->
+      <div id="category-modal" class="modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:100;justify-content:center;align-items:center;">
+        <div class="modal" style="background:var(--bg-panel);border:1px solid var(--border);border-radius:8px;padding:20px;width:420px;max-height:70vh;overflow-y:auto;">
+          <h3 style="margin-bottom:12px;">📂 管理分类</h3>
+          <div style="display:flex;gap:6px;margin-bottom:10px;">
+            <input type="text" id="new-category-name" placeholder="输入新分类名称" style="flex:1;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:13px;">
+            <button id="btn-category-add" class="btn btn-small">➕ 添加</button>
+          </div>
+          <div id="category-list" style="max-height:300px;overflow-y:auto;">
+            <div class="empty-hint">加载中...</div>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+            <button id="btn-category-modal-close" class="btn btn-small">关闭</button>
+          </div>
+        </div>
       </div>
 
       <!-- 编辑/新建弹窗 -->
@@ -69,7 +84,7 @@
         <div class="modal" style="background:var(--bg-panel);border:1px solid var(--border);border-radius:8px;padding:20px;width:500px;max-height:80vh;overflow-y:auto;">
           <h3 id="edit-modal-title">新建 JSON 文件</h3>
           <div style="margin-bottom:10px;"><label style="font-size:12px;color:var(--text-dim);">文件名 *</label><input type="text" id="edit-name" style="width:100%;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:13px;"></div>
-          <div style="margin-bottom:10px;"><label style="font-size:12px;color:var(--text-dim);">分类</label><select id="edit-category" style="width:100%;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:13px;"><option value="telemetry">遥测数据</option><option value="route">航线数据</option><option value="scene">场景文件</option><option value="template">任务模板</option></select></div>
+          <div style="margin-bottom:10px;"><label style="font-size:12px;color:var(--text-dim);">分类</label><input type="text" id="edit-category" list="category-datalist" style="width:100%;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:13px;" placeholder="输入或选择分类"><datalist id="category-datalist"></datalist></div>
           <div style="margin-bottom:10px;"><label style="font-size:12px;color:var(--text-dim);">描述</label><input type="text" id="edit-desc" style="width:100%;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:13px;"></div>
           <div style="margin-bottom:10px;"><label style="font-size:12px;color:var(--text-dim);">JSON 内容</label><textarea id="edit-content" rows="12" style="width:100%;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:12px;font-family:Consolas,monospace;resize:vertical;"></textarea></div>
           <div style="display:flex;gap:8px;justify-content:flex-end;">

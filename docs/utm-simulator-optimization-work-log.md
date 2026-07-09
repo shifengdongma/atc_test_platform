@@ -1395,3 +1395,150 @@ mysql_db_manager.query()
 3. ✅ **优雅降级**: MySQL 不可用时自动 fallback 到 SQLite，系统零中断
 4. ✅ **config.json 路径统一**: Web UI 保存 → common/config.json，load_config() 读取 → common/config.json，闭环一致
 5. ✅ **数据迁移脚本**: 一键将 SQLite 历史数据迁入 MySQL，幂等安全
+
+---
+
+### 2026-07-09: 数据生成页参数提示优化 — 58条参数说明 + 11个模块描述
+
+> 来源: 用户需求 — 数据生成功能参数多但无说明，用户不知道各参数含义和如何设置
+> 需求: 对每个小模块中需要填入的参数进行简单提示和解释
+
+#### 实施方案
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-09 | `web/pages/generate.html` | 重写 (~250行) | ✅ 完成 | 4大模块 10个子模块全覆盖 |
+
+**改造内容**：
+- 新增 58 条 `.param-hint` 参数说明（位于每个输入框下方，灰色小字）
+- 新增 11 个 `.subtab-desc` 模块功能描述（每个子模块顶部蓝色背景说明栏）
+- 新增 CSS 样式：`.param-hint`（灰色提示文字）+ `.subtab-desc`（蓝色功能说明栏）
+
+**覆盖的模块**：
+
+| 模块 | 子模块 | 参数提示数 | 模块描述 |
+|------|--------|-----------|---------|
+| 基础生成 | — | 6 | ✅ |
+| 单机场景 | 航线飞行 | 8 | ✅ |
+| | 偏离航路 | 8 | ✅ |
+| | 状态变更 | 5 | ✅ |
+| 多机场景 | 平行飞行 | 8 | ✅ |
+| | 偏离(高级) | 4 | ✅ |
+| | 碰撞预警 | 4 | ✅ |
+| | 状态告警 | 5 | ✅ |
+| 批量预设 | — | 0 | ✅ |
+| AI 生成 | — | 7 | ✅ |
+
+**参数说明示例**：
+- 架数: "生成多少架无人机的模拟数据，每架含飞行计划和航点列表"
+- 航向(°): "飞行方向角度: 0°=正北, 90°=正东, 180°=正南, 270°=正西"
+- 偏离量(度): "偏离原航线的角度偏移量，约 0.001度≈100米偏离"
+- 采样间隔(ms): "每隔多少毫秒生成一个轨迹点，1000ms=1秒一个点"
+
+#### 本次汇总
+
+| 操作 | 文件数 |
+|------|--------|
+| 重写 | 1（generate.html） |
+| 新增 CSS 样式 | 2（param-hint + subtab-desc） |
+| 新增参数提示 | 58 条 |
+| 新增模块描述 | 11 个 |
+| 状态 | ✅ 已完成 |
+
+---
+
+### 2026-07-09: 基础生成修复 — 输出遥测轨迹格式 + 数据管理适用模式显示 + 文件→模式绑定
+
+> 来源: 用户需求 — 三点联动优化
+> 1. 基础生成产出的文件不能在场景模式下使用（只有flightPlanList，缺少longitude/latitude）
+> 2. 数据管理页看不到JSON文件适用什么仿真模式
+> 3. 选中JSON文件后模式选择器应自动过滤为兼容模式
+
+#### 根因分析
+
+**问题1 — 基础生成格式不匹配** (`web_server.py:977-1007`):
+
+"基础生成" 产出的是**飞行计划格式**（含 `flightPlanList` + `routeList`），但缺少 `longitude`/`latitude`/`geodeticAltitude` 等遥测字段。`SceneEmitter` 场景模式需要的是遥测轨迹格式（每个记录是一个轨迹点）。基础生成每架无人机仅 1 条记录 → 场景模式瞬间耗尽。
+
+**问题2 — 数据管理无格式提示**:
+
+用户上传/生成文件后无法直观判断能用什么模式执行。不同生成脚本产出不同格式：
+- 遥测轨迹（含 lon/lat）→ scene/replay
+- Redis航线（key/value）→ plan/replay
+- 飞行计划（flightPlanList）→ plan/replay
+
+**问题3 — 模式选择无关联**:
+
+选中文件后 5 种模式全部显示，用户可能选错模式导致执行失败。
+
+#### 修改文件
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-09 | `utm_simulator/web_server.py` | 修改 (~110行) | ✅ 完成 | 基础生成: 航点插值→遥测轨迹点 + 双文件输出; `_detect_file_format()` 格式检测; API 响应增加格式字段 |
+| 2026-07-09 | `web/pages/data.html` | 修改 | ✅ 完成 | 表格新增"适用模式"列，colspan 7→8 |
+| 2026-07-09 | `web/static/js/data.js` | 修改 | ✅ 完成 | `loadFiles()` 渲染彩色模式徽章 |
+| 2026-07-09 | `web/static/js/run.js` | 重写 (~130行) | ✅ 完成 | `_fileFormats` 缓存 + `bindModeToFile()` 智能过滤 + 防递归保护 |
+| 2026-07-09 | `web/static/css/style.css` | 修改 | ✅ 完成 | 新增 `.mode-badge` 徽章样式（5种颜色） |
+
+#### 修复详解
+
+**基础生成修复** — `api_generate_data()`:
+```python
+# 修复前: 直接构建 routeList + flightPlanList，输出飞行计划格式
+generated.append({"uniqueProductIdentificationCode": uid, "flightPlanList": [...]})
+
+# 修复后: 沿航点路径每秒插值生成遥测轨迹点
+for step in range(steps):
+    telemetry_records.append({
+        "longitude": ..., "latitude": ..., "geodeticAltitude": ...,
+        "speed": 15.0, "trackAngle": ..., "operatingStatus": 2, ...
+    })
+# 输出两个文件: kafka_data_gen_xxx.json (遥测) + redis_route_gen_xxx.json (航线)
+```
+
+**格式检测函数** — `_detect_file_format()`:
+```
+读取JSON → 检测字段:
+  ├─ first["key"] && first["value"]  → redis_route 格式 → plan, replay
+  ├─ first["longitude"] && first["latitude"] → telemetry 格式 → scene, replay, replay_once
+  │   └─ + first["flightPlanList"] → 也兼容 plan
+  ├─ first["flightPlanList"] (无lon/lat) → flight_plan 格式 → plan, replay
+  └─ 其他 → unknown → 全部模式
+```
+
+**文件→模式绑定** — `bindModeToFile()`:
+```
+选中文件 → 查 _fileFormats → 获取 compatible_modes
+  ├─ 当前模式兼容 → 过滤下拉框仅显示兼容模式
+  └─ 当前模式不兼容 → 自动切换到 compatible_modes[0] + updateMode()
+_bindingInProgress 防递归保护
+```
+
+**模式徽章颜色**：
+
+| 模式 | 徽章 | 颜色 |
+|------|------|------|
+| scene | 🎬场景 | 橙色 #ffa500 |
+| replay | 🔁回放 | 蓝色 #82aaff |
+| replay_once | ▶️单次 | 浅蓝 #6a8adf |
+| plan | 📐计划 | 绿色 #2ecc71 |
+| unknown | 通用 | 灰色 #7a93a8 |
+
+#### 本次汇总
+
+| 操作 | 文件数 |
+|------|--------|
+| 修改 | 4（web_server.py + data.html + data.js + style.css） |
+| 重写 | 1（run.js ~130行） |
+| 新增 Python 函数 | 1（_detect_file_format） |
+| 新增 JS 函数 | 3（_loadFileListWithFormats + bindModeToFile + _restoreAllModes） |
+| 新增 CSS 样式 | 6（mode-badge + 5种模式颜色） |
+| 修复 Bug | 1（基础生成场景模式不可用） |
+| 状态 | ✅ 已完成 |
+
+**核心成果**：
+1. ✅ **基础生成格式修复**: 现在输出遥测轨迹格式（含 lon/lat/alt/speed/heading），场景模式可用；同时输出 redis_route 航线文件
+2. ✅ **数据管理适用模式显示**: 文件列表新增彩色模式徽章列，一目了然
+3. ✅ **文件→模式智能绑定**: 选中 JSON 文件后模式下拉框自动过滤，不兼容模式不显示
+4. ✅ **自动切换**: 当前模式与文件不兼容时自动切换到第一个兼容模式

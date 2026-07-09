@@ -14,10 +14,14 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
-from db_manager import query, query_one, insert, update, delete, query_all, _now
+from mysql_db_manager import query, query_one, insert, update, delete, query_all, _now
 
 TABLE = "sim_json_files"
-_MOCK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mock")
+_MOCK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "mock")
+
+# 确保数据库表已创建（MySQL 优先，SQLite 降级）
+from mysql_db_manager import init_tables as _init_tables
+_init_tables()
 
 
 def _ensure_mock_dir() -> str:
@@ -194,8 +198,32 @@ def _detect_category(fname: str, content: str) -> str:
 
 
 def get_categories() -> List[str]:
-    """获取所有分类列表。"""
-    return ["route", "telemetry", "scene", "template"]
+    """获取所有分类列表（从数据库 DISTINCT 读取）。"""
+    rows = query_all(TABLE)
+    cats = sorted(set(r.get("category", "") for r in rows if r.get("category", "").strip()))
+    return cats
+
+
+def rename_category(old_name: str, new_name: str) -> Dict[str, Any]:
+    """重命名分类：批量更新所有该分类的文件。"""
+    if not old_name or not new_name:
+        return {"success": False, "message": "分类名不能为空"}
+    rows = query(TABLE, where="category = ?", params=(old_name,))
+    count = len(rows)
+    for row in rows:
+        update(TABLE, row["id"], {"category": new_name})
+    return {"success": True, "message": f"已将 {count} 个文件从 '{old_name}' 改为 '{new_name}'", "count": count}
+
+
+def delete_category(name: str) -> Dict[str, Any]:
+    """删除分类：清空所有该分类文件的分类字段。"""
+    if not name:
+        return {"success": False, "message": "分类名不能为空"}
+    rows = query(TABLE, where="category = ?", params=(name,))
+    count = len(rows)
+    for row in rows:
+        update(TABLE, row["id"], {"category": ""})
+    return {"success": True, "message": f"已清空 {count} 个文件的分类 '{name}'", "count": count}
 
 
 # ── 保存生成数据 ────────────────────────────────────────────────────

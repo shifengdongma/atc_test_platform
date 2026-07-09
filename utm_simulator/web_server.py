@@ -805,7 +805,7 @@ def api_save_config():
 
     # 写入 config.json
     try:
-        cfg_path = os.path.join(_root, "config.json")
+        cfg_path = os.path.join(_root, "..", "common", "config.json")
         cfg_data = {
             "redis_ip": _current_config["redis_ip"],
             "redis_port": _current_config["redis_port"],

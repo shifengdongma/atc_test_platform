@@ -36,7 +36,7 @@ async function loadEnvList() {
     var cur = data.current || {};
     info.innerHTML = '<strong>当前激活：</strong>Redis <code>' + (cur.redis_ip||'?') + ':' + (cur.redis_port||'?') +
       '</code> &nbsp;|&nbsp; Kafka <code>' + (cur.kafka_url||'?') + '</code>' +
-      (cur.kafka_url2 ? ' (镜像: ' + cur.kafka_url2 + ')' : '');
+      (cur.kafka_url2 ? ' (Kafka地址2: ' + cur.kafka_url2 + ')' : '');
   } catch(e) {
     tbody.innerHTML = '<tr><td colspan="5" class="empty-hint">加载失败: ' + e.message + '</td></tr>';
   }

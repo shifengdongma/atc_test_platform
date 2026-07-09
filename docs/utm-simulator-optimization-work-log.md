@@ -1307,3 +1307,91 @@ if os.path.exists(route_path):
 2. ✅ **Bug-B 修复**: `replay` 模式文件路径正确拼接 mock_dir，支持绝对路径和纯文件名
 3. ✅ **Bug-C 修复**: `plan` 模式启动时自动加载航线文件写入 Redis，PlanRunner 可正常工作
 4. ✅ **全链路打通**: 上传/生成 → 数据库存储 → 执行 → Redis 飞行计划 + Kafka 遥测 → 实时日志输出
+
+---
+
+### 2026-07-09: MySQL 持久化迁移 — 配置信息 + JSON文件内容统一存入 MySQL
+
+> 来源: 用户需求 — 附带发现 config.json 双文件不一致 + SQLite 单机限制
+> 目标: 将环境配置(sim_env_config)和JSON文件内容(sim_json_files)持久化到 MySQL
+
+#### 根因分析
+
+1. **config.json 双文件不一致**: Web UI `/api/sim/config/save` 写 `utm_simulator/config.json`，`load_config()`、`env_manager.get_current_config()` 读 `common/config.json`，Web UI 保存的配置永远不会被读取
+2. **SQLite 单机限制**: `database/db_manager.py` 管理 4 张 SQLite 表，数据存储在 `database/data.db`，多实例无法共享
+3. **MysqlDbClient 脆弱依赖**: 硬编码 `from env import MYSQL_*`，仅能导入 `atc_api_autotest/env.py`，Docker 注入的 `UTM_MYSQL_*` 环境变量未被消费
+
+#### 实施方案（7步）
+
+**Step 1 — 强化 MysqlDbClient** (`atc_api_autotest/api_tools/mysqldbclient.py`):
+- 将硬编码 `from env import MYSQL_*` 替换为 try/except 优雅导入 + `os.environ.get("UTM_MYSQL_*")` 环境变量 fallback
+- 优先级: UTM_MYSQL_* 环境变量 > atc_api_autotest/env.py > 默认值
+
+**Step 2 — 添加 MySQL 配置** (`utm_simulator/env.py`):
+- 追加 MYSQL_HOST/PORT/USER/PASSWORD/DATABASE/CHARSET 6 个变量
+
+**Step 3 — 创建 MySQL CRUD 适配层** (`database/mysql_db_manager.py` — **新建**):
+- 提供与 `db_manager.py` 完全一致的接口: `query`, `query_one`, `query_all`, `insert`, `update`, `delete`, `init_tables`, `_now`
+- 底层通过 `MysqlDbClient` 操作 MySQL，连接失败时自动 fallback 到 SQLite `db_manager`
+- `query()` 自动将 `?` 占位符转换为 MySQL 的 `%s`
+- `init_tables()` 创建 4 张 MySQL 表（`sim_env_config` / `sim_json_files` / `sim_scheduled_tasks` / `sim_task_logs`），DDL 从 SQLite 语法转为 MySQL（AUTOINCREMENT→AUTO_INCREMENT, TEXT→LONGTEXT, 无 ON UPDATE CURRENT_TIMESTAMP）
+
+**Step 4 — 更新 json_data_manager.py**:
+- `from db_manager import ...` → `from mysql_db_manager import ...`
+- 模块加载时调用 `init_tables()` 确保 MySQL 表已创建
+
+**Step 5 — 更新 env_manager.py**:
+- `from db_manager import ...` → `from mysql_db_manager import ...`
+- 重写 `set_default()`: 移除 raw `sqlite3.connect()` + `import sqlite3`，改用 `query_all()` + `update()` 遍历清零
+
+**Step 6 — 修复 config.json 写入路径** (`utm_simulator/web_server.py`):
+- `api_save_config()`: `os.path.join(_root, "config.json")` → `os.path.join(_root, "..", "common", "config.json")`
+- 与 `load_config()` 和 `env_manager.get_current_config()` 的读取路径统一
+
+**Step 7 — 数据迁移脚本** (`database/migrate_to_mysql.py` — **新建**):
+- 读取 SQLite `sim_env_config` / `sim_json_files` 全部记录 → 写入 MySQL 对应表
+- 幂等设计: 按 name 去重，同名记录跳过
+- 不删除 SQLite 原始数据（只读迁移）
+
+#### 修改文件
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-09 | `atc_api_autotest/api_tools/mysqldbclient.py` | 修改 | ✅ 完成 | 环境变量 fallback + try/except 导入 |
+| 2026-07-09 | `utm_simulator/env.py` | 修改 | ✅ 完成 | 追加 MYSQL_* 6 个变量 |
+| 2026-07-09 | `database/mysql_db_manager.py` | 新建 (~250行) | ✅ 完成 | MySQL CRUD + SQLite 自动降级 |
+| 2026-07-09 | `database/migrate_to_mysql.py` | 新建 (~150行) | ✅ 完成 | 一次性数据迁移，幂等 |
+| 2026-07-09 | `database/json_data_manager.py` | 修改 | ✅ 完成 | db_manager → mysql_db_manager |
+| 2026-07-09 | `database/env_manager.py` | 修改 | ✅ 完成 | db_manager → mysql_db_manager + 重写 set_default() |
+| 2026-07-09 | `utm_simulator/web_server.py` | 修改 | ✅ 完成 | config.json 路径修正 (utm_simulator/ → common/) |
+| 2026-07-09 | `web/pages/env.html` | 修改 | ✅ 完成 | Kafka 地址→Kafka 地址1, Kafka 镜像→Kafka 地址2 |
+| 2026-07-09 | `web/static/js/env.js` | 修改 | ✅ 完成 | (镜像:…)→(Kafka地址2:…) |
+
+#### 优雅降级设计
+
+```
+mysql_db_manager.query()
+  ├─ _get_client() → MySQL 可用?
+  │    ├─ YES → client.cursor.execute() → 返回结果
+  │    └─ NO  → 打印降级日志 → _sqlite.query() → 返回结果
+  └─ MySQL 异常 → 打印降级日志 → _sqlite.query() → 返回结果
+```
+
+无论 MySQL 是否可用，系统始终能正常工作（内存→SQLite→MySQL 三层降级）。
+
+#### 本次汇总
+
+| 操作 | 文件数 |
+|------|--------|
+| 新建 | 2（mysql_db_manager.py + migrate_to_mysql.py） |
+| 修改 | 7（mysqldbclient.py + env.py + json_data_manager.py + env_manager.py + web_server.py + env.html + env.js） |
+| 修复 Bug | 1（config.json 双文件不一致） |
+| 新增函数 | 11（query/query_one/query_all/insert/update/delete/init_tables/_now/_get_client/_ensure_mysql_tables/execute_raw） |
+| 状态 | ✅ 已完成，6 文件语法验证通过 |
+
+**核心成果**：
+1. ✅ **MysqlDbClient 强化**: 支持 UTM_MYSQL_* 环境变量 → Docker .env.example 注入的变量现在可被消费
+2. ✅ **MySQL CRUD 适配层**: 与 SQLite db_manager 完全一致接口，调用方无需改代码
+3. ✅ **优雅降级**: MySQL 不可用时自动 fallback 到 SQLite，系统零中断
+4. ✅ **config.json 路径统一**: Web UI 保存 → common/config.json，load_config() 读取 → common/config.json，闭环一致
+5. ✅ **数据迁移脚本**: 一键将 SQLite 历史数据迁入 MySQL，幂等安全

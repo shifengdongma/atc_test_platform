@@ -14,14 +14,14 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
-from db_manager import (
+from mysql_db_manager import (
     query_all, query_one, insert, update, delete, init_tables, _now,
 )
 
 TABLE = "sim_env_config"
 
 # config.json 路径
-_CONFIG_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+_CONFIG_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common", "config.json")
 
 
 def _ensure_tables() -> None:
@@ -64,19 +64,19 @@ def delete_env(env_id: int) -> bool:
 
 
 def set_default(env_id: int) -> bool:
-    """设为默认环境。"""
+    """设为默认环境（MySQL/SQLite 自适应）。"""
     _ensure_tables()
-    import sqlite3 as _sqlite3
-    import threading
-    with threading.Lock():
-        conn = __import__("db_manager")._get_conn()
-        try:
-            conn.execute(f"UPDATE {TABLE} SET is_default = 0")
-            conn.execute(f"UPDATE {TABLE} SET is_default = 1 WHERE id = ?", (int(env_id),))
-            conn.commit()
-            return True
-        finally:
-            conn.close()
+    try:
+        # 先清零所有环境，再将目标设为 1
+        all_envs = query_all(TABLE)
+        for env in all_envs:
+            if env.get("is_default"):
+                update(TABLE, env["id"], {"is_default": 0})
+        update(TABLE, int(env_id), {"is_default": 1})
+        return True
+    except Exception as e:
+        print(f"[env_manager] set_default 失败: {e}")
+        return False
 
 
 def activate_env(env_id: int) -> Dict[str, Any]:
@@ -154,7 +154,7 @@ def import_from_env_py() -> Dict[str, Any]:
 
 def _update_env_py(config: Dict[str, Any]) -> None:
     """尝试更新 env.py 文件中的连接地址（简单正则替换，仅更新主流配置行）。"""
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.py")
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "utm_simulator", "env.py")
     if not os.path.exists(env_path):
         return
     import re

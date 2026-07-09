@@ -90,9 +90,14 @@
 
         <div id="plan-params" style="display:none;">
           <div class="form-group">
+            <label for="plan-route-file">航线数据文件 (mock/)</label>
+            <select id="plan-route-file" style="width:100%;background:#0d1b2a;color:#82aaff;border:1px solid #2a3a5c;font-size:12px;"></select>
+            <button id="btn-refresh-plan-files" class="btn btn-small" style="margin-top:4px;">🔄 刷新文件列表</button>
+          </div>
+          <div class="form-group">
             <label>选择要仿真的航线 <span id="plan-route-summary"></span></label>
             <div id="plan-route-list" class="plan-route-list">
-              <div class="empty-hint">请先在右侧地图中加载航线，或在此刷新</div>
+              <div class="empty-hint">请先选择航线文件并加载，或在右侧地图中加载航线</div>
             </div>
             <div style="margin-top:4px;display:flex;gap:4px;">
               <button id="btn-plan-select-all" class="btn btn-small">全选</button>

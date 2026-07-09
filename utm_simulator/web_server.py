@@ -94,6 +94,7 @@ _current_config: Dict[str, Any] = {
     "scene_loop": False,
     # plan 模式参数
     "plan_selected_uids": None,  # 用户选择的航线 UID 列表，None=全部，[]=不执行任何，[...]=指定
+    "plan_route_file": "redis_route.json",  # plan 模式初始化用的航线文件（写入 Redis 后由 PlanRunner 插值）
     # replay_once 模式参数
     "data_file": "kafka_data.json",
     "route_file": "redis_route.json",
@@ -173,8 +174,16 @@ class SimulationRunner:
         self._thread: Optional[threading.Thread] = None
 
         # 构建 AppConfig 供 SimulationManager 使用
-        self._app_cfg = AppConfig()
+        # 从 load_config() 加载基础配置（env.py + config.json + UTM_* 环境变量），
+        # 再用前端配置覆盖 Redis/Kafka 连接参数，确保与 web 界面一致
+        self._app_cfg = load_config()
         self._app_cfg.simulation.target_drones = self.target_drones
+        # 覆盖为前端当前选择的连接参数（用户可能通过环境管理切换过）
+        self._app_cfg.redis.host = config.get("redis_ip", self._app_cfg.redis.host)
+        self._app_cfg.redis.port = int(config.get("redis_port", self._app_cfg.redis.port))
+        self._app_cfg.redis.password = getattr(_env, "redis_password", self._app_cfg.redis.password)
+        self._app_cfg.kafka.bootstrap_servers = config.get("kafka_url", self._app_cfg.kafka.bootstrap_servers)
+        self._app_cfg.kafka.bootstrap_servers_mirror = getattr(_env, "kafka_url2", self._app_cfg.kafka.bootstrap_servers_mirror)
 
         # SimulationManager 实例（dynamic/replay 模式）
         self._sim_mgr: Optional[SimulationManager] = None
@@ -210,8 +219,54 @@ class SimulationRunner:
                 _runtime_state["kafka_connected"] = False
 
     def _init_plan_mode(self) -> None:
-        """初始化 Redis 计划插值模式（复用 run_plan.py 的 PlanRunner 逻辑）。"""
+        """初始化 Redis 计划插值模式（复用 run_plan.py 的 PlanRunner 逻辑）。
+
+        先从指定的航线文件加载飞行计划写入 Redis，再启动 PlanRunner 进行插值遥测。
+        """
         from tools.run_plan import PlanRunner as _PlanRunner
+
+        # 先加载航线文件写入 Redis（PlanRunner 依赖 Redis 中已有飞行计划）
+        route_file = self.config.get("plan_route_file", "redis_route.json")
+        mock_dir = os.path.join(_root, "..", "data", "mock")
+        route_path = os.path.join(mock_dir, route_file) if not os.path.isabs(route_file) else route_file
+
+        if os.path.exists(route_path):
+            try:
+                import json as _json
+                import copy
+                with open(route_path, "r", encoding="utf-8") as f:
+                    route_list = _json.load(f)
+                now = time.time()
+                written = 0
+                for item in route_list:
+                    key = item.get("key")
+                    value = item.get("value")
+                    if key is None or value is None:
+                        continue
+                    val = copy.deepcopy(value)
+                    # 平移起降时间到当前时刻
+                    for plan in val.get("flightPlanList") or []:
+                        try:
+                            takeoff = plan.get("planTakeoffTime")
+                            land = plan.get("planLandTime")
+                            if takeoff is not None and land is not None:
+                                diff = now - takeoff
+                                plan["planTakeoffTime"] = now
+                                plan["planLandTime"] = land + diff
+                        except (TypeError, ValueError):
+                            pass
+                    client = RedisClient(
+                        self.config["redis_ip"], self.config["redis_port"],
+                        getattr(_env, "redis_password", ""),
+                    )
+                    client.hset(REDIS_FLIGHT_PLAN_KEY, key, _json.dumps(val, ensure_ascii=False))
+                    written += 1
+                _add_log(f"plan 模式: 已从 {os.path.basename(route_path)} 写入 {written} 条航线到 Redis")
+            except Exception as e:
+                _add_log(f"plan 模式: 加载航线文件失败: {e}")
+        else:
+            _add_log(f"plan 模式: 航线文件不存在 {route_path}，尝试从 Redis 读取已有数据")
+
         self._plan_runner = _PlanRunner(log_callback=_add_log)
         # 读取用户选择的航线 UID 列表
         # None = 未做选择（全部航线），[] = 明确取消全选（不执行任何航线），[...] = 指定航线
@@ -355,7 +410,8 @@ class SimulationRunner:
 
         elif self.mode == "scene":
             # 场景文件注入：使用 run_kafka_scene.py 的 SceneEmitter
-            scene_files = [os.path.join(_root, "mock", f) for f in self.config.get("scene_files", []) if f]
+            mock_dir = os.path.join(_root, "..", "data", "mock")
+            scene_files = [os.path.join(mock_dir, f) for f in self.config.get("scene_files", []) if f]
             scene_dir = self.config.get("scene_dir", None)
             scene_interval = self.config.get("scene_interval", 1000)
             scene_timestamp_mode = self.config.get("timestamp_mode", "replace")
@@ -594,7 +650,7 @@ def api_update_config():
         for key in ("mode", "target_drones", "nfz_enabled", "nfz_count",
                      "api_mode", "api_base_url",
                      "scene_interval", "timestamp_mode", "scene_loop",
-                     "data_file", "route_file", "plan_selected_uids"):
+                     "data_file", "route_file", "plan_selected_uids", "plan_route_file"):
             if key in data:
                 _current_config[key] = data[key]
     return jsonify({"success": True, "config": _current_config})
@@ -614,7 +670,7 @@ def api_start_sim():
     config = dict(_current_config)
     for key in ("mode", "target_drones", "nfz_enabled", "nfz_count",
                 "scene_files", "scene_interval", "timestamp_mode", "scene_loop",
-                "data_file", "route_file", "plan_selected_uids"):
+                "data_file", "route_file", "plan_selected_uids", "plan_route_file"):
         if key in data:
             config[key] = data[key]
 
@@ -1419,6 +1475,25 @@ def api_db_categories():
     """获取所有分类。"""
     mgr = _get_json_mgr()
     return jsonify({"categories": mgr.get_categories()})
+
+
+@app.route("/api/data/db/categories", methods=["PUT"])
+def api_db_rename_category():
+    """重命名分类。"""
+    data = request.get_json(silent=True) or {}
+    old_name = data.get("old_name", "").strip()
+    new_name = data.get("new_name", "").strip()
+    mgr = _get_json_mgr()
+    result = mgr.rename_category(old_name, new_name)
+    return jsonify(result)
+
+
+@app.route("/api/data/db/categories/<name>", methods=["DELETE"])
+def api_db_delete_category(name):
+    """删除分类（清空关联文件的分类字段）。"""
+    mgr = _get_json_mgr()
+    result = mgr.delete_category(name)
+    return jsonify(result)
 
 
 # ==================== AI 数据生成 API ================================

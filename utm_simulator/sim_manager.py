@@ -41,6 +41,13 @@ _root = os.path.dirname(os.path.abspath(__file__))
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
+# 公共模块路径（database/ common/ 已从 utm_simulator/ 移出到项目根目录）
+_database_path = os.path.join(_root, '..', 'database')
+_common_path = os.path.join(_root, '..', 'common')
+for _p in (_database_path, _common_path):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 from redis_client import RedisClient
 from kafka_proc import KafkaProducerClient, KafkaConsumerClient
 from simulation_core import Simulator, UAV_IDENTIFIERS
@@ -317,16 +324,16 @@ class SimulationManager:
             uid_start_offset=sim_cfg.uid_start_offset,
         )
 
-        # 生成初始批次飞行计划
-        drone_ids = UAV_IDENTIFIERS[:sim_cfg.target_drones]
-        plans = self.simulator.generate_plan(drone_ids, sim_cfg.target_drones)
-
-        for plan in plans:
-            uid = plan.uniqueProductIdentificationCode
+        # 循环生成初始批次飞行计划（generate_plan 每次只生成一个 FlightPlan）
+        generated = 0
+        for _ in range(sim_cfg.target_drones):
+            plan = self.simulator.generate_plan()
+            uid = plan.aircraft.uid.decode("utf-8")
             route_json = self._plan_to_route_json(plan)
             self.redis.hset(REDIS_FLIGHT_PLAN_KEY, uid, route_json)
+            generated += 1
 
-        self._add_log(f"动态仿真: 已生成 {len(plans)} 架无人机飞行计划并写入 Redis")
+        self._add_log(f"动态仿真: 已生成 {generated} 架无人机飞行计划并写入 Redis")
 
         # 禁飞区（可选）
         self._nfz_list: List[Any] = []
@@ -335,7 +342,8 @@ class SimulationManager:
             self._nfz_list = self.simulator.generate_nfzs(nfz_count)
             for nfz in self._nfz_list:
                 nfz_json = self._nfz_to_json(nfz)
-                self.redis.hset(REDIS_AIRSPACE_KEY, nfz.airspaceId, nfz_json)
+                nfz_id = nfz.uid.decode("utf-8") if isinstance(nfz.uid, bytes) else str(nfz.uid)
+                self.redis.hset(REDIS_AIRSPACE_KEY, nfz_id, nfz_json)
             self._add_log(f"已生成 {len(self._nfz_list)} 个禁飞区")
         except Exception as e:
             logger.warning("禁飞区生成失败（非致命）: %s", e)
@@ -346,9 +354,16 @@ class SimulationManager:
         route_file: Optional[str] = None,
     ) -> None:
         """预生成注入模式初始化：加载 JSON 数据文件，写入 Redis 航线。"""
-        mock_dir = os.path.join(_root, "mock")
-        data_path = data_file or os.path.join(mock_dir, "kafka_data.json")
-        route_path = route_file or os.path.join(mock_dir, "redis_route.json")
+        mock_dir = os.path.join(_root, "..", "data", "mock")
+        # 拼接完整路径：若传入的是纯文件名则拼接 mock_dir，绝对路径则直接使用
+        if data_file:
+            data_path = data_file if os.path.isabs(data_file) else os.path.join(mock_dir, data_file)
+        else:
+            data_path = os.path.join(mock_dir, "kafka_data.json")
+        if route_file:
+            route_path = route_file if os.path.isabs(route_file) else os.path.join(mock_dir, route_file)
+        else:
+            route_path = os.path.join(mock_dir, "redis_route.json")
 
         # 加载并写 Redis 航线
         if os.path.exists(route_path):
@@ -363,6 +378,8 @@ class SimulationManager:
                     self._shift_plan_times(val)
                     self.redis.hset(REDIS_FLIGHT_PLAN_KEY, key, json.dumps(val, ensure_ascii=False))
             self._add_log(f"已从 {os.path.basename(route_path)} 写入 {len(route_list)} 条航线到 Redis")
+        else:
+            self._add_log(f"航线数据文件不存在: {route_path} — 请先生成或上传数据文件")
 
         # 加载遥测数据并按 UID 建索引
         self._replay_index = {}
@@ -376,10 +393,37 @@ class SimulationManager:
             self._replay_cursors = {uid: 0 for uid in self._replay_index}
             self._add_log(f"已从 {os.path.basename(data_path)} 加载 {len(kafka_data)} 条遥测 ({len(self._replay_index)} 架无人机)")
         else:
-            self._add_log("未找到预生成数据文件，replay 模式遥测将为空")
+            self._add_log(f"遥测数据文件不存在: {data_path} — 请先生成或上传数据文件")
 
     def _init_plan_mode(self) -> None:
-        """Redis 计划插值模式：通过 PlanRunner 后台线程管理。"""
+        """Redis 计划插值模式：先加载航线文件写入 Redis，再通过 PlanRunner 后台线程插值。
+
+        PlanRunner 依赖 Redis 中已有飞行计划，因此需要先播种数据。
+        """
+        # 先尝试加载默认航线文件写入 Redis
+        mock_dir = os.path.join(_root, "..", "data", "mock")
+        default_route = os.path.join(mock_dir, "redis_route.json")
+        if os.path.exists(default_route):
+            try:
+                with open(default_route, "r", encoding="utf-8") as f:
+                    route_list = json.load(f)
+                now = time.time()
+                written = 0
+                for item in route_list:
+                    key = item.get("key")
+                    value = item.get("value")
+                    if key is None or value is None:
+                        continue
+                    val = copy.deepcopy(value)
+                    self._shift_plan_times(val)
+                    self.redis.hset(REDIS_FLIGHT_PLAN_KEY, key, json.dumps(val, ensure_ascii=False))
+                    written += 1
+                self._add_log(f"plan 模式: 已从 redis_route.json 写入 {written} 条航线到 Redis")
+            except Exception as e:
+                self._add_log(f"plan 模式: 加载航线文件失败: {e}")
+        else:
+            self._add_log("plan 模式: 默认航线文件不存在，尝试从 Redis 读取已有数据")
+
         try:
             from tools.run_plan import PlanRunner
         except ImportError as e:
@@ -425,22 +469,21 @@ class SimulationManager:
         if not self.simulator:
             return
 
-        # 步进仿真
+        # 步进仿真（step() 内部自动清理 state==5 的 agent 到 last_finished_uids）
         telemetry_list = self.simulator.step(1.0)
 
-        # 移除已完成无人机
-        finished = self.simulator.remove_finished()
-        for uid in finished:
+        # 打印已降落的无人机
+        for uid in self.simulator.last_finished_uids:
             self._add_log(f"无人机 {uid} 已降落，从仿真移除")
 
         # 补充新无人机维持目标架数
         sim_cfg = self.config.simulation
-        if self.simulator.active_count < sim_cfg.target_drones:
-            need = sim_cfg.target_drones - self.simulator.active_count
-            drone_ids = UAV_IDENTIFIERS[sim_cfg.uid_start_offset:sim_cfg.uid_start_offset + need]
-            new_plans = self.simulator.generate_plan(drone_ids, need)
-            for plan in new_plans:
-                uid = plan.uniqueProductIdentificationCode
+        active_count = len(self.simulator.agents)
+        if active_count < sim_cfg.target_drones:
+            need = sim_cfg.target_drones - active_count
+            for _ in range(need):
+                plan = self.simulator.generate_plan()
+                uid = plan.aircraft.uid.decode("utf-8")
                 route_json = self._plan_to_route_json(plan)
                 self.redis.hset(REDIS_FLIGHT_PLAN_KEY, uid, route_json)
                 self._add_log(f"新无人机 {uid} 加入仿真")
@@ -458,9 +501,6 @@ class SimulationManager:
                 k_ok = self.kafka_producer.is_connected()
                 if not r_ok or not k_ok:
                     self._add_log(f"连接异常: Redis={'OK' if r_ok else 'DOWN'} Kafka={'OK' if k_ok else 'DOWN'}")
-
-            # 更新活跃计划（只保留 simulator 中仍存在的）
-            active_uids = set(self.simulator.agents.keys())
 
     # ── Replay 模式 tick ────────────────────────────────────────────
 
@@ -608,16 +648,19 @@ class SimulationManager:
 
     def _nfz_to_json(self, nfz) -> str:
         """将禁飞区对象转为标准空域 JSON 字符串。"""
+        nfz_uid = nfz.uid.decode("utf-8").rstrip("\x00") if isinstance(nfz.uid, bytes) else str(nfz.uid)
         obj = {
-            "airspaceId": nfz.airspaceId,
-            "spcNo": getattr(nfz, "spcNo", ""),
-            "name": getattr(nfz, "name", "动态禁飞区"),
-            "typeCode": getattr(nfz, "typeCode", 1),
+            "airspaceId": nfz_uid,
+            "spcNo": getattr(nfz, "spcNo", nfz_uid),
+            "name": getattr(nfz, "name", f"动态禁飞区_{nfz_uid}"),
+            "typeCode": getattr(nfz, "type", 1),
             "status": getattr(nfz, "status", 1),
-            "times": getattr(nfz, "times", []),
+            "times": [
+                {"startTime": getattr(nfz, "start_time", 0), "endTime": getattr(nfz, "end_time", 0)}
+            ],
             "usagePurpose": getattr(nfz, "usagePurpose", ""),
-            "lowestHeight": getattr(nfz, "lowestHeight", 0.0),
-            "highestHeight": getattr(nfz, "highestHeight", 500.0),
+            "lowestHeight": nfz.geometry.min_alt if hasattr(nfz, "geometry") else 0.0,
+            "highestHeight": nfz.geometry.max_alt if hasattr(nfz, "geometry") else 500.0,
             "capacity": getattr(nfz, "capacity", 0),
             "monitorAbility": getattr(nfz, "monitorAbility", 1),
             "polygon": getattr(nfz, "polygon", {}),
@@ -625,23 +668,29 @@ class SimulationManager:
         return json.dumps(obj, ensure_ascii=False)
 
     def _telemetry_list_to_kafka(self, telemetry_list: list) -> List[Dict[str, Any]]:
-        """将 Simulator 遥测列表转为 Kafka 消息格式（与 main.py 一致）。"""
+        """将 Simulator 遥测列表转为 Kafka 消息格式（与 main.py 一致）。
+
+        simulator.step() 返回格式: [{"current": TelemetryData, "history": [...]}, ...]
+        需要从 item["current"] 提取 TelemetryData 对象。
+        """
         msgs = []
         now_ms = int(time.time() * 1000)
-        for t in telemetry_list:
+        for item in telemetry_list:
+            t = item["current"]  # 从包装字典中提取 TelemetryData
+            uid_str = t.uid.decode("utf-8").rstrip("\x00") if isinstance(t.uid, bytes) else str(t.uid)
             msg = dict(TELEMETRY_DEFAULTS)
             msg.update({
-                "uniqueProductIdentificationCode": t.uniqueProductIdentificationCode,
-                "realNameRegistrationSign": getattr(t, "realNameRegistrationSign", ""),
-                "longitude": t.longitude,
-                "latitude": t.latitude,
-                "trackAngle": t.trackAngle,
+                "uniqueProductIdentificationCode": uid_str,
+                "realNameRegistrationSign": getattr(t, "realNameRegistrationSign", uid_str),
+                "longitude": t.location.lon,
+                "latitude": t.location.lat,
+                "trackAngle": t.heading,
                 "speed": t.speed,
-                "geodeticAltitude": t.geodeticAltitude,
-                "verticalSpeed": getattr(t, "verticalSpeed", 0.0),
-                "relativeAltitude": getattr(t, "relativeAltitude", 0.0),
-                "ressureAltitude": getattr(t, "ressureAltitude", 0.0),
-                "operatingStatus": getattr(t, "operatingStatus", 2),
+                "geodeticAltitude": t.location.alt,
+                "verticalSpeed": t.verticalSpeed,
+                "relativeAltitude": t.relativeAltitude,
+                "ressureAltitude": t.ressureAltitude,
+                "operatingStatus": t.operatingStatus,
                 "timestamp": now_ms,
                 "sourceType": getattr(t, "sourceType", 1),
             })

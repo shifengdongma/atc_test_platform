@@ -9,6 +9,22 @@ var isRunning = false;
 var history = [];
 var logs = [];
 
+// ── URL 参数解析（支持从数据管理页跳转预填文件）─────────────────────
+var _urlParams = {};
+(function() {
+  var search = window.location.search.substring(1);
+  if (search) {
+    search.split('&').forEach(function(pair) {
+      var parts = pair.split('=');
+      if (parts.length === 2) {
+        _urlParams[decodeURIComponent(parts[0])] = decodeURIComponent(parts[1]);
+      }
+    });
+  }
+})();
+var _presetFileName = _urlParams['preset_file'] || null;
+var _presetMode = _urlParams['preset_mode'] || null;
+
 // ── 模式描述 ────────────────────────────────────────────────────────
 var modeDescriptions = {
   dynamic: '🎮 动态仿真：实时生成飞行计划，Simulator引擎计算遥测，持续运行。适合开发调试和实时测试。',
@@ -110,6 +126,16 @@ async function refreshSceneFileList() {
       sel.innerHTML = data.files.map(function(f) {
         return '<option value="' + f.name + '">' + f.name + ' (' + f.records + '条)</option>';
       }).join('');
+      // 如果有预设文件名，自动选中
+      if (_presetFileName) {
+        var opts = sel.options;
+        for (var i = 0; i < opts.length; i++) {
+          if (opts[i].value === _presetFileName) {
+            opts[i].selected = true;
+            break;
+          }
+        }
+      }
     }
   } catch(e) { sel.innerHTML = '<option>加载失败</option>'; }
 }
@@ -124,6 +150,16 @@ async function refreshReplayFileList() {
         dataSel.innerHTML = data.files.map(function(f) {
           return '<option value="' + f.name + '"' + (f.name.indexOf('kafka_data') >= 0 ? ' selected' : '') + '>' + f.name + '</option>';
         }).join('');
+        // 如果有预设文件名，自动选中
+        if (_presetFileName) {
+          var opts = dataSel.options;
+          for (var i = 0; i < opts.length; i++) {
+            if (opts[i].value === _presetFileName) {
+              opts[i].selected = true;
+              break;
+            }
+          }
+        }
       }
       if (routeSel) {
         routeSel.innerHTML = data.files.map(function(f) {
@@ -137,6 +173,8 @@ async function refreshReplayFileList() {
 async function loadPlanRouteList() {
   var list = document.getElementById('plan-route-list');
   if (!list) return;
+  // 同时刷新 plan 模式的文件选择器
+  await refreshPlanFileList();
   try {
     var data = await apiGet('/api/sim/plans?limit=200');
     if (typeof window.populatePlanRouteList === 'function') {
@@ -145,6 +183,29 @@ async function loadPlanRouteList() {
   } catch(e) {
     list.innerHTML = '<div class="empty-hint">加载航线失败，请检查服务连接</div>';
   }
+}
+
+async function refreshPlanFileList() {
+  var sel = document.getElementById('plan-route-file');
+  if (!sel) return;
+  try {
+    var data = await apiGet('/api/data/files');
+    if (data.files) {
+      sel.innerHTML = data.files.map(function(f) {
+        return '<option value="' + f.name + '"' + (f.name.indexOf('redis_route') >= 0 ? ' selected' : '') + '>' + f.name + '</option>';
+      }).join('');
+      // 如果有预设文件名，自动选中
+      if (_presetFileName) {
+        var opts = sel.options;
+        for (var i = 0; i < opts.length; i++) {
+          if (opts[i].value === _presetFileName) {
+            opts[i].selected = true;
+            break;
+          }
+        }
+      }
+    }
+  } catch(e) {}
 }
 
 // ── 加载配置 ────────────────────────────────────────────────────────
@@ -221,6 +282,7 @@ if (elBtnStart) elBtnStart.addEventListener('click', async function() {
     if (hasCheckboxes && typeof window.getSelectedPlanUids === 'function') {
       body.plan_selected_uids = window.getSelectedPlanUids();
     }
+    body.plan_route_file = (document.getElementById('plan-route-file')||{}).value || 'redis_route.json';
   }
   var result = await apiPost('/api/sim/start', body);
   if (result.success) {
@@ -268,6 +330,10 @@ if (elNfzOn) elNfzOn.addEventListener('change', function() { if (elNfzCnt) elNfz
 // Plan 刷新按钮
 var btnPlanRefresh = document.getElementById('btn-plan-refresh-routes');
 if (btnPlanRefresh) btnPlanRefresh.addEventListener('click', loadPlanRouteList);
+
+// Plan 文件列表刷新按钮
+var btnPlanFileRefresh = document.getElementById('btn-refresh-plan-files');
+if (btnPlanFileRefresh) btnPlanFileRefresh.addEventListener('click', refreshPlanFileList);
 
 // Scene 刷新按钮
 var btnRefScene = document.getElementById('btn-refresh-scene-files');
@@ -422,8 +488,17 @@ async function pollStatus() {
 
 // ── 初始化 ──────────────────────────────────────────────────────────
 async function initRun() {
-  // 加载配置
+  // 如果 URL 参数指定了模式，先设置模式选择器
+  if (_presetMode && elMode) {
+    elMode.value = _presetMode;
+  }
+  // 加载配置（会被 fetchConfig 覆盖模式，所以在此之后需要再设置）
   await fetchConfig();
+  // URL 预设模式覆盖后端默认配置
+  if (_presetMode && elMode) {
+    elMode.value = _presetMode;
+    updateMode(); // 触发对应参数面板显示
+  }
   // 加载环境列表
   await loadEnvSelector();
   // 初始化图表和地图
@@ -438,6 +513,13 @@ async function initRun() {
   // 首次加载地图数据
   setTimeout(loadFlightPlans, 500);
   setTimeout(loadNoFlyZones, 800);
+
+  // 提示预设文件
+  if (_presetFileName) {
+    setTimeout(function() {
+      showToast('已预选文件: ' + _presetFileName + ' (模式: ' + (_presetMode || 'replay') + ')', 'info');
+    }, 1000);
+  }
 }
 
 if (document.readyState === 'loading') {

@@ -1136,3 +1136,174 @@ for item in telemetry_list:
 4. ✅ 定时任务从配置页右栏独立为完整功能页面
 5. ✅ 3个新板块（性能/高可用/基础数据）预留路由+页面+导航，待后续开发
 
+---
+
+### 2026-07-09: 数据管理模块三项优化 — 关闭预览 + 自定义分类 + 执行跳转
+
+> 来源计划: `C:\Users\keda\.claude\plans\1-2-2-1-rustling-thompson.md`
+> 需求: 数据管理页功能增强
+
+#### 1. 关闭预览按钮
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-09 | `web/pages/data.html` | 修改 | ✅ 完成 | 预览区标题栏新增 `✕ 关闭预览` 按钮 |
+| 2026-07-09 | `web/static/js/data.js` | 修改 | ✅ 完成 | 新增 `closePreview()` 函数：清空预览内容 → 恢复占位提示 → `currentFileId = null` → 禁用下载/导出按钮 |
+
+#### 2. 自定义分类管理
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-09 | `database/json_data_manager.py` | 修改 | ✅ 完成 | `get_categories()` 从硬编码4项改为 `SELECT DISTINCT category FROM sim_json_files` 动态读取；新增 `rename_category(old, new)` 批量UPDATE + `delete_category(name)` 批量清空 |
+| 2026-07-09 | `utm_simulator/web_server.py` | 修改 | ✅ 完成 | 新增 `PUT /api/data/db/categories`（重命名）+ `DELETE /api/data/db/categories/<name>`（删除）API端点 |
+| 2026-07-09 | `web/pages/data.html` | 修改 | ✅ 完成 | 分类过滤下拉框旁新增 `📂 分类` 按钮；新增分类管理弹窗（添加输入框+分类列表+操作按钮）；编辑弹窗分类从 `<select>` 改为 `<input list="category-datalist">` 支持自定义输入 |
+| 2026-07-09 | `web/static/js/data.js` | 修改 | ✅ 完成 | 新增 `loadCategoryFilter()` 从 `/api/data/db/categories` 动态加载分类填充过滤下拉框+datalist；新增 `showCategoryModal()`/`hideCategoryModal()`/`loadCategoryList()` 弹窗逻辑；内联重命名（✏️→文本输入→✓保存→API调用→刷新）；删除（🗑确认→API调用→刷新）；添加新分类（输入+回车/点击→添加到datalist+下拉框） |
+
+**分类管理功能特性**：
+- 分类列表从数据库 DISTINCT 动态读取，不再硬编码
+- 内联重命名：点击✏️ → 显示文本输入框 → 输入新名称 → ✓保存 → 批量更新所有关联文件
+- 删除分类：🗑确认 → 清空所有关联文件的分类字段 → 刷新
+- 添加新分类：输入名称 → ➕添加 → 即时可用（保存文件时即创建）
+- 编辑文件时支持自定义分类输入（`<input>` + `<datalist>` 辅助提示）
+
+#### 3. 文件"执行"按钮
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-09 | `web/pages/data.html` | 修改 | ✅ 完成 | 文件列表操作列新增 `▶ 执行` 按钮（每个文件行） |
+| 2026-07-09 | `web/static/js/data.js` | 修改 | ✅ 完成 | 新增 `window.executeFile(id)`：获取文件名 → 调用 `POST /api/data/db/export/{id}` 导出到 mock/ → 跳转 `/run?preset_file=FILENAME&preset_mode=replay` |
+| 2026-07-09 | `web/static/js/run.js` | 修改 | ✅ 完成 | 新增URL参数解析（`_urlParams`/`_presetFileName`/`_presetMode`）；`initRun()` 中检测预设模式并设置 `elMode.value` + 调用 `updateMode()`；`refreshSceneFileList()`/`refreshReplayFileList()` 加载完文件列表后自动选中 `_presetFileName` 对应的选项；预设成功后 1s Toast 提示 |
+
+**执行跳转流程**：
+```
+数据管理页点击 ▶ → 导出文件到mock/ → 跳转 /run?preset_file=xxx.json&preset_mode=replay
+                                                          ↓
+run.js initRun() → 设置模式=replay → updateMode() → refreshReplayFileList()
+                                                          ↓
+                                         遍历<option>找到匹配文件名 → selected=true
+                                                          ↓
+                                                 Toast: "已预选文件: xxx.json"
+```
+
+### 本次汇总
+
+| 操作 | 文件数 |
+|------|--------|
+| 修改 | 5（data.html + data.js + json_data_manager.py + web_server.py + run.js） |
+| 新增 API 端点 | 2（PUT/DELETE /api/data/db/categories） |
+| 新增 JS 函数 | 8（closePreview/executeFile/loadCategoryFilter/showCategoryModal/hideCategoryModal/loadCategoryList/cancelEdit/apiPostWithMethod） |
+| 新增 Python 方法 | 2（rename_category/delete_category） |
+| 新增 UI 组件 | 3（关闭预览按钮/分类管理弹窗/执行按钮） |
+| 状态 | ✅ 已完成 |
+
+**核心成果**：
+1. ✅ 预览面板新增关闭按钮，用户体验更完整
+2. ✅ 分类管理系统：从硬编码4项升级为数据库驱动的动态分类，支持添加/重命名/删除
+3. ✅ 文件→仿真执行一键跳转：自动导出到mock/ + URL参数传递 + 模式/文件双预选
+
+---
+
+### 2026-07-09: 仿真工作流3项致命Bug修复 — 打通"上传→执行→数据注入"全链路
+
+> 来源: 用户需求 — 全工作流追踪调试，验证上传/生成 → 数据管理 → 仿真执行 → Redis/Kafka注入 + 日志输出
+> 问题: dynamic/replay 模式连接到错误的 Redis/Kafka；replay 模式文件路径拼接错误导致数据未加载；plan 模式完全不创建飞行计划
+
+#### 根因分析
+
+经过对 web_server.py、sim_manager.py、tools/run_kafka.py、tools/run_kafka_scene.py、tools/run_plan.py 的全量代码追踪，发现3个致命Bug：
+
+**Bug-A — `dynamic`/`replay` 模式连接配置丢失** (`web_server.py:176-177`):
+
+`SimulationRunner.__init__()` 创建 `AppConfig()` 使用全部默认值（Redis=127.0.0.1:6379, Kafka=127.0.0.1:9092），忽略了 web 界面配置和 env.py 中的真实连接参数。传递给 `SimulationManager` 后，`dynamic` 和 `replay` 模式连接到 localhost 而非实际服务器。
+
+**Bug-B — `replay` 模式文件路径拼接错误** (`sim_manager.py:357-359`):
+
+```python
+# 修复前: data_file 为 "kafka_data.json"(truthy) 时，直接返回纯文件名，未拼接 mock_dir
+data_path = data_file or os.path.join(mock_dir, "kafka_data.json")
+```
+
+`data_file or default` 在 `data_file` 为 truthy 字符串时短路求值，返回纯文件名（如 `"kafka_data.json"`），导致 `os.path.exists()` 在 CWD 查找失败，静默跳过数据加载。
+
+**Bug-C — `plan` 模式不创建飞行计划** (`tools/run_plan.py:253-310`):
+
+`PlanRunner.merge_from_redis()` 仅从 Redis 读取已有飞行计划。若 Redis 中 `BIZ_DATA:UAV_ROUTE` 为空，整个 plan 模式不做任何事。`web_server.py` 的 `_init_plan_mode()` 也没有加载 JSON 文件的逻辑。
+
+**附带发现**:
+- `replay_once` 和 `scene` 模式因绕过 `SimulationManager`，直接 `import env` 使用真实配置，反而能正常工作
+- `config.json` 存储位置（`utm_simulator/config.json`）与 `load_config()` 查找位置（`common/config.json`）不一致
+
+#### 修改文件
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-09 | `utm_simulator/web_server.py` | 修改 (~30行) | ✅ 完成 | Bug-A: `SimulationRunner.__init__` 改用 `load_config()` + web 配置覆盖；Bug-C: `_init_plan_mode()` 添加航线文件加载写入 Redis；新增 `plan_route_file` 配置项和 API 参数 |
+| 2026-07-09 | `utm_simulator/sim_manager.py` | 修改 (~15行) | ✅ 完成 | Bug-B: `_init_replay_mode()` 路径拼接改为 `os.path.isabs` 检测 + `os.path.join`；Bug-C: `_init_plan_mode()` 添加默认航线文件加载 |
+| 2026-07-09 | `web/pages/run.html` | 修改 (~5行) | ✅ 完成 | plan-params 面板新增航线文件选择器 `<select id="plan-route-file">` |
+| 2026-07-09 | `web/static/js/run.js` | 修改 (~30行) | ✅ 完成 | 新增 `refreshPlanFileList()` 函数；`loadPlanRouteList()` 自动刷新文件列表；启动时传递 `plan_route_file`；新增 plan 刷新按钮事件 |
+| 2026-07-09 | `web/static/js/data.js` | 修改 (~3行) | ✅ 完成 | `executeFile()` 根据文件名自动判断模式：含 `route` → plan，否则 → replay |
+
+#### 修复详解
+
+**Bug-A 修复** — `SimulationRunner.__init__()`:
+```python
+# 修复前: 全部使用默认值
+self._app_cfg = AppConfig()
+self._app_cfg.simulation.target_drones = self.target_drones
+
+# 修复后: load_config() 加载 env.py + config.json 基础配置，再用前端参数覆盖
+self._app_cfg = load_config()
+self._app_cfg.simulation.target_drones = self.target_drones
+self._app_cfg.redis.host = config.get("redis_ip", self._app_cfg.redis.host)
+self._app_cfg.redis.port = int(config.get("redis_port", self._app_cfg.redis.port))
+self._app_cfg.redis.password = getattr(_env, "redis_password", self._app_cfg.redis.password)
+self._app_cfg.kafka.bootstrap_servers = config.get("kafka_url", self._app_cfg.kafka.bootstrap_servers)
+self._app_cfg.kafka.bootstrap_servers_mirror = getattr(_env, "kafka_url2", ...)
+```
+
+**Bug-B 修复** — `_init_replay_mode()`:
+```python
+# 修复前
+data_path = data_file or os.path.join(mock_dir, "kafka_data.json")
+
+# 修复后: 区分绝对路径 vs 纯文件名
+if data_file:
+    data_path = data_file if os.path.isabs(data_file) else os.path.join(mock_dir, data_file)
+else:
+    data_path = os.path.join(mock_dir, "kafka_data.json")
+```
+
+**Bug-C 修复** — `_init_plan_mode()` (web_server.py):
+```python
+# 新增: 启动 PlanRunner 前加载航线文件写入 Redis
+route_file = self.config.get("plan_route_file", "redis_route.json")
+route_path = os.path.join(mock_dir, route_file) if not os.path.isabs(route_file) else route_file
+if os.path.exists(route_path):
+    # 读取 redis_route.json，平移时间，hset 写入 Redis
+    for item in route_list:
+        # ... hset(BIZ_DATA:UAV_ROUTE, key, json.dumps(val))
+```
+
+#### 附带修复
+
+- `sim_manager.py` `_init_plan_mode()` 同样添加从默认 `redis_route.json` 加载的逻辑（CLI 使用场景）
+- `plan_route_file` 加入 `/api/sim/config` PUT 和 `/api/sim/start` POST 允许字段列表
+- 前端 plan 模式新增文件选择下拉框 + 刷新按钮，与 replay/scene 模式一致
+- 数据管理页 ▶ 按钮自动判断：route 文件 → plan 模式，其他 → replay 模式
+
+#### 本次汇总
+
+| 操作 | 文件数 |
+|------|--------|
+| 修改 | 5（web_server.py + sim_manager.py + run.html + run.js + data.js） |
+| 修复 Bug | 3 个致命Bug（连接配置丢失 + 路径拼接错误 + plan无数据加载） |
+| 新增 JS 函数 | 1（refreshPlanFileList） |
+| 新增配置项 | 1（plan_route_file） |
+| 附带修复 | 2（sim_manager plan模式 + data.js 自动模式判断） |
+| 状态 | ✅ 已完成，待验证 |
+
+**核心成果**：
+1. ✅ **Bug-A 修复**: `dynamic`/`replay` 模式现在使用正确的 Redis/Kafka 连接配置（load_config + web覆盖）
+2. ✅ **Bug-B 修复**: `replay` 模式文件路径正确拼接 mock_dir，支持绝对路径和纯文件名
+3. ✅ **Bug-C 修复**: `plan` 模式启动时自动加载航线文件写入 Redis，PlanRunner 可正常工作
+4. ✅ **全链路打通**: 上传/生成 → 数据库存储 → 执行 → Redis 飞行计划 + Kafka 遥测 → 实时日志输出

@@ -974,23 +974,89 @@ def api_generate_data():
                         center_lat + dist * _math.sin(angle) / 110540.0,
                     ))
 
-            # 构建 routeList
+            # ── 沿航点插值生成遥测轨迹点（Kafka 格式 + Redis 航线格式） ──
             route_list = []
-            for j in range(len(waypoints) - 1):
+            telemetry_records = []
+            # 每个航点分配高度递进
+            wp_with_alt = []
+            for j, (lon, lat) in enumerate(waypoints):
+                alt = 100.0 + j * 50  # 逐段升高 50m
+                wp_with_alt.append((lon, lat, alt))
+
+            # 构建 routeList（Redis 航线格式）
+            for j in range(len(wp_with_alt) - 1):
+                s_lon, s_lat, s_alt = wp_with_alt[j]
+                e_lon, e_lat, e_alt = wp_with_alt[j + 1]
                 route_list.append({
                     "sequence": j,
                     "type": 2,
-                    "segmentStartLon": round(waypoints[j][0], 6),
-                    "segmentStartLat": round(waypoints[j][1], 6),
-                    "segmentEndLon": round(waypoints[j + 1][0], 6),
-                    "segmentEndLat": round(waypoints[j + 1][1], 6),
-                    "segmentStartHeight": 100.0 + j * 50,
-                    "segmentEndHeight": 100.0 + (j + 1) * 50,
+                    "segmentStartLon": round(s_lon, 6),
+                    "segmentStartLat": round(s_lat, 6),
+                    "segmentEndLon": round(e_lon, 6),
+                    "segmentEndLat": round(e_lat, 6),
+                    "segmentStartHeight": s_alt,
+                    "segmentEndHeight": e_alt,
                     "segmentProtectHeight": 50.0,
                     "segmentProtectHeightType": 1,
                     "segmentWidth": 100.0,
                 })
 
+            # 沿航点路径插值生成遥测轨迹点（Kafka 场景模式/回放模式可用）
+            interval_sec = 1.0  # 每秒一个轨迹点
+            cruise_speed = 15.0  # m/s
+            total_flight_time = 0.0
+
+            for j in range(len(wp_with_alt) - 1):
+                s_lon, s_lat, s_alt = wp_with_alt[j]
+                e_lon, e_lat, e_alt = wp_with_alt[j + 1]
+
+                # 计算航段距离和方位角
+                d_lon = (e_lon - s_lon) * _math.cos(_math.radians((s_lat + e_lat) / 2)) * 111320.0
+                d_lat = (e_lat - s_lat) * 110540.0
+                seg_dist = _math.hypot(d_lon, d_lat)
+                seg_time = seg_dist / cruise_speed if cruise_speed > 0 else 1.0
+                steps = max(1, int(seg_time / interval_sec))
+
+                heading = (_math.degrees(_math.atan2(d_lon, d_lat)) + 360) % 360
+
+                for step in range(steps):
+                    frac = step / steps
+                    lon = s_lon + (e_lon - s_lon) * frac
+                    lat = s_lat + (e_lat - s_lat) * frac
+                    alt = s_alt + (e_alt - s_alt) * frac
+                    ts = int((now_ts + total_flight_time + frac * seg_time) * 1000)
+
+                    telemetry_records.append({
+                        "uniqueProductIdentificationCode": uid,
+                        "realNameRegistrationSign": f"GEN_{uid}",
+                        "longitude": round(lon, 6),
+                        "latitude": round(lat, 6),
+                        "geodeticAltitude": round(alt, 1),
+                        "speed": cruise_speed,
+                        "trackAngle": round(heading, 1),
+                        "verticalSpeed": 0.0,
+                        "relativeAltitude": 0.0,
+                        "ressureAltitude": 0.0,
+                        "operatingStatus": 2,
+                        "uasOperationCategory": 1,
+                        "classification": 1,
+                        "rpsLocationType": 1,
+                        "rpsLongitude": 0.0,
+                        "rpsLatitude": 0.0,
+                        "rpsAltitude": 0.0,
+                        "coordinateSystemType": 0,
+                        "timestampAccuracy": 0,
+                        "horizontalAccuracy": 1.0,
+                        "verticalAccuracy": 1.0,
+                        "speedAccuracy": 1.0,
+                        "sourceType": 1,
+                        "active": 1,
+                        "timestamp": ts,
+                        "addInf": {},
+                    })
+                total_flight_time += seg_time
+
+            # 构建飞行计划（Redis 航线格式）
             flight_plan = {
                 "flightPlanId": 1,
                 "planTakeoffTime": now_ts + i * 10,
@@ -1006,20 +1072,35 @@ def api_generate_data():
                 "flightPlanList": [flight_plan],
             })
 
-        # 保存到 mock/ 目录
+        # 保存遥测轨迹文件（Kafka 格式，用于 scene/replay 模式）
         mock_dir = os.path.join(_root, "..", "data", "mock")
         os.makedirs(mock_dir, exist_ok=True)
         ts = int(time.time())
+
+        # 1) Kafka 遥测轨迹文件（场景模式 / 回放模式的 kafka_data）
         kafka_file = os.path.join(mock_dir, f"kafka_data_gen_{ts}.json")
         with open(kafka_file, "w", encoding="utf-8") as f:
-            json.dump(generated, f, ensure_ascii=False, indent=2)
+            json.dump(telemetry_records, f, ensure_ascii=False, indent=2)
 
-        _add_log(f"已生成 {count} 架无人机数据 → {os.path.basename(kafka_file)} (模式: {pattern})")
+        # 2) Redis 航线文件（replay / plan 模式的 redis_route）
+        route_file = os.path.join(mock_dir, f"redis_route_gen_{ts}.json")
+        route_data = []
+        for item in generated:
+            uid = item["uniqueProductIdentificationCode"]
+            route_data.append({
+                "key": uid,
+                "value": item,
+            })
+        with open(route_file, "w", encoding="utf-8") as f:
+            json.dump(route_data, f, ensure_ascii=False, indent=2)
+
+        _add_log(f"已生成 {count} 架无人机数据 (遥测 {len(telemetry_records)} 点) → {os.path.basename(kafka_file)} + {os.path.basename(route_file)}")
 
         return jsonify({
             "success": True,
-            "message": f"已生成 {count} 条数据记录",
+            "message": f"已生成 {count} 架无人机, {len(telemetry_records)} 个轨迹点",
             "file": os.path.basename(kafka_file),
+            "route_file": os.path.basename(route_file),
             "path": kafka_file,
             "count": count,
             "pattern": pattern,

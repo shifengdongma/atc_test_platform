@@ -24,6 +24,10 @@ var _urlParams = {};
 })();
 var _presetFileName = _urlParams['preset_file'] || null;
 var _presetMode = _urlParams['preset_mode'] || null;
+// 文件格式缓存: filename → {format, compatible_modes}
+var _fileFormats = {};
+// 所有模式选项（备份，用于恢复）
+var _allModeOptions = [];
 
 // ── 模式描述 ────────────────────────────────────────────────────────
 var modeDescriptions = {
@@ -92,6 +96,74 @@ function setRunningState(running) {
   }
 }
 
+// ── 文件→模式绑定 ────────────────────────────────────────────────────
+var _bindingInProgress = false;  // 防止递归切换
+
+function bindModeToFile() {
+  if (_bindingInProgress) return;
+  // 保存所有模式选项（首次调用时）
+  if (_allModeOptions.length === 0 && elMode) {
+    for (var i = 0; i < elMode.options.length; i++) {
+      _allModeOptions.push({ value: elMode.options[i].value, text: elMode.options[i].text });
+    }
+  }
+  if (!elMode) return;
+
+  // 获取当前活跃面板中选中的文件
+  var selectedFile = null;
+  var sceneSel = document.getElementById('scene-file-select');
+  var replayDataSel = document.getElementById('replay-data-file');
+  var planSel = document.getElementById('plan-route-file');
+  var activeMode = elMode.value;
+
+  if (activeMode === 'scene' && sceneSel) selectedFile = sceneSel.value;
+  else if ((activeMode === 'replay' || activeMode === 'replay_once') && replayDataSel) selectedFile = replayDataSel.value;
+  else if (activeMode === 'plan' && planSel) selectedFile = planSel.value;
+
+  if (!selectedFile) {
+    // 无选中文件 → 恢复全部模式
+    _restoreAllModes();
+    return;
+  }
+
+  var fmt = _fileFormats[selectedFile];
+  if (!fmt || !fmt.compatible_modes || fmt.compatible_modes.length === 0) {
+    _restoreAllModes();
+    return;
+  }
+
+  var compatible = fmt.compatible_modes;
+  // 如果当前模式不在兼容列表中，切换到第一个兼容模式
+  if (compatible.indexOf(activeMode) === -1) {
+    _bindingInProgress = true;
+    elMode.innerHTML = _allModeOptions.filter(function(o) {
+      return compatible.indexOf(o.value) !== -1;
+    }).map(function(o) {
+      return '<option value="' + o.value + '">' + o.text + '</option>';
+    }).join('');
+    elMode.value = compatible[0];
+    updateMode();
+    _bindingInProgress = false;
+  } else {
+    // 当前模式兼容 → 仅显示兼容模式
+    elMode.innerHTML = _allModeOptions.filter(function(o) {
+      return compatible.indexOf(o.value) !== -1;
+    }).map(function(o) {
+      var sel = o.value === activeMode ? ' selected' : '';
+      return '<option value="' + o.value + '"' + sel + '>' + o.text + '</option>';
+    }).join('');
+  }
+}
+
+function _restoreAllModes() {
+  if (!elMode || _allModeOptions.length === 0) return;
+  var current = elMode.value;
+  elMode.innerHTML = _allModeOptions.map(function(o) {
+    var sel = o.value === current ? ' selected' : '';
+    return '<option value="' + o.value + '"' + sel + '>' + o.text + '</option>';
+  }).join('');
+}
+
 // ── 模式切换 ────────────────────────────────────────────────────────
 function updateMode() {
   if (elDesc) elDesc.textContent = modeDescriptions[elMode.value] || '';
@@ -116,58 +188,61 @@ function updateMode() {
   }
 }
 
-// ── 文件列表加载 ────────────────────────────────────────────────────
-async function refreshSceneFileList() {
-  var sel = document.getElementById('scene-file-select');
+// ── 文件列表加载（含格式缓存，供模式绑定） ──────────────────────────────
+async function _loadFileListWithFormats(selId) {
+  var sel = document.getElementById(selId);
   if (!sel) return;
   try {
     var data = await apiGet('/api/data/files');
     if (data.files) {
-      sel.innerHTML = data.files.map(function(f) {
-        return '<option value="' + f.name + '">' + f.name + ' (' + f.records + '条)</option>';
-      }).join('');
-      // 如果有预设文件名，自动选中
-      if (_presetFileName) {
-        var opts = sel.options;
-        for (var i = 0; i < opts.length; i++) {
-          if (opts[i].value === _presetFileName) {
-            opts[i].selected = true;
-            break;
-          }
-        }
-      }
+      _fileFormats = {};  // 重建缓存
+      data.files.forEach(function(f) {
+        _fileFormats[f.name] = { format: f.format, compatible_modes: f.compatible_modes || [] };
+      });
+      return data.files;
     }
-  } catch(e) { sel.innerHTML = '<option>加载失败</option>'; }
+  } catch(e) {}
+  return [];
+}
+
+async function refreshSceneFileList() {
+  var sel = document.getElementById('scene-file-select');
+  if (!sel) return;
+  var files = await _loadFileListWithFormats('scene-file-select');
+  sel.innerHTML = files.map(function(f) {
+    return '<option value="' + f.name + '">' + f.name + ' (' + f.records + '条)</option>';
+  }).join('');
+  if (_presetFileName) {
+    for (var i = 0; i < sel.options.length; i++) {
+      if (sel.options[i].value === _presetFileName) { sel.options[i].selected = true; break; }
+    }
+  }
+  sel.onchange = bindModeToFile;
+  bindModeToFile();  // 初始绑定
 }
 
 async function refreshReplayFileList() {
-  try {
-    var data = await apiGet('/api/data/files');
-    if (data.files) {
-      var dataSel = document.getElementById('replay-data-file');
-      var routeSel = document.getElementById('replay-route-file');
-      if (dataSel) {
-        dataSel.innerHTML = data.files.map(function(f) {
-          return '<option value="' + f.name + '"' + (f.name.indexOf('kafka_data') >= 0 ? ' selected' : '') + '>' + f.name + '</option>';
-        }).join('');
-        // 如果有预设文件名，自动选中
-        if (_presetFileName) {
-          var opts = dataSel.options;
-          for (var i = 0; i < opts.length; i++) {
-            if (opts[i].value === _presetFileName) {
-              opts[i].selected = true;
-              break;
-            }
-          }
-        }
-      }
-      if (routeSel) {
-        routeSel.innerHTML = data.files.map(function(f) {
-          return '<option value="' + f.name + '"' + (f.name.indexOf('redis_route') >= 0 ? ' selected' : '') + '>' + f.name + '</option>';
-        }).join('');
+  var files = await _loadFileListWithFormats('replay-data-file');
+  var dataSel = document.getElementById('replay-data-file');
+  var routeSel = document.getElementById('replay-route-file');
+  if (dataSel) {
+    dataSel.innerHTML = files.map(function(f) {
+      return '<option value="' + f.name + '"' + (f.name.indexOf('kafka_data') >= 0 ? ' selected' : '') + '>' + f.name + '</option>';
+    }).join('');
+    if (_presetFileName) {
+      for (var i = 0; i < dataSel.options.length; i++) {
+        if (dataSel.options[i].value === _presetFileName) { dataSel.options[i].selected = true; break; }
       }
     }
-  } catch(e) {}
+    dataSel.onchange = bindModeToFile;
+  }
+  if (routeSel) {
+    routeSel.innerHTML = files.map(function(f) {
+      return '<option value="' + f.name + '"' + (f.name.indexOf('redis_route') >= 0 ? ' selected' : '') + '>' + f.name + '</option>';
+    }).join('');
+    routeSel.onchange = bindModeToFile;
+  }
+  bindModeToFile();
 }
 
 async function loadPlanRouteList() {
@@ -188,24 +263,17 @@ async function loadPlanRouteList() {
 async function refreshPlanFileList() {
   var sel = document.getElementById('plan-route-file');
   if (!sel) return;
-  try {
-    var data = await apiGet('/api/data/files');
-    if (data.files) {
-      sel.innerHTML = data.files.map(function(f) {
-        return '<option value="' + f.name + '"' + (f.name.indexOf('redis_route') >= 0 ? ' selected' : '') + '>' + f.name + '</option>';
-      }).join('');
-      // 如果有预设文件名，自动选中
-      if (_presetFileName) {
-        var opts = sel.options;
-        for (var i = 0; i < opts.length; i++) {
-          if (opts[i].value === _presetFileName) {
-            opts[i].selected = true;
-            break;
-          }
-        }
-      }
+  var files = await _loadFileListWithFormats('plan-route-file');
+  sel.innerHTML = files.map(function(f) {
+    return '<option value="' + f.name + '"' + (f.name.indexOf('redis_route') >= 0 ? ' selected' : '') + '>' + f.name + '</option>';
+  }).join('');
+  if (_presetFileName) {
+    for (var i = 0; i < sel.options.length; i++) {
+      if (sel.options[i].value === _presetFileName) { sel.options[i].selected = true; break; }
     }
-  } catch(e) {}
+  }
+  sel.onchange = bindModeToFile;
+  bindModeToFile();
 }
 
 // ── 加载配置 ────────────────────────────────────────────────────────

@@ -1,14 +1,19 @@
 # 日志文件
 tmp/log/
 
-# Mock数据
+# Mock数据 — 运行时生成的 JSON 文件不入库
 utm_simulator/mock/
+data/mock/
+!data/mock/.gitkeep
 
 # 敏感配置 — 包含 Redis/Kafka 密码及内网地址
 **/env.py
 **/ha_env.py
 **/dev_env.py
 **/env.md
+
+# 运行时配置文件
+common/config.json
 
 # IDE 与本地配置
 .claude/settings.local.json
@@ -21,4 +26,6 @@ utm_simulator/mock/
 *.pyo
 
 # SQLite 本地数据库
-utm_simulator/data.db
+*.db
+*.sqlite3
+!database/data.db

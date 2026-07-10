@@ -8,6 +8,11 @@ var $ = function(sel) { return document.querySelector(sel); };
 var isRunning = false;
 var history = [];
 var logs = [];
+// 四层运行日志数据
+var telemetryLogs = [];
+var traceLogs = [];
+var collisionLogs = [];
+var wsCapturedLogs = [];
 
 // ── URL 参数解析（支持从数据管理页跳转预填文件）─────────────────────
 var _urlParams = {};
@@ -496,7 +501,15 @@ if (dom.btnExport) dom.btnExport.addEventListener('click', function() {
 // 清空日志
 if (dom.btnClearLog) dom.btnClearLog.addEventListener('click', function() {
   logs = [];
+  telemetryLogs = [];
+  traceLogs = [];
+  collisionLogs = [];
+  wsCapturedLogs = [];
   if (dom.logStream) dom.logStream.innerHTML = '<div class="log-empty">已清空</div>';
+  var layers = ['log-layer-telemetry', 'log-layer-trace', 'log-layer-collision', 'log-layer-ws'];
+  layers.forEach(function(id) { var el = document.getElementById(id); if (el) el.innerHTML = '<div class="log-empty">已清空</div>'; });
+  var badges = ['badge-telemetry', 'badge-trace', 'badge-collision', 'badge-ws'];
+  badges.forEach(function(id) { var el = document.getElementById(id); if (el) el.textContent = '0'; });
 });
 
 // ── 地图 ────────────────────────────────────────────────────────────
@@ -546,6 +559,152 @@ onWsEvent('status_change', function(data) {
     if (elBadge) { elBadge.textContent = '启动中'; elBadge.className = 'badge starting'; }
   }
 });
+
+// ── 四层运行日志 WebSocket 事件 ─────────────────────────────────────
+function formatTime(ts) {
+  var d = new Date(ts || Date.now());
+  return d.toLocaleTimeString('zh-CN', { hour12: false });
+}
+
+// Layer 1: Kafka 遥测数据
+onWsEvent('telemetry_data', function(data) {
+  var records = data.records || [];
+  records.forEach(function(r) {
+    telemetryLogs.push({
+      time: formatTime(r.timestamp || Date.now()),
+      uavCode: r.uniqueProductIdentificationCode || r.uavIdentifyCode || '',
+      lon: r.longitude, lat: r.latitude, alt: r.geodeticAltitude,
+      speed: r.speed, heading: r.trackAngle
+    });
+  });
+  if (telemetryLogs.length > 500) telemetryLogs = telemetryLogs.slice(-500);
+  renderTelemetryLayer();
+});
+
+// Layer 2: Trace 轨迹数据
+onWsEvent('trace_data', function(data) {
+  var items = data.data || [];
+  items.forEach(function(t) {
+    traceLogs.push({
+      time: formatTime(Date.now()),
+      uavCode: t.uniqueProductIdentificationCode || data.key || '',
+      points: t.trajectoryPoints ? t.trajectoryPoints.length : (Array.isArray(t) ? t.length : 0)
+    });
+  });
+  if (traceLogs.length > 500) traceLogs = traceLogs.slice(-500);
+  renderTraceLayer();
+});
+
+// Layer 3: 冲突告警
+onWsEvent('collision_alarm', function(data) {
+  collisionLogs.push({
+    time: formatTime(Date.now()),
+    alertType: data.alertType || data.alertCategory || '未知',
+    level: data.alertLevel || '',
+    involvedUavs: (data.involvedUavs || data.alertUavList || []).length,
+    detail: data
+  });
+  if (collisionLogs.length > 200) collisionLogs = collisionLogs.slice(-200);
+  renderCollisionLayer();
+});
+
+// Layer 4: ATC WebSocket 数据
+onWsEvent('ws_captured', function(data) {
+  wsCapturedLogs.push({
+    time: formatTime(Date.now()),
+    type: data.raw_type || 'unknown',
+    summary: data.message || JSON.stringify(data.detail || '').substring(0, 120)
+  });
+  if (wsCapturedLogs.length > 200) wsCapturedLogs = wsCapturedLogs.slice(-200);
+  renderWsCapturedLayer();
+});
+
+// ── 四层渲染函数 ───────────────────────────────────────────────────
+function renderTelemetryLayer() {
+  var el = document.getElementById('log-layer-telemetry');
+  if (!el) return;
+  updateBadge('badge-telemetry', telemetryLogs.length);
+  if (telemetryLogs.length === 0) { el.innerHTML = '<div class="log-empty">等待遥测数据...</div>'; return; }
+  var latest = telemetryLogs.slice(-20).reverse();
+  el.innerHTML = latest.map(function(r) {
+    var lon = r.lon ? r.lon.toFixed(4) : '-';
+    var lat = r.lat ? r.lat.toFixed(4) : '-';
+    return '<div class="log-line log-telemetry">'
+      + '<span class="log-ts">[' + r.time + ']</span> '
+      + '<span class="log-uav">' + escHtml(r.uavCode) + '</span> '
+      + '<span class="log-coord">' + lon + ', ' + lat + '</span> '
+      + '<span class="log-alt">' + (r.alt || '-') + 'm</span> '
+      + '<span class="log-speed">' + (r.speed || '-') + 'm/s</span>'
+      + '</div>';
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function renderTraceLayer() {
+  var el = document.getElementById('log-layer-trace');
+  if (!el) return;
+  updateBadge('badge-trace', traceLogs.length);
+  if (traceLogs.length === 0) { el.innerHTML = '<div class="log-empty">等待轨迹数据...</div>'; return; }
+  var latest = traceLogs.slice(-30).reverse();
+  el.innerHTML = latest.map(function(r) {
+    return '<div class="log-line log-trace">'
+      + '<span class="log-ts">[' + r.time + ']</span> '
+      + '<span class="log-uav">' + escHtml(r.uavCode) + '</span> '
+      + '<span class="log-points">轨迹点: ' + r.points + '</span>'
+      + '</div>';
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function renderCollisionLayer() {
+  var el = document.getElementById('log-layer-collision');
+  if (!el) return;
+  updateBadge('badge-collision', collisionLogs.length);
+  if (collisionLogs.length === 0) { el.innerHTML = '<div class="log-empty">等待告警数据...</div>'; return; }
+  var latest = collisionLogs.slice(-20).reverse();
+  el.innerHTML = latest.map(function(r) {
+    return '<div class="log-line log-collision">'
+      + '<span class="log-ts">[' + r.time + ']</span> '
+      + '<span class="log-alert-type" style="color:var(--warning);">' + escHtml(r.alertType) + '</span> '
+      + '<span class="log-uav-count">' + r.involvedUavs + ' 架</span>'
+      + ' <span class="log-level">[' + escHtml(r.level) + ']</span>'
+      + '</div>';
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function renderWsCapturedLayer() {
+  var el = document.getElementById('log-layer-ws');
+  if (!el) return;
+  updateBadge('badge-ws', wsCapturedLogs.length);
+  if (wsCapturedLogs.length === 0) { el.innerHTML = '<div class="log-empty">等待 WS 数据...</div>'; return; }
+  var latest = wsCapturedLogs.slice(-20).reverse();
+  el.innerHTML = latest.map(function(r) {
+    return '<div class="log-line log-ws">'
+      + '<span class="log-ts">[' + r.time + ']</span> '
+      + '<span class="log-ws-type">' + escHtml(r.type) + '</span> '
+      + escHtml(r.summary)
+      + '</div>';
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function toggleLogLayer(header) {
+  var body = header.nextElementSibling;
+  var toggle = header.querySelector('.log-layer-toggle');
+  if (body.style.display === 'none') {
+    body.style.display = 'block';
+    toggle.textContent = '▼';
+  } else {
+    body.style.display = 'none';
+    toggle.textContent = '▶';
+  }
+}
+
+function updateBadge(id, count) {
+  var el = document.getElementById(id);
+  if (el) el.textContent = count;
+}
 
 // ── 定时状态轮询 ────────────────────────────────────────────────────
 async function pollStatus() {

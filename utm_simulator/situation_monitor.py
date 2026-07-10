@@ -99,6 +99,11 @@ class SituationMonitor:
 
         # 告警详情去重 — 通过内容哈希避免相同告警重复推送
         self._last_warnings_hash = ""
+        # 告警 API 重试追踪
+        self._alert_retry_count = 0
+        self._max_alert_retries = 3
+        # STOMP warningTags 兜底标志
+        self._pending_alarm_fallback = False
 
     # ── Token 获取 ──────────────────────────────────────────────
 
@@ -144,8 +149,8 @@ class SituationMonitor:
             if token:
                 self._jwt_token = token
                 return token
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[SituationMonitor] Jwt_Token_get 获取失败: {e}")
 
         # 尝试从 atc_ha_test 的 ha_Jwt_Token_get 获取
         try:
@@ -157,10 +162,15 @@ class SituationMonitor:
             if token:
                 self._jwt_token = token
                 return token
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[SituationMonitor] ha_Jwt_Token_get 获取失败: {e}")
 
-        print("[SituationMonitor] ⚠️ 无法获取 JWT Token，将尝试无认证连接")
+        print("[SituationMonitor] ⚠️ 所有 JWT Token 获取方式均失败，将尝试无认证连接")
+        if self._streamer:
+            try:
+                self._streamer.push("sim_status", "JWT Token 获取失败: 所有来源均不可用，态势监控可能无法正常工作")
+            except Exception:
+                pass
         return ""
 
     # ── 生命周期 ────────────────────────────────────────────────
@@ -373,6 +383,20 @@ class SituationMonitor:
             self._ws.send(json.dumps([sub2]))
             print(f"[SituationMonitor] SUBSCRIBE: {STOMP_DATA_PUSH}")
 
+            time.sleep(0.2)
+            if not self._ws or not self._running:
+                return
+            # 订阅 3: 集群健康状态（来自 daemon 端点，参考 ws_client_check.py）
+            sub3 = (
+                f"SUBSCRIBE\n"
+                f"id:sub-2\n"
+                f"destination:/topic/clusterChange\n"
+                f"ack:auto\n"
+                f"\n\x00"
+            )
+            self._ws.send(json.dumps([sub3]))
+            print(f"[SituationMonitor] SUBSCRIBE: /topic/clusterChange")
+
         threading.Thread(target=_delayed_subscribe, daemon=True).start()
 
     # ── STOMP 载荷解析 ──────────────────────────────────────────
@@ -434,16 +458,28 @@ class SituationMonitor:
                 if alarm_count != self._last_alarm_count:
                     detail = {"total": alarm_count, "source": "alarmStatistic"}
                     # 主动获取告警详情（含 UAV 编号、类别、原因等）
-                    if alarm_count > 0:
+                    if alarm_count > 0 and self._alert_retry_count < self._max_alert_retries:
                         alarm_details = self._fetch_alert_details(alarm_count)
                         if alarm_details:
                             detail["warnings"] = alarm_details
-                            self._last_alarm_count = alarm_count  # 仅成功时更新，允许失败重试
+                            self._last_alarm_count = alarm_count
+                            self._alert_retry_count = 0  # 成功，重置重试计数
+                            self._pending_alarm_fallback = False
                         else:
-                            # API 失败时不更新 _last_alarm_count，下次同计数消息可重试
-                            print(f"[SituationMonitor] 告警详情获取失败 (count={alarm_count})，将在下次消息中重试")
+                            # API 失败时标记错误，允许 fallback + 重试
+                            self._alert_retry_count += 1
+                            self._pending_alarm_fallback = True
+                            detail["_api_failed"] = True
+                            detail["_error"] = f"REST API 请求失败 (重试 {self._alert_retry_count}/{self._max_alert_retries})"
+                            print(f"[SituationMonitor] 告警详情获取失败 (count={alarm_count}, retry={self._alert_retry_count})")
+                    elif self._alert_retry_count >= self._max_alert_retries and alarm_count != self._last_alarm_count:
+                        # 重试用尽，标记失败但仍推送日志（让前端显示错误态）
+                        detail["_api_failed"] = True
+                        detail["_error"] = f"REST API 多次重试失败，告警详情不可用"
+                        self._last_alarm_count = alarm_count
                     else:
                         self._last_alarm_count = alarm_count  # 0 条告警无需获取详情
+                        self._alert_retry_count = 0
                     self._push_log(LOG_TYPE_ALARM, f"实时告警数: {alarm_count}",
                                    detail=detail)
             except (ValueError, TypeError) as e:
@@ -489,7 +525,22 @@ class SituationMonitor:
                 pass
             return
 
-        # 3. 飞行轨迹 / UAV 数据 — 提取 UAV 详情 + 告警标签
+        # 3. 集群健康状态（来自 /topic/clusterChange，参考 ws_client_check.py）
+        if "clusters" in data and isinstance(data.get("clusters"), list):
+            clusters_info = []
+            master_cluster = ""
+            for c in data["clusters"]:
+                cid = c.get("clusterId", "?")
+                is_master = "主" if c.get("isMaster") else "备"
+                health = "健康" if c.get("healthStatus") else "异常"
+                clusters_info.append(f"{cid}({is_master}/{health})")
+                if c.get("isMaster"):
+                    master_cluster = cid
+            self._push_log("ws_captured_data", f"集群状态: {', '.join(clusters_info)}",
+                           detail={"clusters": data["clusters"], "master_cluster": master_cluster})
+            return
+
+        # 4. 飞行轨迹 / UAV 数据 — 提取 UAV 详情 + 告警标签
         has_uavs = "uavs" in data and isinstance(data.get("uavs"), list)
         has_flight_track = "flightTrack" in data
         has_nested_data = "data" in data and isinstance(data.get("data"), dict)
@@ -514,13 +565,33 @@ class SituationMonitor:
 
         # ── 实时告警日志（从 UAV 的 warningTags 中提取） ──
         warnings = self._extract_warning_details(data)
-        if warnings:
-            # 通过 JSON 内容哈希去重，避免相同告警反复推送
-            warnings_hash = json.dumps(warnings, sort_keys=True, ensure_ascii=False)
-            if warnings_hash != self._last_warnings_hash:
-                self._last_warnings_hash = warnings_hash
-                self._push_log(LOG_TYPE_ALARM, f"实时告警: {len(warnings)} 条",
-                               detail={"total": len(warnings), "warnings": warnings})
+        if warnings or self._pending_alarm_fallback:
+            if warnings:
+                # 通过 JSON 内容哈希去重，避免相同告警反复推送
+                warnings_hash = json.dumps(warnings, sort_keys=True, ensure_ascii=False)
+                if warnings_hash != self._last_warnings_hash:
+                    self._last_warnings_hash = warnings_hash
+                    # 如果 API 之前失败，使用 STOMP warningTags 作为兜底
+                    source = "stomp_warning_tags" if self._pending_alarm_fallback else "stomp_warning_tags"
+                    self._push_log(LOG_TYPE_ALARM, f"实时告警: {len(warnings)} 条",
+                                   detail={"total": len(warnings), "warnings": warnings, "source": source})
+                    self._pending_alarm_fallback = False
+                    self._alert_retry_count = 0
+            elif self._pending_alarm_fallback:
+                # 有待处理 fallback 但当前消息无 warningTags — 记录空告警
+                self._push_log(LOG_TYPE_ALARM, "实时告警: 0 条 (STOMP 兜底无 warningTags)",
+                               detail={"total": 0, "warnings": [], "source": "stomp_warning_tags",
+                                       "_api_failed": True, "_error": "API 失败且 STOMP 消息中无 warningTags"})
+                self._pending_alarm_fallback = False
+
+        # ── ATC WebSocket 前端数据采集 ──
+        # 对已处理的飞行/告警数据推送一份 ws_captured_data 摘要
+        # 节流：仅在有 UAV 或告警相关数据时推送
+        if uav_count > 0 or warnings:
+            self._push_log("ws_captured_data",
+                           f"ATC {data.get('type', 'flightTrack')}: {uav_count} UAV, {len(warnings or [])} 告警",
+                           detail={"raw_type": data.get("type", ""), "uav_count": uav_count,
+                                   "warning_count": len(warnings) if warnings else 0})
 
     def _extract_uav_count(self, data: Dict[str, Any]) -> int:
         """从消息中提取 UAV 数量。"""
@@ -649,6 +720,13 @@ class SituationMonitor:
         try:
             token = self._get_token()
             if not token:
+                msg = "告警详情获取失败: 无法获取 JWT Token"
+                print(f"[SituationMonitor] {msg}")
+                if self._streamer:
+                    try:
+                        self._streamer.push("sim_status", msg)
+                    except Exception:
+                        pass
                 return None
 
             import requests as _requests
@@ -687,9 +765,24 @@ class SituationMonitor:
                 timeout=10,
             )
             if resp.status_code != 200:
+                msg = f"告警详情 API 返回非 200: {resp.status_code}, body={resp.text[:300]}"
+                print(f"[SituationMonitor] {msg}")
+                if self._streamer:
+                    try:
+                        self._streamer.push("sim_status", msg)
+                    except Exception:
+                        pass
                 return None
             result = resp.json()
-            if result.get("code") != "0" and result.get("code") != 0:
+            code = result.get("code")
+            if str(code) != "0" and code != 0:
+                msg = f"告警详情 API 返回非 0 code: {code}, msg={result.get('msg', '无')}"
+                print(f"[SituationMonitor] {msg}")
+                if self._streamer:
+                    try:
+                        self._streamer.push("sim_status", msg)
+                    except Exception:
+                        pass
                 return None
 
             content = result.get("result", {}).get("content", [])

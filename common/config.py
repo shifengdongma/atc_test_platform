@@ -217,3 +217,20 @@ def reload_config() -> AppConfig:
     global _cached_config
     _cached_config = None
     return get_config()
+
+
+# ── 项目路径常量 ────────────────────────────────────────────────────
+# 统一管理项目目录路径，消除各处重复的 os.path.join(dirname, "..", "data", "mock")
+
+from pathlib import Path as _Path
+
+_PROJECT_ROOT = _Path(__file__).parent.parent.resolve()
+
+DATA_DIR = str(_PROJECT_ROOT / "data")
+MOCK_DIR = str(_PROJECT_ROOT / "data" / "mock")
+TEMPLATES_DIR = str(_PROJECT_ROOT / "data" / "templates")
+SCHEMAS_DIR = str(_PROJECT_ROOT / "data" / "schemas")
+UPLOADS_DIR = str(_PROJECT_ROOT / "data" / "uploads")
+DATABASE_DIR = str(_PROJECT_ROOT / "database")
+UTM_SIMULATOR_DIR = str(_PROJECT_ROOT / "utm_simulator")
+DOCS_DIR = str(_PROJECT_ROOT / "docs")

@@ -353,6 +353,58 @@ body {
 .data-table .btn-tiny { padding: 2px 8px; font-size: 10px; border-radius: 3px; cursor: pointer; background: #1a2740; border: 1px solid #2a3a5c; color: #8899aa; margin-right: 3px; }
 .data-table .btn-tiny:hover { background: #2a3a5c; color: #c0d0e0; }
 
+/* ── 数据管理页全屏布局 ─────────────────────────────────── */
+.page-data { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+.page-data .app-layout { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+.page-data-main { flex: 1; display: flex; flex-direction: column; padding: 12px 16px; overflow: hidden; min-width: 0; }
+.page-data-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; max-width: none !important; }
+.page-data-panel h2 { flex: 0 0 auto; }
+
+.data-toolbar {
+  display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; align-items: center;
+  flex: 0 0 auto;
+}
+.data-search-input { flex: 1; min-width: 150px; background: #0d1b2a; border: 1px solid #2a3a5c; color: #82aaff; padding: 6px 10px; border-radius: 4px; font-size: 13px; }
+.data-search-input:focus { border-color: var(--accent); outline: none; }
+.data-filter-select { background: #0d1b2a; border: 1px solid #2a3a5c; color: #82aaff; padding: 6px 10px; border-radius: 4px; font-size: 13px; min-width: 110px; }
+.data-filter-select:focus { border-color: var(--accent); outline: none; }
+
+.data-table-wrapper { flex: 1; overflow-y: auto; min-height: 0; margin-bottom: 8px; }
+
+.data-pagination-bar { display: flex; justify-content: center; gap: 4px; padding: 6px 0; flex: 0 0 auto; }
+.data-pagination-bar .btn-tiny.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.data-preview-section { flex: 0 0 auto; }
+.data-preview-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.data-preview-header label { font-size: 13px; color: var(--text-dim); }
+.data-preview-actions { display: flex; gap: 4px; }
+
+.preview-content { margin: 0; white-space: pre-wrap; font-size: 10px; line-height: 1.4; }
+.preview-more-hint { text-align: center; padding: 8px; color: var(--text-dim); font-size: 11px; border-top: 1px dashed var(--border); }
+
+/* 告警类型徽章 */
+.alarm-badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 10px; font-weight: 500; white-space: nowrap; }
+
+/* 来源标签 */
+.source-label { font-size: 10px; padding: 1px 5px; border-radius: 2px; white-space: nowrap; }
+.source-manual { color: #82aaff; }
+.source-import { color: #2ecc71; }
+.source-upload { color: #f39c12; }
+.source-generated { color: #9b59b6; }
+
+/* 操作列 */
+.action-cell { white-space: nowrap; min-width: 110px; }
+
+/* 航线校验 */
+.route-cell { font-size: 12px; }
+.route-check { font-size: 12px; }
+
+/* 文本变暗 */
+.text-dim { color: var(--text-dim); }
+
+/* 空状态提示 */
+.empty-hint { text-align: center; padding: 24px; color: var(--text-dim); font-size: 13px; }
+
 /* ── 地图工具栏 ──────────────────────────────────────── */
 .map-toolbar { display: flex; gap: 4px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
 
@@ -700,4 +752,43 @@ body {
 .mode-badge.mode-replay      { background:rgba(130,170,255,0.15); color:#82aaff; }
 .mode-badge.mode-replay_once { background:rgba(130,170,255,0.10); color:#6a8adf; }
 .mode-badge.mode-plan        { background:rgba(46,204,113,0.15);  color:#2ecc71; }
+
+/* ── 运行日志四层结构 ────────────────────────────────────────────── */
+.log-layer {
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.log-layer-header {
+  display: flex; align-items: center; gap: 8px; padding: 5px 8px;
+  cursor: pointer; background: var(--bg-alt); user-select: none;
+}
+.log-layer-header:hover { background: var(--bg-hover); }
+.log-layer-toggle { font-size: 10px; color: var(--text-dim); min-width: 12px; }
+.log-layer-title { font-size: 12px; font-weight: 500; flex: 1; }
+.log-layer-badge {
+  font-size: 10px; background: var(--accent); color: #fff;
+  border-radius: 10px; padding: 0 6px; min-width: 18px; text-align: center;
+}
+.log-layer-body {
+  padding: 2px 8px; max-height: 160px; overflow-y: auto;
+  font-size: 11px; line-height: 1.5;
+}
+.log-layer-body .log-line {
+  padding: 1px 0; border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+.log-telemetry .log-uav   { color: var(--accent); }
+.log-telemetry .log-coord { color: var(--text-dim); font-size: 10px; }
+.log-trace .log-uav     { color: var(--accent); }
+.log-collision .log-alert-type { font-weight: 600; }
+.log-ws .log-ws-type    { color: var(--accent); font-size: 10px; }
+
+/* ── 告警详情错误态 ───────────────────────────────────────────────── */
+.alarm-item-error { color: var(--warning, #e67e22); }
+.alarm-item-loading { color: var(--text-dim); }
+.alarm-item-empty { color: var(--success, #2ecc71); }
+.btn-retry-alarm {
+  background: rgba(42,63,86,0.8); border: 1px solid var(--border);
+  color: var(--accent); padding: 2px 8px; border-radius: 3px; cursor: pointer;
+}
+.btn-retry-alarm:hover { background: rgba(58,95,118,0.8); }
 .mode-badge.mode-unknown     { background:rgba(122,147,168,0.10); color:#7a93a8; }

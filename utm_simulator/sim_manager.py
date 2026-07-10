@@ -93,14 +93,19 @@ class SimulationManager:
     后台线程和运行状态。
     """
 
-    def __init__(self, config: Optional[AppConfig] = None, log_callback=None) -> None:
+    def __init__(self, config: Optional[AppConfig] = None, log_callback=None,
+                 trace_callback=None, telemetry_callback=None) -> None:
         """
         Args:
             config: 应用配置。为 None 时自动从 env.py + 环境变量加载。
             log_callback: 可选，日志回调函数 func(msg: str)，用于桥接到 web 前端。
+            trace_callback: 可选，trace 回调函数 func(dict)，用于桥接 trace 数据到 WebSocket。
+            telemetry_callback: 可选，遥测回调函数 func(dict)，用于桥接 telemetry 到 WebSocket。
         """
         self.config = config or load_config()
         self._log_callback = log_callback
+        self._trace_callback = trace_callback
+        self._telemetry_callback = telemetry_callback
 
         # ── Redis / Kafka 客户端 ────────────────────────────────────
         self.redis = RedisClient(
@@ -299,6 +304,18 @@ class SimulationManager:
             except Exception:
                 pass
             self._plan_runner = None
+
+        # 清理 dynamic 模式 Simulator (ctypes) — 必须在创建新 kafka-python
+        # 对象前释放 ctypes 资源，否则 Windows 上会触发 C-level 崩溃
+        if self.mode == "dynamic" and self.simulator:
+            try:
+                del self.simulator
+            except Exception:
+                pass
+            self.simulator = None
+            import gc
+            gc.collect()
+            self._add_log("Simulator (ctypes) 资源已释放")
 
         # 关闭 Kafka
         try:
@@ -558,6 +575,12 @@ class SimulationManager:
             except Exception as e:
                 self._add_log(f"遥测写 Redis 失败: {e}")
             self._kafka_sent_total += len(kafka_msgs)
+            # 回调遥测数据到 WebSocket（实时桥接至前端运行日志面板）
+            if self._telemetry_callback:
+                try:
+                    self._telemetry_callback({"records": kafka_msgs, "count": len(kafka_msgs)})
+                except Exception:
+                    pass
             if self._tick_count % 30 == 0:
                 self._add_log(f"动态仿真: {len(kafka_msgs)} 条遥测→Redis, 累计 {self._kafka_sent_total} 条")
 
@@ -587,6 +610,12 @@ class SimulationManager:
         if records and self._ensure_kafka_producer():
             self.kafka_producer.send_bulk(records, KAFKA_UAV_DATA_TOPIC)
             self._kafka_sent_total += len(records)
+            # 回调遥测数据到 WebSocket（实时桥接至前端运行日志面板）
+            if self._telemetry_callback:
+                try:
+                    self._telemetry_callback({"records": records, "count": len(records)})
+                except Exception:
+                    pass
             if self._tick_count % 30 == 0:
                 self._add_log(f"Replay: {len(records)} 条/{len(self._replay_index)} 架, 累计 {self._kafka_sent_total} 条")
 
@@ -666,6 +695,16 @@ class SimulationManager:
                         ] if allowed else value
                         if filtered:
                             self._trace_msg_count += 1
+                            # 回调 trace 数据到 WebSocket（实时桥接至前端运行日志面板）
+                            if self._trace_callback:
+                                try:
+                                    self._trace_callback({
+                                        "count": len(filtered),
+                                        "data": filtered,
+                                        "key": redis_key,
+                                    })
+                                except Exception:
+                                    pass
                             if self._trace_msg_count % 50 == 0:
                                 self._add_log(f"Trace消费: 累计 {self._trace_msg_count} 条, 最近 {len(filtered)} 条")
             except Exception as e:

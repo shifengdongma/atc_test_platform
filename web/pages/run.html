@@ -170,21 +170,82 @@
           <div class="chart-box"><canvas id="chart-kafka"></canvas></div>
         </div>
 
-        <!-- ★ 运行日志（类似系统日志的结构） ★ -->
-        <div class="log-panel" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;">
-          <h3 style="display:flex;justify-content:space-between;align-items:center;">
+        <!-- ★ 运行日志（4层结构） ★ -->
+        <div class="log-panel" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;overflow-y:auto;">
+          <h3 style="display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
             <span>📋 运行日志</span>
             <div style="display:flex;gap:8px;align-items:center;">
-              <label style="font-size:10px;color:var(--text-dim);"><input type="checkbox" class="run-log-type-cb" value="sim_status" checked> 状态</label>
-              <label style="font-size:10px;color:var(--text-dim);"><input type="checkbox" class="run-log-type-cb" value="redis_route" checked> 航线</label>
-              <label style="font-size:10px;color:var(--text-dim);"><input type="checkbox" class="run-log-type-cb" value="kafka_telemetry" checked> Kafka</label>
-              <label style="font-size:10px;color:var(--text-dim);"><input type="checkbox" class="run-log-type-cb" value="other" checked> 其他</label>
               <button id="btn-export-log" class="btn btn-small">📥 导出</button>
               <button id="btn-clear-log" class="btn btn-small">🧹 清空</button>
             </div>
           </h3>
-          <div class="log-stream" id="log-stream" style="flex:1;max-height:none;">
-            <div class="log-empty">等待日志...</div>
+
+          <!-- Layer 1: Kafka uav_runtime_data 遥测 -->
+          <div class="log-layer">
+            <div class="log-layer-header" onclick="toggleLogLayer(this)">
+              <span class="log-layer-toggle">▶</span>
+              <span class="log-layer-title">📡 Kafka uav_runtime_data 遥测</span>
+              <span class="log-layer-badge" id="badge-telemetry">0</span>
+            </div>
+            <div class="log-layer-body" id="log-layer-telemetry">
+              <div class="log-empty">等待遥测数据...</div>
+            </div>
+          </div>
+
+          <!-- Layer 2: Kafka uav_runtime_trace 轨迹预测 -->
+          <div class="log-layer">
+            <div class="log-layer-header" onclick="toggleLogLayer(this)">
+              <span class="log-layer-toggle">▶</span>
+              <span class="log-layer-title">🗺️ Kafka uav_runtime_trace 轨迹预测</span>
+              <span class="log-layer-badge" id="badge-trace">0</span>
+            </div>
+            <div class="log-layer-body" id="log-layer-trace">
+              <div class="log-empty">等待轨迹数据...</div>
+            </div>
+          </div>
+
+          <!-- Layer 3: Kafka uav_collision_alarm 冲突告警 -->
+          <div class="log-layer">
+            <div class="log-layer-header" onclick="toggleLogLayer(this)">
+              <span class="log-layer-toggle">▶</span>
+              <span class="log-layer-title">⚠️ Kafka uav_collision_alarm 冲突告警</span>
+              <span class="log-layer-badge" id="badge-collision">0</span>
+            </div>
+            <div class="log-layer-body" id="log-layer-collision">
+              <div class="log-empty">等待告警数据...</div>
+            </div>
+          </div>
+
+          <!-- Layer 4: ATC WebSocket 前端数据 -->
+          <div class="log-layer">
+            <div class="log-layer-header" onclick="toggleLogLayer(this)">
+              <span class="log-layer-toggle">▶</span>
+              <span class="log-layer-title">🌐 ATC WebSocket 前端数据</span>
+              <span class="log-layer-badge" id="badge-ws">0</span>
+            </div>
+            <div class="log-layer-body" id="log-layer-ws">
+              <div class="log-empty">等待 WS 数据...</div>
+            </div>
+          </div>
+
+          <!-- Layer 5: 系统日志（折叠） -->
+          <div class="log-layer">
+            <div class="log-layer-header" onclick="toggleLogLayer(this)">
+              <span class="log-layer-toggle">▶</span>
+              <span class="log-layer-title">📋 系统日志</span>
+              <span class="log-layer-badge" id="badge-system">0</span>
+            </div>
+            <div class="log-layer-body" id="log-layer-system">
+              <div style="display:flex;gap:8px;flex-wrap:wrap;padding:4px 0;">
+                <label style="font-size:10px;color:var(--text-dim);"><input type="checkbox" class="run-log-type-cb" value="sim_status" checked> 状态</label>
+                <label style="font-size:10px;color:var(--text-dim);"><input type="checkbox" class="run-log-type-cb" value="redis_route" checked> 航线</label>
+                <label style="font-size:10px;color:var(--text-dim);"><input type="checkbox" class="run-log-type-cb" value="kafka_telemetry" checked> Kafka</label>
+                <label style="font-size:10px;color:var(--text-dim);"><input type="checkbox" class="run-log-type-cb" value="other" checked> 其他</label>
+              </div>
+              <div class="log-stream" id="log-stream" style="max-height:none;">
+                <div class="log-empty">等待日志...</div>
+              </div>
+            </div>
           </div>
         </div>
       </section>

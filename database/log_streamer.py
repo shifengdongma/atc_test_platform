@@ -53,6 +53,8 @@ LOG_TYPES = {
     "situation_uav": "态势-监视目标",
     "situation_plan": "态势-飞行计划",
     "situation_alarm": "态势-实时告警",
+    "kafka_collision_alarm": "Kafka 冲突告警",
+    "ws_captured_data": "WebSocket 前端数据",
 }
 
 

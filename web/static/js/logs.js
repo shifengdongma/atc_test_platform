@@ -209,26 +209,54 @@ function renderAlarmTab() {
 
     // 告警详情列表
     if (l.detail && l.detail.warnings && l.detail.warnings.length > 0) {
+      // 有详情数据 — 直接渲染告警卡片
+      var sourceLabel = l.detail.source === 'stomp_warning_tags' ? ' (STOMP兜底)' : '';
       l.detail.warnings.forEach(function(w) {
         html += '<div class="alarm-item">';
         html += '<span class="alarm-item-code">' + escHtml(w.uavCode || '-') + '</span>';
-        html += '<span class="alarm-item-type">' + escHtml(w.warningType || '告警') + '</span>';
+        html += '<span class="alarm-item-type">' + escHtml(w.warningType || w.alertCategory || '告警') + '</span>';
         html += '<span class="alarm-item-msg">' + escHtml(w.message || '') + '</span>';
         html += '</div>';
       });
+      if (sourceLabel) {
+        html += '<div class="alarm-item" style="font-size:10px;color:var(--text-dim);"><span style="grid-column:1/-1;">来源: STOMP warningTags (REST API 兜底)</span></div>';
+      }
     } else if (l.detail && l.detail.source === 'alarmStatistic') {
-      // 来自 alarmStatistic 计数，区分有告警但详情未加载 / 无告警
-      if (l.detail.total > 0) {
+      // 来自 alarmStatistic 计数
+      if (l.detail._api_failed) {
+        // API 失败 — 显示错误 + 重试按钮
+        html += '<div class="alarm-item"><span class="alarm-item-msg alarm-item-error" style="grid-column:1/-1;">'
+          + '⚠️ 告警详情 API 请求失败'
+          + (l.detail._error ? ': ' + escHtml(l.detail._error) : '')
+          + ' <button class="btn-retry-alarm" onclick="retryAlarmDetails()" style="margin-left:8px;font-size:11px;">\u{1F504} 重试</button>'
+          + '</span></div>';
+      } else if (l.detail.total > 0) {
         html += '<div class="alarm-item"><span class="alarm-item-msg alarm-item-loading" style="grid-column:1/-1;">⏳ 告警详情获取中…（共 ' + l.detail.total + ' 条，REST API 请求）</span></div>';
       } else {
         html += '<div class="alarm-item"><span class="alarm-item-msg alarm-item-empty" style="grid-column:1/-1;">当前无告警 ✅</span></div>';
       }
+    } else if (l.detail && l.detail.source === 'stomp_warning_tags' && l.detail.total === 0) {
+      // STOMP 兜底也空
+      html += '<div class="alarm-item"><span class="alarm-item-msg alarm-item-error" style="grid-column:1/-1;">⚠️ 告警详情不可用 (API 失败且 STOMP 无 warningTags)</span></div>';
     } else {
       html += '<div class="alarm-item"><span class="alarm-item-msg" style="grid-column:1/-1;">（无告警详情）</span></div>';
     }
     html += '</div>';
   }
   el.innerHTML = html;
+}
+
+// 告警详情重试
+function retryAlarmDetails() {
+  fetch('/api/sim/retry-alarm-details', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.success) {
+        var toast = document.getElementById('toast');
+        if (toast) { toast.textContent = '✅ 告警详情重试已触发，请稍候刷新'; toast.className = 'toast show'; setTimeout(function() { toast.className = 'toast'; }, 3000); }
+      }
+    })
+    .catch(function() {});
 }
 
 // ── 全部日志 Tab ──────────────────────────────────────────────────

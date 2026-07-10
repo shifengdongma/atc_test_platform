@@ -1755,3 +1755,104 @@ Docker 容器部署到 Linux 服务器后，后台日志出现 5 类错误：
 | 修复字段名 | 1（pressureAltitude 场景模式对齐） |
 | 修复 async_mode | 1（threading 替代 eventlet） |
 | 状态 | ✅ 已完成 |
+
+---
+
+### 2026-07-10 数据管理与 JSON 文件管理全面优化
+
+> 来源计划: `json-imperative-boot.md`
+
+#### 一、数据库存储架构升级（content → file_path）
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `database/db_manager.py` | 修改 | `sim_json_files` DDL：删除 content/created_by 列，新增 alarm_type/file_path/simulator_id/linked_route/source 列 |
+| `database/mysql_db_manager.py` | 修改 | MySQL DDL 同步更新，新字段支持 COMMENT 注释 |
+| `database/json_data_manager.py` | 重写 | 核心逻辑：content 写入磁盘 data/mock/，数据库仅存 file_path 路径；自动检测 alarm_type/simulator_id/linked_route；新增分页预览 preview_file()；新增航线校验 validate_route_correlation()；新增 get_alarm_types() |
+
+#### 二、API 端点更新
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `utm_simulator/web_server.py` | 修改 | 新增 GET /api/data/db/files/<id>/preview 分页预览端点；新增 GET /api/data/db/files/<id>/validate-route 航线校验端点；list 端点新增 alarm_type 过滤参数；download 改用 flask.send_file() 流式传输；调度器回调改用 shutil.copy2 从 file_path 复制 |
+| `database/migrate_schema_v2.py` | 新建 | v1→v2 迁移脚本：添加新列 + 数据迁移（content→file_path）+ 元数据体检测填充 |
+
+#### 三、前端全面重设计
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `web/pages/data.html` | 重写 | 全屏弹性布局（移除 max-height 固定限制）；新表头顺序：ID→告警类型→操作→模拟器ID→关联航线→文件名→大小→来源→更新时间；新增告警类型过滤下拉框；编辑弹窗增加 alarm_type/simulator_id/linked_route/source 字段；大文件编辑警告 |
+| `web/static/js/data.js` | 重写 | 告警类型彩色徽章（碰撞预警=红/偏航=橙/最低安全高度=深橙/正常遥测=绿/飞行计划=蓝）；分页预览（首500行+加载更多）；航线校验异步加载（✅/❌/❓）；来源标签（📝手动/📥导入/📤上传/🤖生成）；loadCategoryFilter 同步加载 alarm_types |
+| `web/static/css/style.css` | 修改 | 新增 .page-data 全屏布局/.alarm-badge/.source-label/.data-toolbar/.data-table-wrapper/.data-preview-section/.preview-content/.route-cell 等样式 |
+
+#### 四、基础设施优化
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `common/config.py` | 修改 | 新增集中路径常量：DATA_DIR/MOCK_DIR/TEMPLATES_DIR/SCHEMAS_DIR/UPLOADS_DIR/DATABASE_DIR/UTM_SIMULATOR_DIR/DOCS_DIR；json_data_manager.py 改为从 config 导入 MOCK_DIR |
+| `.gitignore` | 修改 | 新增 data/mock/ 排除运行时 JSON 文件；新增 common/config.json 排除持久化配置；统一 SQLite 排除规则 |
+| `data/mock/.gitkeep` | 新建 | 保留版本控制中的目录结构 |
+
+#### 汇总
+
+| 操作 | 文件数 |
+|------|--------|
+| 新建 | 2（migrate_schema_v2.py + .gitkeep） |
+| 修改 | 5（db_manager.py + mysql_db_manager.py + web_server.py + config.py + .gitignore） |
+| 重写 | 3（json_data_manager.py + data.html + data.js） |
+
+| 状态 | ✅ 已完成（SQLite 已迁移 8 条记录，MySQL 待手动 ALTER TABLE） |
+
+---
+
+### 2026-07-10: 系统日志告警详情修复 + 运行日志四层结构优化
+
+> 来源计划: `1-rest-vectorized-clarke.md`
+
+#### 一、系统日志告警详情修复（Part A）
+
+**问题**：`/logs` 页面"实时告警"Tab 中，告警详情始终显示"⏳ 告警详情获取中…"而非真实数据。
+**根因**：`situation_monitor.py::_fetch_alert_details()` 中 REST API 调用在多个环节静默失败。
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `utm_simulator/situation_monitor.py` | 修改 | 增强 `_fetch_alert_details()` 错误日志：Token 获取失败、HTTP 非 200、code≠0 等分支均记录具体失败原因并 push `sim_status`；新增 `_alert_retry_count`（上限 3，失败累计/成功清零）；detail 增加 `_api_failed`/`_error` 标记；`_get_token()` 每个来源失败时打印日志；新增 `_pending_alarm_fallback` 标志 — API 失败后从 STOMP warningTags 兜底推送告警详情 |
+| `web/static/js/logs.js` | 修改 | `renderAlarmTab()` 新增 `_api_failed` 错误态分支（显示 ⚠️ + 错误信息 + 🔄 重试按钮）；新增 `source="stomp_warning_tags"` 分支直接渲染 STOMP 兜底告警；新增 `retryAlarmDetails()` 调用 `/api/sim/retry-alarm-details` |
+| `utm_simulator/web_server.py` | 修改 | 新增 `POST /api/sim/retry-alarm-details` 端点（重置 `_alert_retry_count` 和 `_pending_alarm_fallback`） |
+| `web/static/css/style.css` | 修改 | 新增 `.alarm-item-error`、`.alarm-item-loading`、`.alarm-item-empty`、`.btn-retry-alarm` 样式 |
+
+#### 二、运行日志四层结构（Part B）
+
+**需求**：`/run` 页面"运行日志"面板从单一扁平日志流改为 4 层可折叠结构。
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `database/log_streamer.py` | 修改 | `LOG_TYPES` 新增 `kafka_collision_alarm`、`ws_captured_data` 两种日志类型 |
+| `utm_simulator/sim_manager.py` | 修改 | `SimulationManager.__init__` 新增 `trace_callback` 和 `telemetry_callback` 参数；`_consume_trace()` 在 filtered 有数据时调用 `trace_callback`；`_tick_replay()` 和 `_run_dynamic` 在发送遥测后调用 `telemetry_callback` |
+| `utm_simulator/web_server.py` | 修改 | 新增 `_start_collision_alarm_consumer()`（后台线程消费 `uav_collision_alarm` topic，push LogStreamer + emit SocketIO）；引入 `KafkaConsumerClient`；创建 `SimulationManager` 时传入 `trace_callback`/`telemetry_callback` 桥接至 `socketio.emit`；replay_once 路径增加 `telemetry_data` emit |
+| `utm_simulator/situation_monitor.py` | 修改 | `_send_stomp_connect()` 新增 `/topic/clusterChange` SUBSCRIBE；`_process_body()` 新增集群健康状态处理器（push `ws_captured_data`）；末尾增加 ATC WS 数据摘要推送 |
+| `web/static/js/common.js` | 修改 | `_wsCallbacks` 新增 `telemetry_data`、`trace_data`、`collision_alarm`、`ws_captured` 事件注册；`getSocket()` 增加对应 `_socket.on()` 监听 |
+| `web/pages/run.html` | 修改 | 运行日志面板替换为 5 层可折叠结构：📡 Kafka遥测 / 🗺️ Trace轨迹 / ⚠️ 冲突告警 / 🌐 ATC WS数据 / 📋 系统日志 |
+| `web/static/js/run.js` | 修改 | 新增 `telemetryLogs`/`traceLogs`/`collisionLogs`/`wsCapturedLogs` 数据数组；新增 4 个 WebSocket 事件处理器；新增 `renderTelemetryLayer()`/`renderTraceLayer()`/`renderCollisionLayer()`/`renderWsCapturedLayer()` 渲染函数；新增 `toggleLogLayer()`/`updateBadge()` 辅助函数；更新清空逻辑覆盖全部层 |
+| `web/static/css/style.css` | 修改 | 新增 `.log-layer`/`.log-layer-header`/`.log-layer-toggle`/`.log-layer-title`/`.log-layer-badge`/`.log-layer-body` 层样式；新增 `.log-telemetry`/`.log-trace`/`.log-collision`/`.log-ws` 行内样式 |
+
+**四层数据流**：
+
+| 层 | WebSocket 事件 | 数据源 |
+|----|---------------|--------|
+| 📡 Kafka uav_runtime_data 遥测 | `telemetry_data` | sim_manager send_bulk 后回调 emit |
+| 🗺️ Kafka uav_runtime_trace 轨迹 | `trace_data` | sim_manager trace 消费线程回调 emit |
+| ⚠️ Kafka uav_collision_alarm 告警 | `collision_alarm` | 新后台消费者线程 poll → emit |
+| 🌐 ATC WebSocket 前端数据 | `ws_captured` | situation_monitor STOMP + clusterChange |
+| 📋 系统日志 | `log_entry`（原有） | LogStreamer push callback |
+
+#### 汇总
+
+| 操作 | 文件数 |
+|------|--------|
+| 修改 | 9 |
+| 新增 API | 1（`/api/sim/retry-alarm-details`） |
+| 新增 SocketIO 事件 | 4 |
+| 新增日志类型 | 2 |
+
+| 状态 | ✅ 已完成（4 Python 文件语法检查通过） |

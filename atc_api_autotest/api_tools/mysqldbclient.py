@@ -87,14 +87,21 @@ class MysqlDbClient:
     """
 
     def __init__(self, host=None, port=None, user=None, password=None,
-                 database=None, charset=None):
-        """初始化客户端，参数为空时自动使用 env.py/环境变量配置"""
+                 database=None, charset=None, read_timeout=60, write_timeout=60):
+        """初始化客户端，参数为空时自动使用 env.py/环境变量配置
+
+        Args:
+            read_timeout: 读取超时秒数（默认60，DDL操作可能需要更长时间）
+            write_timeout: 写入超时秒数（默认60）
+        """
         self.host = host if host is not None else _MYSQL_HOST
         self.port = port if port is not None else _MYSQL_PORT
         self.user = user if user is not None else _MYSQL_USER
         self.password = password if password is not None else _MYSQL_PASSWORD
         self.database = database if database is not None else _MYSQL_DATABASE
         self.charset = charset if charset is not None else _MYSQL_CHARSET
+        self.read_timeout = read_timeout
+        self.write_timeout = write_timeout
         self.conn = None
         self.cursor = None
 
@@ -110,8 +117,8 @@ class MysqlDbClient:
                 charset=self.charset,
                 cursorclass=pymysql.cursors.DictCursor,
                 connect_timeout=10,
-                read_timeout=30,
-                write_timeout=30,
+                read_timeout=self.read_timeout,
+                write_timeout=self.write_timeout,
             )
             self.cursor = self.conn.cursor()
             print(f"[MysqlDbClient] 成功连接到 MySQL {self.host}:{self.port}, 数据库: {self.database}")

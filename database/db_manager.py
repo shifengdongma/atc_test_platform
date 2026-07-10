@@ -38,16 +38,19 @@ _TABLE_DDL = {
     """,
     "sim_json_files": """
         CREATE TABLE IF NOT EXISTS sim_json_files (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            name        TEXT NOT NULL,
-            category    TEXT DEFAULT 'route',
-            content     TEXT DEFAULT '',
-            size_bytes  INTEGER DEFAULT 0,
-            description TEXT DEFAULT '',
-            tags        TEXT DEFAULT '',
-            created_by  TEXT DEFAULT 'manual',
-            created_at  TEXT DEFAULT '',
-            updated_at  TEXT DEFAULT ''
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            name         TEXT NOT NULL,
+            category     TEXT DEFAULT 'route',
+            alarm_type   TEXT DEFAULT '',
+            file_path    TEXT DEFAULT '',
+            simulator_id TEXT DEFAULT '',
+            linked_route TEXT DEFAULT '',
+            size_bytes   INTEGER DEFAULT 0,
+            source       TEXT DEFAULT 'manual',
+            description  TEXT DEFAULT '',
+            tags         TEXT DEFAULT '',
+            created_at   TEXT DEFAULT '',
+            updated_at   TEXT DEFAULT ''
         )
     """,
     "sim_scheduled_tasks": """

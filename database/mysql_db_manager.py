@@ -80,7 +80,7 @@ def _get_client():
         # ── 首次连接 ──
         if _mysql_client is None and _mysql_available is None:
             try:
-                _mysql_client = MysqlDbClient()
+                _mysql_client = MysqlDbClient(read_timeout=120, write_timeout=120)
                 if _mysql_client.connect():
                     # 验证连接确实可用（防止连接成功但立即断开的情况）
                     try:
@@ -122,7 +122,7 @@ def _get_client():
                     pass
                 _mysql_client = None
                 try:
-                    _mysql_client = MysqlDbClient()
+                    _mysql_client = MysqlDbClient(read_timeout=120, write_timeout=120)
                     if _mysql_client.connect():
                         # 验证新连接确实可用
                         try:
@@ -172,16 +172,19 @@ _MYSQL_TABLE_DDL = {
     """,
     "sim_json_files": """
         CREATE TABLE IF NOT EXISTS `sim_json_files` (
-            `id`          INT AUTO_INCREMENT PRIMARY KEY,
-            `name`        VARCHAR(256) NOT NULL,
-            `category`    VARCHAR(64) DEFAULT 'route',
-            `content`     LONGTEXT,
-            `size_bytes`  INT DEFAULT 0,
-            `description` TEXT,
-            `tags`        VARCHAR(512) DEFAULT '',
-            `created_by`  VARCHAR(64) DEFAULT 'manual',
-            `created_at`  DATETIME DEFAULT CURRENT_TIMESTAMP,
-            `updated_at`  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            `id`           INT AUTO_INCREMENT PRIMARY KEY,
+            `name`         VARCHAR(256) NOT NULL,
+            `category`     VARCHAR(64) DEFAULT 'route',
+            `alarm_type`   VARCHAR(64) DEFAULT '' COMMENT '告警类型',
+            `file_path`    VARCHAR(1024) DEFAULT '' COMMENT '本地文件路径',
+            `simulator_id` VARCHAR(128) DEFAULT '' COMMENT '模拟器ID(无人机唯一标识)',
+            `linked_route` VARCHAR(256) DEFAULT '' COMMENT '关联航线名称',
+            `size_bytes`   INT DEFAULT 0,
+            `source`       VARCHAR(32) DEFAULT 'manual' COMMENT '来源: manual/import/upload/generated',
+            `description`  TEXT,
+            `tags`         VARCHAR(512) DEFAULT '',
+            `created_at`   DATETIME DEFAULT CURRENT_TIMESTAMP,
+            `updated_at`   DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='JSON数据文件表'
     """,
     "sim_scheduled_tasks": """

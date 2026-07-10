@@ -40,7 +40,10 @@ window.apiPost = async function(path, body) {
 
 // ── WebSocket（单例，所有页面共享）─────────────────────────────────
 var _socket = null;
-var _wsCallbacks = { status: [], status_change: [], log: [], log_entry: [] };
+var _wsCallbacks = {
+  status: [], status_change: [], log: [], log_entry: [],
+  telemetry_data: [], trace_data: [], collision_alarm: [], ws_captured: [],
+};
 
 window.getSocket = function() {
   if (_socket) return _socket;
@@ -68,6 +71,18 @@ window.getSocket = function() {
   });
   _socket.on('log_entry', function(data) {
     _wsCallbacks.log_entry.forEach(function(fn) { fn(data); });
+  });
+  _socket.on('telemetry_data', function(data) {
+    _wsCallbacks.telemetry_data.forEach(function(fn) { fn(data); });
+  });
+  _socket.on('trace_data', function(data) {
+    _wsCallbacks.trace_data.forEach(function(fn) { fn(data); });
+  });
+  _socket.on('collision_alarm', function(data) {
+    _wsCallbacks.collision_alarm.forEach(function(fn) { fn(data); });
+  });
+  _socket.on('ws_captured', function(data) {
+    _wsCallbacks.ws_captured.forEach(function(fn) { fn(data); });
   });
   return _socket;
 };

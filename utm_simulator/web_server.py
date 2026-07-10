@@ -36,7 +36,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from flask_socketio import SocketIO, emit
 
 from redis_client import RedisClient
-from kafka_proc import KafkaProducerClient
+from kafka_proc import KafkaConsumerClient, KafkaProducerClient
 from config import load_config, AppConfig
 from sim_manager import SimulationManager
 import env as _env
@@ -160,6 +160,62 @@ def _get_streamer():
         s._callback = _ws_push
         s.push("sim_status", "日志采集服务已就绪")
     return s
+
+
+# ── Kafka 冲突告警消费者 ──────────────────────────────────────────
+_collision_consumer = None
+_collision_consumer_thread = None
+
+
+def _start_collision_alarm_consumer():
+    """消费 uav_collision_alarm topic 并推送到 LogStreamer + SocketIO。
+    初始化在后台线程完成，避免 subscribe() 阻塞请求线程。"""
+    global _collision_consumer, _collision_consumer_thread
+    if _collision_consumer is not None:
+        return
+
+    def _init_and_poll():
+        global _collision_consumer
+        try:
+            kafka_url = _current_config["kafka_url"]
+            _collision_consumer = KafkaConsumerClient(
+                bootstrap_servers=kafka_url,
+                group_id=f"utm_web_collision_{os.getpid()}",
+                consume_from_latest_on_start=True,
+            )
+            _collision_consumer.subscribe(["uav_collision_alarm"])
+            print(f"[web_server] Kafka 冲突告警消费者已启动 (topic=uav_collision_alarm)")
+
+            while True:
+                try:
+                    messages = _collision_consumer.poll(timeout_ms=500)
+                    for msg in messages:
+                        if isinstance(msg, dict):
+                            involved = len(msg.get("involvedUavs", msg.get("alertUavList", [])))
+                            alert_type = msg.get("alertType", msg.get("alertCategory", "未知"))
+                            try:
+                                _get_streamer().push(
+                                    "kafka_collision_alarm",
+                                    f"冲突告警: {alert_type} 涉及 {involved} 架无人机",
+                                    detail=msg
+                                )
+                            except Exception:
+                                pass
+                            try:
+                                socketio.emit("collision_alarm", msg)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+                time.sleep(0.1)
+        except Exception as e:
+            print(f"[web_server] 冲突告警消费者启动失败: {e}")
+            _collision_consumer = None
+
+    _collision_consumer_thread = threading.Thread(
+        target=_init_and_poll, daemon=True, name="collision-consumer"
+    )
+    _collision_consumer_thread.start()
 
 
 # ==================== SimulationRunner ============================
@@ -295,7 +351,9 @@ class SimulationRunner:
 
         if self.mode == "dynamic":
             # 使用 SimulationManager 统一编排（桥接日志到前端）
-            self._sim_mgr = SimulationManager(self._app_cfg, log_callback=_add_log)
+            self._sim_mgr = SimulationManager(self._app_cfg, log_callback=_add_log,
+                                              trace_callback=lambda d: socketio.emit("trace_data", d),
+                                              telemetry_callback=lambda d: socketio.emit("telemetry_data", d))
             self._sim_mgr.start(mode=self.mode, target_drones=self.target_drones)
 
             with _lock:
@@ -390,6 +448,8 @@ class SimulationRunner:
                     if batch:
                         try:
                             ds.kafka_producer.send_bulk(batch, KAFKA_UAV_DATA_TOPIC)
+                            # 桥接遥测数据到前端运行日志面板
+                            socketio.emit("telemetry_data", {"records": batch, "count": len(batch)})
                         except Exception as e:
                             _add_log(f"Kafka 发送失败: {e}")
                         with _lock:
@@ -533,6 +593,17 @@ class SimulationRunner:
             _get_situation_monitor().start()
         except Exception as e:
             print(f"[web_server] 态势监控启动失败: {e}")
+
+        # 启动 Kafka 冲突告警消费者
+        # dynamic 模式下跳过：kafka-python 后台 I/O 线程与 Simulator ctypes
+        # 并发操作在 Windows 上会导致 C-level 崩溃（与 trace 消费者处理一致）
+        if self.mode != "dynamic":
+            try:
+                _start_collision_alarm_consumer()
+            except Exception as e:
+                print(f"[web_server] 冲突告警消费者启动失败: {e}")
+        else:
+            print("[web_server] dynamic 模式，跳过 Kafka 冲突告警消费者")
 
         self._thread = threading.Thread(target=self._sim_loop, daemon=True)
         self._thread.start()
@@ -1535,40 +1606,107 @@ def _get_json_mgr():
 
 @app.route("/api/data/db/files", methods=["GET"])
 def api_db_list_files():
-    """分页查询数据库中的 JSON 文件。"""
+    """分页查询数据库中的 JSON 文件（v2: 文件路径存储，不含 content）。"""
     mgr = _get_json_mgr()
     category = request.args.get("category", "")
+    alarm_type = request.args.get("alarm_type", "")
     keyword = request.args.get("keyword", "")
     page = request.args.get("page", 1, type=int)
     page_size = request.args.get("page_size", 20, type=int)
-    result = mgr.list_files(category=category, keyword=keyword, page=page, page_size=page_size)
-    # 为每个文件附加格式检测信息（仅取内容前 64KB）
+    result = mgr.list_files(
+        category=category, alarm_type=alarm_type,
+        keyword=keyword, page=page, page_size=page_size,
+    )
+    # 为每个文件附加格式检测信息（从磁盘读取首 64KB）
     for f in result.get("files", []):
-        content = f.get("content", "") or ""
-        fmt = _detect_file_format(content[:65536])
+        fpath = f.get("file_path", "")
+        sample = ""
+        if fpath and os.path.exists(fpath):
+            try:
+                with open(fpath, "r", encoding="utf-8") as fh:
+                    sample = fh.read(65536)
+            except Exception:
+                pass
+        fmt = _detect_file_format(sample) if sample else {"format": "unknown", "format_label": "未知格式", "compatible_modes": []}
         f["format"] = fmt["format"]
         f["format_label"] = fmt["format_label"]
         f["compatible_modes"] = fmt["compatible_modes"]
+        # 移除内部字段，不暴露给前端
+        f.pop("file_path", None)
     return jsonify(result)
 
 
 @app.route("/api/data/db/files/<int:file_id>", methods=["GET"])
 def api_db_get_file(file_id):
-    """获取文件详情。"""
+    """获取文件详情（默认不含完整内容，大文件用 /preview 端点）。"""
+    mgr = _get_json_mgr()
+    include_content = request.args.get("include_content", "").lower() == "true"
+    if include_content:
+        # 仅返回前 100KB，避免大文件 OOM
+        result = mgr.read_file_content_partial(file_id, max_chars=102400)
+        record = mgr.get_file(file_id)
+        if record:
+            record["content"] = result.get("content", "")
+            record["content_truncated"] = result.get("truncated", False)
+            record["content_message"] = result.get("message", "")
+        return jsonify(record) if record else jsonify({"error": "文件不存在"}), 404
+    record = mgr.get_file(file_id)
+    if not record:
+        return jsonify({"error": "文件不存在"}), 404
+    # 移除内部路径
+    record.pop("file_path", None)
+    return jsonify(record)
+
+
+@app.route("/api/data/db/files/<int:file_id>/preview", methods=["GET"])
+def api_db_preview_file(file_id):
+    """分页预览文件内容（按行读取，避免大文件 OOM）。"""
+    mgr = _get_json_mgr()
+    offset = request.args.get("offset", 0, type=int)
+    limit = request.args.get("limit", 500, type=int)
+    result = mgr.preview_file(file_id, offset=offset, limit=limit)
+    if "error" in result:
+        return jsonify(result), 404
+    return jsonify(result)
+
+
+@app.route("/api/data/db/files/<int:file_id>/validate-route", methods=["GET"])
+def api_db_validate_route(file_id):
+    """校验文件关联的航线是否在数据库中存在。"""
     mgr = _get_json_mgr()
     record = mgr.get_file(file_id)
     if not record:
         return jsonify({"error": "文件不存在"}), 404
-    return jsonify(record)
+    linked_route = record.get("linked_route", "")
+    result = mgr.validate_route_correlation(linked_route)
+    return jsonify(result)
 
 
 @app.route("/api/data/db/files", methods=["POST"])
 def api_db_save_file():
-    """新增或更新文件（JSON 内容或文件上传）。"""
+    """新增或更新文件（JSON 内容或元数据）。
+
+    支持 content 字段（写入磁盘），同时接受 alarm_type/simulator_id/linked_route/source。
+    """
     mgr = _get_json_mgr()
-    data = request.get_json(silent=True) or {}
-    if not data.get("name") and not data.get("content"):
-        return jsonify({"success": False, "message": "文件名和内容不能同时为空"}), 400
+    # 支持 JSON body 和 multipart form（文件上传）
+    if request.content_type and "multipart" in request.content_type:
+        # 文件上传
+        uploaded = request.files.get("file")
+        if not uploaded:
+            return jsonify({"success": False, "message": "未选择文件"}), 400
+        name = uploaded.filename or f"upload_{int(time.time())}.json"
+        content = uploaded.read().decode("utf-8")
+        data = {
+            "name": name,
+            "content": content,
+            "source": "upload",
+            "description": f"上传: {name}",
+        }
+    else:
+        data = request.get_json(silent=True) or {}
+        if not data.get("name") and not data.get("content") and not data.get("file_path"):
+            return jsonify({"success": False, "message": "文件名和内容不能同时为空"}), 400
     try:
         fid = mgr.save_file(data)
         return jsonify({"success": True, "id": fid, "message": "已保存"})
@@ -1598,16 +1736,20 @@ def api_db_delete_file(file_id):
 
 @app.route("/api/data/db/files/<int:file_id>/download", methods=["GET"])
 def api_db_download_file(file_id):
-    """下载文件内容为 JSON。"""
-    from flask import Response as _Response
+    """下载文件内容为 JSON（从磁盘流式传输）。"""
+    from flask import send_file
     mgr = _get_json_mgr()
-    record = mgr.download_file(file_id)
+    record = mgr.get_file(file_id)
     if not record:
         return jsonify({"error": "文件不存在"}), 404
-    return _Response(
-        record["content"],
+    fpath = record.get("file_path", "")
+    if not fpath or not os.path.exists(fpath):
+        return jsonify({"error": "文件内容不可用"}), 404
+    return send_file(
+        fpath,
         mimetype="application/json",
-        headers={"Content-Disposition": f"attachment; filename={record['name']}"},
+        as_attachment=True,
+        download_name=record.get("name", "file.json"),
     )
 
 
@@ -1630,9 +1772,12 @@ def api_db_export_mock(file_id):
 
 @app.route("/api/data/db/categories", methods=["GET"])
 def api_db_categories():
-    """获取所有分类。"""
+    """获取所有分类和告警类型。"""
     mgr = _get_json_mgr()
-    return jsonify({"categories": mgr.get_categories()})
+    return jsonify({
+        "categories": mgr.get_categories(),
+        "alarm_types": mgr.get_alarm_types(),
+    })
 
 
 @app.route("/api/data/db/categories", methods=["PUT"])
@@ -1741,20 +1886,23 @@ def _get_scheduler():
             if json_file_id:
                 try:
                     import json_data_manager as jdm
-                    record = jdm.download_file(int(json_file_id))
+                    record = jdm.get_file(int(json_file_id))
                     if record:
-                        # 写入 mock/ 目录供仿真使用
+                        # 从磁盘复制到 mock/ 目录供仿真使用
                         mock_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "mock")
                         os.makedirs(mock_dir, exist_ok=True)
-                        fpath = os.path.join(mock_dir, record["name"])
-                        with open(fpath, "w", encoding="utf-8") as f:
-                            f.write(record["content"])
+                        src_path = record.get("file_path", "")
+                        dest_path = os.path.join(mock_dir, record.get("name", ""))
+                        if src_path and os.path.exists(src_path):
+                            if os.path.abspath(src_path) != os.path.abspath(dest_path):
+                                import shutil
+                                shutil.copy2(src_path, dest_path)
                         # 设置 data_file 参数
                         if mode in ("replay", "replay_once"):
-                            params["data_file"] = record["name"]
+                            params["data_file"] = record.get("name", "")
                         elif mode == "scene":
-                            params["scene_files"] = [record["name"]]
-                        _add_log(f"[定时任务] 已从数据库加载文件: {record['name']}")
+                            params["scene_files"] = [record.get("name", "")]
+                        _add_log(f"[定时任务] 已从数据库加载文件: {record.get('name', '')}")
                 except Exception as e:
                     _add_log(f"[定时任务] 加载 JSON 文件失败: {e}")
 
@@ -1931,6 +2079,18 @@ def api_logs_export_db():
         mimetype=mime,
         headers={"Content-Disposition": f"attachment; filename=sim-logs-db-{ts}.{fmt}"},
     )
+
+
+@app.route("/api/sim/retry-alarm-details", methods=["POST"])
+def api_retry_alarm_details():
+    """触发态势监控器重新获取告警详情。"""
+    monitor = _get_situation_monitor()
+    if monitor:
+        monitor._alert_retry_count = 0
+        monitor._pending_alarm_fallback = False
+        _get_streamer().push("sim_status", "告警详情重试已触发")
+        return jsonify({"success": True, "message": "已触发告警详情重试"})
+    return jsonify({"success": False, "message": "态势监控未启动"}), 503
 
 
 @app.route("/api/logs/types", methods=["GET"])

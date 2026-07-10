@@ -142,6 +142,7 @@ class SimulationManager:
         self._route_cache: List[Dict[str, Any]] = []         # replay 模式 Redis 航线缓存
         self._plans: Dict[str, Any] = {}                     # plan 模式: uid → RoutePlanSim
         self._plan_runner = None                             # plan 模式 PlanRunner 引用
+        self._dynamic_uids: Set[str] = set()                 # dynamic 模式写过的所有 UID（stop 时精确清理）
 
         self._add_log("SimulationManager 初始化完成")
         logger.info(
@@ -257,6 +258,7 @@ class SimulationManager:
         self._errors = 0
         self._logs = []
         self._plans = {}
+        self._dynamic_uids.clear()
 
         # ── 模式特定初始化 ──────────────────────────────────────────
         if mode == "dynamic":
@@ -305,17 +307,34 @@ class SimulationManager:
                 pass
             self._plan_runner = None
 
-        # 清理 dynamic 模式 Simulator (ctypes) — 必须在创建新 kafka-python
-        # 对象前释放 ctypes 资源，否则 Windows 上会触发 C-level 崩溃
-        if self.mode == "dynamic" and self.simulator:
+        # 清理 dynamic 模式: 精确删除模拟生成的 UID + 释放 ctypes 资源
+        if self.mode == "dynamic":
+            # 只删除本次 dynamic 模式自己写入的 UID，不碰下游真实航线
+            if self._dynamic_uids:
+                try:
+                    for uid in self._dynamic_uids:
+                        try:
+                            self.redis.client.hdel(REDIS_FLIGHT_PLAN_KEY, uid)
+                        except Exception:
+                            pass
+                    self._add_log(f"已清理 {len(self._dynamic_uids)} 个模拟 UID (Redis)")
+                except Exception:
+                    pass
+            # 清理遥测缓存
             try:
-                del self.simulator
+                self.redis.client.delete("BIZ_DATA:UAV_TELEMETRY")
             except Exception:
                 pass
-            self.simulator = None
-            import gc
-            gc.collect()
-            self._add_log("Simulator (ctypes) 资源已释放")
+            # 释放 ctypes 资源
+            if self.simulator:
+                try:
+                    del self.simulator
+                except Exception:
+                    pass
+                self.simulator = None
+                import gc
+                gc.collect()
+                self._add_log("Simulator (ctypes) 资源已释放")
 
         # 关闭 Kafka
         try:
@@ -403,6 +422,7 @@ class SimulationManager:
         for _ in range(sim_cfg.target_drones):
             plan = self.simulator.generate_plan()
             uid = plan.aircraft.uid.decode("utf-8")
+            self._dynamic_uids.add(uid)
             route_json = self._plan_to_route_json(plan)
             self.redis.hset(REDIS_FLIGHT_PLAN_KEY, uid, route_json)
             generated += 1
@@ -558,6 +578,7 @@ class SimulationManager:
             for _ in range(need):
                 plan = self.simulator.generate_plan()
                 uid = plan.aircraft.uid.decode("utf-8")
+                self._dynamic_uids.add(uid)
                 route_json = self._plan_to_route_json(plan)
                 self.redis.hset(REDIS_FLIGHT_PLAN_KEY, uid, route_json)
                 self._add_log(f"新无人机 {uid} 加入仿真")

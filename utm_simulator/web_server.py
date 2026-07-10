@@ -759,14 +759,22 @@ def api_start_sim():
 
 @app.route("/api/sim/stop", methods=["POST"])
 def api_stop_sim():
-    """停止仿真。"""
+    """停止仿真。停止后自动重启进程以隔离 ctypes/Kafka 堆污染。"""
     global _sim_runner
     if not _sim_runner:
         return jsonify({"success": False, "message": "无运行中的仿真"}), 404
 
     _sim_runner.stop()
     _sim_runner = None
-    return jsonify({"success": True, "message": "仿真已停止"})
+
+    # 重启进程 — Simulator(ctypes) 与 kafka-python(librdkafka)
+    # 在同一进程中先后运行会导致 C-level 堆损坏，重启获得干净环境
+    import sys as _sys, subprocess as _sp
+    env = os.environ.copy()
+    env["UTM_RESTART"] = "1"
+    _sp.Popen([_sys.executable] + _sys.argv, env=env, close_fds=True)
+    print("[web_server] 正在重启进程以清理堆状态...", flush=True)
+    os._exit(0)
 
 
 @app.route("/api/sim/plans", methods=["GET"])
@@ -2126,4 +2134,9 @@ if __name__ == "__main__":
     print(f"  - 配置: Redis={_current_config['redis_ip']}:{_current_config['redis_port']}")
     print(f"  - 配置: Kafka={_current_config['kafka_url']}")
     print("  按 Ctrl+C 停止服务")
+    # 重启后等待端口释放（Windows TIME_WAIT 约 120 秒，但通常 2 秒内释放）
+    if os.environ.get("UTM_RESTART") == "1":
+        import time as _t
+        print("[web_server] 等待端口释放...", flush=True)
+        _t.sleep(2.0)
     socketio.run(app, host=host, port=port, allow_unsafe_werkzeug=True)

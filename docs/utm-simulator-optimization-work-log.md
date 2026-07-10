@@ -1856,3 +1856,44 @@ Docker 容器部署到 Linux 服务器后，后台日志出现 5 类错误：
 | 新增日志类型 | 2 |
 
 | 状态 | ✅ 已完成（4 Python 文件语法检查通过） |
+
+| 状态 | ✅ 已完成（4 Python 文件语法检查通过） |
+
+---
+
+### 2026-07-10 第三次优化: 模式切换进程崩溃 + 数据污染根治
+
+> 来源: 多轮调试定位到 C-level 堆污染，采用进程隔离策略
+
+#### 问题
+
+1. **dynamic → plan 模式切换进程直接终止**: 通过 `[TRACE]` 精确追踪到 `KafkaProducerClient.connect()` 即 librdkafka 初始化时崩溃。根因为 dynamic 模式 Simulator(ctypes) 运行后堆污染，后续 librdkafka 加载时触发 access violation。Python 层无法修复。
+2. **plan → dynamic 模式页面卡死**: 同样源于进程堆污染。
+3. **dynamic 模式数据残留 Redis**: stop() 只删当前活跃 agent UID，已完成飞行的无人机航线残留污染下游。
+
+#### 解决方案
+
+**进程隔离**: `api_stop_sim()` 停止后用 `subprocess.Popen` + `os._exit(0)` 自动重启 Web 进程，所有模式切换都触发重启，确保每次启动都是干净堆。启动时通过 `UTM_RESTART` 环境变量等 2 秒端口释放。
+
+**精确 Redis 清理**: 新增 `_dynamic_uids: Set[str]` 追踪本次动态生成的 UID，stop 时逐字段 HDEL 不碰下游真实航线。
+
+#### 修复文件
+
+| 文件 | 改动 |
+|------|------|
+| `utm_simulator/web_server.py:765-781` | `api_stop_sim()` 停止后自动重启进程 |
+| `utm_simulator/web_server.py:2141-2145` | 启动时检测 `UTM_RESTART` 等端口释放 |
+| `utm_simulator/sim_manager.py:144` | 新增 `_dynamic_uids` 追踪集合 |
+| `utm_simulator/sim_manager.py:407,563` | 生成 UID 时记录到 `_dynamic_uids` |
+| `utm_simulator/sim_manager.py:310-333` | stop() 精确逐字段 HDEL |
+
+#### 汇总
+
+| 操作 | 文件数 |
+|------|--------|
+| 修改 | 2（sim_manager.py + web_server.py） |
+| 新增进程重启机制 | 1（subprocess + os._exit） |
+| 修复 C-level 堆污染 | 1（进程隔离 — Python 层无解） |
+| 修复 Redis 数据污染 | 1（精确 UID 追踪清理） |
+
+| 状态 | ✅ 已完成 |

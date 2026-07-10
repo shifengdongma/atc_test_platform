@@ -37,7 +37,7 @@ class KafkaProducerClient:
         self.connect()
     
     def connect(self):
-        """连接Kafka服务器"""  
+        """连接Kafka服务器"""
         try:
             config = {
                 'bootstrap_servers': self.bootstrap_servers,

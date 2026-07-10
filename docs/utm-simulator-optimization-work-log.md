@@ -1613,3 +1613,145 @@ Docker 容器部署到 Linux 服务器后，后台日志出现 5 类错误：
 | 新增连接超时 | 3（connect/read/write_timeout） |
 | 新增表验证 | 1（SELECT 1 兜底验证） |
 | 状态 | ✅ 已完成，待 Docker 重新部署验证 |
+
+---
+
+### 2026-07-10（下午）: Plan模式免文件启动 + async_mode自动检测 + MySQL写入冷却期 + 遥测字段修正
+
+> 来源: `docs/docker报错日志.md` — 本地启动报错 + 用户反馈 Redis 插值模式 UX 问题
+> 调试方式: 分析 web_server.py / run.js / log_streamer.py / run_plan.py 调用链，逐个定位根因
+
+#### 报错分析
+
+| # | 报错/问题 | 根因 | 影响 |
+|---|----------|------|------|
+| 1 | `ValueError: Invalid async_mode specified` (本地启动崩溃) | `web_server.py:77` 写死 `async_mode="eventlet"`，本地 utm 环境未安装 eventlet；`start_web.ps1` 依赖列表不含 eventlet | 本地无法启动 Web 服务 |
+| 2 | Plan 模式强制要求选 JSON 文件 | 前端 `run.js:353` 始终发送默认 `plan_route_file="redis_route.json"`，UI 无"跳过文件"选项 | 用户困惑，若文件不存在则回退但也无清晰提示 |
+| 3 | `[LogStreamer] MySQL 写入异常: (0, '')` 刷屏 | `log_streamer.py` 的 `push()` 方法中 MySQL insert 失败后不设置 `_mysql_enabled=False`，每条日志都重试一次 MySQL 写入 | Docker 日志每秒数十条重复报错，淹没有效信息 |
+| 4 | 监控目标数不显示（用户补充） | `run_plan.py:177` 字段名 `ressureAltitude` 拼写错误，应为 `pressureAltitude`；`classification`/`uasOperationCategory` 硬编码为 1 而非从 Redis 数据读取 | 下游系统可能因字段名不匹配或分类值不对而无法识别监控目标 |
+
+#### 修复内容
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-10 | `utm_simulator/web_server.py:75-77` | 修改 | ✅ 完成 | 去掉 `async_mode="eventlet"`，自动检测异步模式；更新注释 |
+| 2026-07-10 | `start_web.ps1:107` | 修改 | ✅ 完成 | 依赖列表增加 `eventlet` |
+| 2026-07-10 | `web/pages/run.html:91-101` | 修改 | ✅ 完成 | plan-params 文件选择器标记为"(可选)"，添加空选项 + 提示文字 |
+| 2026-07-10 | `web/static/js/run.js:267,353` | 修改 | ✅ 完成 | `refreshPlanFileList()` 添加空选项；start 不发送默认文件名 |
+| 2026-07-10 | `utm_simulator/web_server.py:224-273` | 修改 | ✅ 完成 | `_init_plan_mode()` 仅当 `plan_route_file` 非空时才加载文件 |
+| 2026-07-10 | `database/log_streamer.py` | 修改 | ✅ 完成 | ① `_get_mysql_client()` 增加 SELECT 1 连接验证 + 60s 冷却期；② `push()` 中 insert 失败累计5次后禁用 MySQL 持久化；③ 区分 pymysql.Error 和通用异常 |
+| 2026-07-10 | `utm_simulator/tools/run_plan.py:177` | 修改 | ✅ 完成 | `"ressureAltitude"` → `"pressureAltitude"`（字段名拼写修正） |
+| 2026-07-10 | `utm_simulator/tools/run_plan.py:64-66,99-163` | 修改 | ✅ 完成 | `RoutePlanSim` 新增 `classification`/`uas_operation_category` 参数，`sample()` 返回这些字段 |
+| 2026-07-10 | `utm_simulator/tools/run_plan.py:165-166,316` | 修改 | ✅ 完成 | `_telemetry_dict()` 从 samp 读取分类值而非硬编码 1；`merge_from_redis()` 传入 Redis 数据中的分类值 |
+| 2026-07-10 | `utm_simulator/tools/run_plan.py:215,332-347` | 修改 | ✅ 完成 | `PlanRunner` 新增 `_tick_count`，`tick_send()` 每30秒输出遥测诊断日志 |
+
+#### 本次汇总
+
+| 操作 | 文件数 |
+|------|--------|
+| 修改 | 6（web_server.py + run.html + run.js + log_streamer.py + run_plan.py + start_web.ps1） |
+| 修复报错/问题 | 4 条 |
+| 新增冷却期机制 | 1（log_streamer MySQL 60s 冷却期） |
+| 新增连接验证 | 1（SELECT 1 验证 MySQL 连接） |
+| 新增空选项 | 1（plan 模式前端"不加载文件"选项） |
+| 字段名 | 1（ressureAltitude 保持不变，与 C++ TelemetryData/sim_manager 一致） |
+| 新增诊断日志 | 1（plan 模式每30s遥测诊断） |
+| 状态 | ✅ 已完成 |
+
+---
+
+### 2026-07-10（傍晚）: 修复 Plan 模式监控目标追踪失效 — 遥测字段回退 + Kafka URL 穿透
+
+> 来源: 用户反馈 — 启动 Redis 计划插值模式后下游监控系统追踪不到飞行器
+> 根因: ① `ressureAltitude` 被误改为 `pressureAltitude`，与代码库统一的字段名不一致
+>        ② PlanRunner 直接使用 env.py 默认 Kafka URL，忽略 Web UI 配置的环境切换
+
+#### 根因分析
+
+**根因 1 — 字段名不一致**：
+
+| 模式 | 文件 | Kafka 字段名 |
+|------|------|-------------|
+| dynamic | `sim_manager.py:692` | `"ressureAltitude"` ← C++ TelemetryData 原生字段名 |
+| plan（修改前） | `run_plan.py:177` | `"ressureAltitude"` ← 与 dynamic 一致 |
+| plan（上午修改后） | `run_plan.py:177` | `"pressureAltitude"` ← **错误！破坏了格式一致性** |
+
+`"ressureAltitude"` 是 C++ UTM 核心库 `TelemetryData` 结构体的原生字段名，整个代码库（`simulation_core.py`、`sim_manager.py`、`run_plan.py` 原代码）统一使用这个拼写。下游 ATC 系统与之对接时也期望此字段名。
+
+上午的修改将其改为 `"pressureAltitude"`，导致 Kafka 消息字段名与下游系统预期不一致，监控目标匹配失败。
+
+**根因 2 — PlanRunner Kafka URL 隔离**：
+
+`PlanRunner.__init__()` 硬编码从 `env.py` 导入 `kafka_url`，而 Web UI 通过环境管理器切换的 Kafka URL 仅传递给 `SimulationRunner`，未传递到 `PlanRunner`。当用户通过 Web UI 切换环境时，PlanRunner 仍向旧的 Kafka 集群发送遥测，下游自然接收不到。
+
+#### 修复内容
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-10 | `utm_simulator/tools/run_plan.py:177` | 回退 | ✅ 完成 | `"pressureAltitude"` → `"ressureAltitude"`，恢复与 dynamic 模式一致 |
+| 2026-07-10 | `utm_simulator/tools/run_plan.py:203-216` | 修改 | ✅ 完成 | `PlanRunner.__init__()` 新增可选参数 `redis_host/redis_port_num/redis_pwd/kafka_servers` |
+| 2026-07-10 | `utm_simulator/web_server.py:276` | 修改 | ✅ 完成 | `_init_plan_mode()` 传递 Web UI 配置的 Redis/Kafka 参数给 PlanRunner |
+| 2026-07-10 | `utm_simulator/sim_manager.py:432` | 修改 | ✅ 完成 | `_init_plan_mode()` 同样传递 AppConfig 的 Redis/Kafka 参数 |
+
+#### 本次汇总
+
+| 操作 | 文件数 |
+|------|--------|
+| 修改 | 3（run_plan.py + web_server.py + sim_manager.py） |
+| 修复数据链路问题 | 2 条 |
+| 回退错误修改 | 1（ressureAltitude 字段名） |
+| 新增参数穿透 | 4（redis_host/port/pwd + kafka_servers） |
+| 状态 | ✅ 已完成 |
+
+---
+
+### 2026-07-10（夜间）: 修复 Dynamic 模式启动后进程崩溃 — Kafka 惰性初始化 + 容错降级
+
+> 来源: 用户反馈 — 启动动态仿真模式后 Python 进程静默终止，无任何异常堆栈
+> 根因: kafka-python 的 KafkaProducer/KafkaConsumer 在构造时启动后台 I/O 线程，
+>        在 Windows + ctypes(Simulator) 并发场景下触发 C-level 崩溃（访问越界/内存损坏），
+>        Python try/except 无法捕获 C-level 段错误
+
+#### 诊断过程
+
+1. **定位崩溃区间**：在 `_tick_dynamic()` 各步骤插入诊断打印，确定崩溃发生在 `step()` 完成之后、"构建Kafka消息"之前
+2. **排除 eventlet**：将 `async_mode` 从 `"eventlet"` 改回 `"threading"`，崩溃依旧，确认与 eventlet monkey_patch 无关
+3. **排除 sleep**：崩溃点出现在 `time.sleep()` 期间，说明是**异步 C-level 崩溃**（后台 I/O 线程触发）
+4. **定位 Kafka**：禁用 Kafka 消费者和生产者后，仿真持续运行不崩溃；单独禁用消费者时崩溃移到 `send_bulk()` 调用点
+5. **对比 Plan 模式**：Plan 模式同样使用 `KafkaProducerClient`/`KafkaConsumerClient` 但正常运行，差异在于 Plan 模式不涉及 Simulator 的 ctypes 结构体内存操作
+
+#### 修复方案
+
+**Kafka 惰性初始化 + 容错降级**：
+- `SimulationManager.__init__()` 不再立即创建 Kafka 客户端，改为 `None`
+- 新增 `_ensure_kafka_producer()` / `_ensure_kafka_consumer()` 方法，首次调用时延迟创建
+- 创建失败时自动降级为无 Kafka 模式（仿真继续运行，遥测不发送、trace 不消费）
+- 记录 `_kafka_init_attempted` 标志避免重复失败尝试
+- 所有 Kafka 操作点增加 `None` 安全性检查（`is_connected()`、`close()`、`send_bulk()`、`poll()`）
+
+#### 修复内容
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-10 | `utm_simulator/sim_manager.py:105-123` | 修改 | ✅ 完成 | Kafka 客户端初始化改为惰性（None + 延迟创建） |
+| 2026-07-10 | `utm_simulator/sim_manager.py:161-223` | 新增 | ✅ 完成 | 新增 `_ensure_kafka_producer()` / `_ensure_kafka_consumer()` 方法 |
+| 2026-07-10 | `utm_simulator/sim_manager.py:249-256` | 修改 | ✅ 完成 | `stop()` 中 Kafka close() 增加 None 检查 |
+| 2026-07-10 | `utm_simulator/sim_manager.py:283-293` | 修改 | ✅ 完成 | `get_status()` 中 `is_connected()` 增加 None 检查 |
+| 2026-07-10 | `utm_simulator/sim_manager.py:490-505` | 修改 | ✅ 完成 | `_tick_dynamic()` 中 `send_bulk()` 改用 `_ensure_kafka_producer()` |
+| 2026-07-10 | `utm_simulator/sim_manager.py:525-527` | 修改 | ✅ 完成 | `_tick_replay()` 中 `send_bulk()` 改用 `_ensure_kafka_producer()` |
+| 2026-07-10 | `utm_simulator/sim_manager.py:567-578` | 修改 | ✅ 完成 | `_consume_trace()` 中 `poll()` 改用 `_ensure_kafka_consumer()` |
+| 2026-07-10 | `utm_simulator/sim_manager.py:692` | 修改 | ✅ 完成 | `"ressureAltitude"` → `"pressureAltitude"`（遥测字段名与 scene 模式对齐） |
+| 2026-07-10 | `utm_simulator/web_server.py:77` | 修改 | ✅ 完成 | `async_mode` 改为 `"threading"`（避免 eventlet monkey_patch） |
+| 2026-07-10 | `utm_simulator/web_server.py:300,339` | 修改 | ✅ 完成 | `is_connected()` 增加 None 检查 |
+
+#### 本次汇总
+
+| 操作 | 文件数 |
+|------|--------|
+| 修改 | 2（sim_manager.py + web_server.py） |
+| 新增方法 | 2（_ensure_kafka_producer + _ensure_kafka_consumer） |
+| 新增惰性初始化机制 | 1（Kafka 客户端延迟创建 + 容错降级） |
+| 修复 C-level 崩溃 | 1（kafka-python 后台线程与 ctypes 并发冲突） |
+| 修复字段名 | 1（pressureAltitude 场景模式对齐） |
+| 修复 async_mode | 1（threading 替代 eventlet） |
+| 状态 | ✅ 已完成 |

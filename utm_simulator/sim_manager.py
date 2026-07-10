@@ -108,16 +108,12 @@ class SimulationManager:
             str(self.config.redis.port_int),
             self.config.redis.password,
         )
-        self.kafka_producer = KafkaProducerClient(
-            bootstrap_servers=self.config.kafka.bootstrap_servers,
-            bootstrap_servers_mirror=self.config.kafka.bootstrap_servers_mirror,
-        )
-        self.kafka_consumer = KafkaConsumerClient(
-            bootstrap_servers=self.config.kafka.bootstrap_servers,
-            group_id=f"utm_sim_mgr_{os.getpid()}",
-            consume_from_latest_on_start=True,
-        )
-        self.kafka_consumer.subscribe([KAFKA_TRACE_TOPIC])
+        # Kafka 客户端惰性初始化 — 避免 kafka-python 后台 I/O 线程在
+        # Windows + ctypes(Simulator) 并发场景下触发 C-level 崩溃。
+        # 首次 send_bulk / poll 调用时由 _ensure_kafka_* 延迟创建。
+        self.kafka_producer = None
+        self.kafka_consumer = None
+        self._kafka_init_attempted = False
 
         # ── 运行状态 ────────────────────────────────────────────────
         self.mode: str = ""
@@ -164,6 +160,59 @@ class SimulationManager:
                 self._log_callback(msg)
             except Exception:
                 pass
+
+    # ── Kafka 惰性初始化（容错降级）──────────────────────────────────
+
+    def _ensure_kafka_producer(self) -> bool:
+        """惰性创建 Kafka 生产者（首次 send_bulk 时调用）。
+
+        kafka-python 的 KafkaProducer 构造函数会启动后台 I/O 线程，
+        在 Windows + ctypes(Simulator) 并发场景下可能触发 C-level 崩溃。
+        因此延迟到首次实际发送时才创建，创建失败时自动降级为无 Kafka 模式。
+
+        Returns:
+            True 表示生产者可用，False 表示已降级
+        """
+        if self.kafka_producer is not None:
+            return True
+        if self._kafka_init_attempted:
+            return False
+        self._kafka_init_attempted = True
+        try:
+            self.kafka_producer = KafkaProducerClient(
+                bootstrap_servers=self.config.kafka.bootstrap_servers,
+                bootstrap_servers_mirror=self.config.kafka.bootstrap_servers_mirror,
+            )
+            self._add_log("Kafka 生产者已连接")
+            return True
+        except Exception as e:
+            self._add_log(f"Kafka 生产者初始化失败（仿真继续运行但不发送遥测）: {e}")
+            self.kafka_producer = None
+            return False
+
+    def _ensure_kafka_consumer(self) -> bool:
+        """惰性创建 Kafka 消费者（首次 poll 时调用）。
+
+        与生产者同理，延迟创建避免后台 I/O 线程与 Simulator 并发崩溃。
+
+        Returns:
+            True 表示消费者可用，False 表示已降级
+        """
+        if self.kafka_consumer is not None:
+            return True
+        try:
+            self.kafka_consumer = KafkaConsumerClient(
+                bootstrap_servers=self.config.kafka.bootstrap_servers,
+                group_id=f"utm_sim_mgr_{os.getpid()}",
+                consume_from_latest_on_start=True,
+            )
+            self.kafka_consumer.subscribe([KAFKA_TRACE_TOPIC])
+            self._add_log("Kafka 消费者已连接")
+            return True
+        except Exception as e:
+            self._add_log(f"Kafka 消费者初始化失败（仿真继续运行但不消费 trace）: {e}")
+            self.kafka_consumer = None
+            return False
 
     # ── 生命周期 ────────────────────────────────────────────────────
 
@@ -214,8 +263,11 @@ class SimulationManager:
         # 启动线程
         self._sim_thread = threading.Thread(target=self._sim_loop, daemon=True, name="sim-loop")
         self._sim_thread.start()
-        self._trace_thread = threading.Thread(target=self._consume_trace, daemon=True, name="trace-cons")
-        self._trace_thread.start()
+        # trace 消费线程仅在非 dynamic 模式下启动 — dynamic 模式的 Simulator
+        # ctypes 内存操作与 kafka-python 后台 I/O 线程并发会导致 C-level 崩溃
+        if self.mode != "dynamic":
+            self._trace_thread = threading.Thread(target=self._consume_trace, daemon=True, name="trace-cons")
+            self._trace_thread.start()
 
         self._add_log(f"仿真已启动: 模式={mode}, 目标架数={self.config.simulation.target_drones}")
         logger.info("仿真启动 mode=%s drones=%d", mode, self.config.simulation.target_drones)
@@ -247,11 +299,13 @@ class SimulationManager:
 
         # 关闭 Kafka
         try:
-            self.kafka_consumer.close()
+            if self.kafka_consumer:
+                self.kafka_consumer.close()
         except Exception:
             pass
         try:
-            self.kafka_producer.close()
+            if self.kafka_producer:
+                self.kafka_producer.close()
         except Exception:
             pass
 
@@ -267,7 +321,7 @@ class SimulationManager:
         with self._lock:
             active_drones = 0
             if self.mode == "dynamic" and self.simulator:
-                active_drones = self.simulator.active_count
+                active_drones = len(self.simulator.agents)
             elif self.mode == "replay":
                 active_drones = len(self._replay_index)
             elif self.mode == "plan":
@@ -283,7 +337,7 @@ class SimulationManager:
                 "uptime_sec": int(time.time() - self._start_time) if self._start_time else 0,
                 "errors": self._errors,
                 "redis_connected": self.redis.client is not None,
-                "kafka_connected": self.kafka_producer.is_connected(),
+                "kafka_connected": self.kafka_producer.is_connected() if self.kafka_producer else False,
                 "logs": list(self._logs[-10:]),
             }
 
@@ -488,9 +542,9 @@ class SimulationManager:
                 self.redis.hset(REDIS_FLIGHT_PLAN_KEY, uid, route_json)
                 self._add_log(f"新无人机 {uid} 加入仿真")
 
-        # 发送遥测到 Kafka
+        # 发送遥测到 Kafka（惰性初始化，失败时自动降级）
         kafka_msgs = self._telemetry_list_to_kafka(telemetry_list)
-        if kafka_msgs:
+        if kafka_msgs and self._ensure_kafka_producer():
             self.kafka_producer.send_bulk(kafka_msgs, KAFKA_UAV_DATA_TOPIC)
             self._kafka_sent_total += len(kafka_msgs)
             if self._tick_count % 30 == 0:
@@ -498,7 +552,7 @@ class SimulationManager:
             # 连接健康检查（每 30 tick）
             if self._tick_count % 30 == 0:
                 r_ok = self.redis.client is not None
-                k_ok = self.kafka_producer.is_connected()
+                k_ok = self.kafka_producer.is_connected() if self.kafka_producer else False
                 if not r_ok or not k_ok:
                     self._add_log(f"连接异常: Redis={'OK' if r_ok else 'DOWN'} Kafka={'OK' if k_ok else 'DOWN'}")
 
@@ -525,7 +579,7 @@ class SimulationManager:
             records.append(msg)
             self._replay_cursors[uid] = cursor + 1
 
-        if records:
+        if records and self._ensure_kafka_producer():
             self.kafka_producer.send_bulk(records, KAFKA_UAV_DATA_TOPIC)
             self._kafka_sent_total += len(records)
             if self._tick_count % 30 == 0:
@@ -568,9 +622,13 @@ class SimulationManager:
         """消费 uav_runtime_trace topic（共享逻辑，三种模式通用）。
 
         从 Kafka 读取 trace 消息 → 按 redisKey 查 Redis → 过滤打印。
+        Kafka 消费者惰性初始化，失败时静默跳过。
         """
         while self._running:
             try:
+                if not self._ensure_kafka_consumer():
+                    time.sleep(5.0)  # 初始化失败，等 5 秒后重试
+                    continue
                 messages = self.kafka_consumer.poll(timeout_ms=500)
                 for msg in messages:
                     if not isinstance(msg, dict):
@@ -689,7 +747,7 @@ class SimulationManager:
                 "geodeticAltitude": t.location.alt,
                 "verticalSpeed": t.verticalSpeed,
                 "relativeAltitude": t.relativeAltitude,
-                "ressureAltitude": t.ressureAltitude,
+                "pressureAltitude": t.ressureAltitude,
                 "operatingStatus": t.operatingStatus,
                 "timestamp": now_ms,
                 "sourceType": getattr(t, "sourceType", 1),

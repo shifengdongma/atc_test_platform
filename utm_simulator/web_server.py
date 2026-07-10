@@ -72,9 +72,9 @@ DEFAULT_TARGET_DRONES = 1
 # ── Flask 应用初始化 ───────────────────────────────────────────────
 app = Flask(__name__, static_folder="../web/static", static_url_path="/static")
 app.config["SECRET_KEY"] = "utm_moc52_web_secret"
-# eventlet 异步模式 — 使用 eventlet 原生 WSGI 服务器处理 WebSocket，
-# 彻底避免 Werkzeug 开发服务器的 "write() before start_response" 500 错误
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+# threading 模式 + simple-websocket 传输层
+# 不能用 eventlet：其 monkey_patch 会破坏 C++ Simulator 的线程导致进程崩溃
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # ── 全局状态（线程安全通过 _lock 保护） ────────────────────────────
 _lock = threading.Lock()
@@ -300,7 +300,7 @@ class SimulationRunner:
 
             with _lock:
                 _runtime_state["redis_connected"] = self._sim_mgr.redis.client is not None
-                _runtime_state["kafka_connected"] = self._sim_mgr.kafka_producer.is_connected()
+                _runtime_state["kafka_connected"] = (self._sim_mgr.kafka_producer.is_connected() if self._sim_mgr.kafka_producer else False)
 
             while self._running and self._sim_mgr._running:
                 try:
@@ -339,7 +339,7 @@ class SimulationRunner:
 
             with _lock:
                 _runtime_state["redis_connected"] = self._sim_mgr.redis.client is not None
-                _runtime_state["kafka_connected"] = self._sim_mgr.kafka_producer.is_connected()
+                _runtime_state["kafka_connected"] = (self._sim_mgr.kafka_producer.is_connected() if self._sim_mgr.kafka_producer else False)
 
             while self._running and self._sim_mgr._running:
                 try:

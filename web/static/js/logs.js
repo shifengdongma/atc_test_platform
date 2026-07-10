@@ -170,6 +170,14 @@ function renderPlanTab() {
       html += '<span class="log-ts">[' + l.time + ']</span> ';
       html += escHtml(l.msg);
       if (l.detail) {
+        // 计数不匹配提示
+        if (l.detail.countMismatch) {
+          html += ' <span style="font-size:10px;color:var(--warning);">⚠️ 实际计划: ' + l.detail.redisCount + ' 条</span>';
+        }
+        // REST API 不可用提示
+        if (l.detail.totalCount !== undefined && !l.detail.plans && !l.detail.countMismatch) {
+          html += ' <span style="font-size:10px;color:var(--text-dim);">(计划列表 API 不可用)</span>';
+        }
         html += ' <span style="font-size:10px;color:var(--text-dim);cursor:pointer;" onclick="var d=this.nextElementSibling;d.style.display=d.style.display===\'block\'?\'none\':\'block\'">📋 详情</span>';
         html += '<div class="plan-detail-sub"><code>' + escHtml(JSON.stringify(l.detail, null, 2)) + '</code></div>';
       }
@@ -208,8 +216,15 @@ function renderAlarmTab() {
         html += '<span class="alarm-item-msg">' + escHtml(w.message || '') + '</span>';
         html += '</div>';
       });
+    } else if (l.detail && l.detail.source === 'alarmStatistic') {
+      // 来自 alarmStatistic 计数，区分有告警但详情未加载 / 无告警
+      if (l.detail.total > 0) {
+        html += '<div class="alarm-item"><span class="alarm-item-msg alarm-item-loading" style="grid-column:1/-1;">⏳ 告警详情获取中…（共 ' + l.detail.total + ' 条，REST API 请求）</span></div>';
+      } else {
+        html += '<div class="alarm-item"><span class="alarm-item-msg alarm-item-empty" style="grid-column:1/-1;">当前无告警 ✅</span></div>';
+      }
     } else {
-      html += '<div class="alarm-item"><span class="alarm-item-msg" style="grid-column:1/-1;">（无告警详情，来自 alarmStatistic 计数）</span></div>';
+      html += '<div class="alarm-item"><span class="alarm-item-msg" style="grid-column:1/-1;">（无告警详情）</span></div>';
     }
     html += '</div>';
   }

@@ -34,6 +34,9 @@ _root = os.path.dirname(os.path.abspath(__file__))
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
+from redis_client import RedisClient
+import env as _env
+
 # ── 常量 ──────────────────────────────────────────────────────────
 ATC_WS_BASE_URL = "wss://dkkgsit-test.testdolphin.com/la-atc-ws-backend/ws/stomp"
 STOMP_FLIGHT_TRACK = "/flightTrack/SEAT0001"
@@ -99,19 +102,39 @@ class SituationMonitor:
 
     # ── Token 获取 ──────────────────────────────────────────────
 
-    def _get_token(self) -> str:
-        """获取 JWT Token，优先级：构造参数 > 环境变量 > 自动登录。"""
-        if self._jwt_token:
-            return self._jwt_token
+    @staticmethod
+    def _parse_token_exp(token: str) -> int:
+        """解析 JWT Token 的 exp 过期时间戳（秒），失败返回 0。"""
+        try:
+            import base64
+            payload_b64 = token.split(".")[1]
+            padding = 4 - len(payload_b64) % 4
+            if padding != 4:
+                payload_b64 += "=" * padding
+            payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+            return int(payload.get("exp", 0))
+        except Exception:
+            return 0
 
+    def _get_token(self) -> str:
+        """获取 JWT Token，支持自动刷新。有效期内优先返回缓存。"""
+        # 如果已有 token，检查是否仍然有效（预留 60 秒缓冲）
+        if self._jwt_token:
+            exp = self._parse_token_exp(self._jwt_token)
+            if exp > time.time() + 60:
+                return self._jwt_token
+            # 已过期或即将过期，清除后重新获取
+            print("[SituationMonitor] JWT Token 即将过期，重新获取...")
+            self._jwt_token = None
+
+        # 尝试从环境变量获取
         token = os.environ.get("ATC_JWT_TOKEN", "")
         if token:
             self._jwt_token = token
             return token
 
-        # 尝试自动获取（复用 sim_api_bridge 的 JWT 获取逻辑）
+        # 尝试自动获取（复用 Jwt_Token_get 模块的缓存+自动刷新机制）
         try:
-            # 尝试从 atc_api_autotest 的 Jwt_Token_get 获取
             _atc_root = os.path.join(os.path.dirname(_root), "atc_api_autotest")
             _atc_tools = os.path.join(_atc_root, "api_tools")
             if _atc_tools not in sys.path:
@@ -409,17 +432,22 @@ class SituationMonitor:
             try:
                 alarm_count = int(data["value"])
                 if alarm_count != self._last_alarm_count:
-                    self._last_alarm_count = alarm_count
                     detail = {"total": alarm_count, "source": "alarmStatistic"}
                     # 主动获取告警详情（含 UAV 编号、类别、原因等）
                     if alarm_count > 0:
                         alarm_details = self._fetch_alert_details(alarm_count)
                         if alarm_details:
                             detail["warnings"] = alarm_details
+                            self._last_alarm_count = alarm_count  # 仅成功时更新，允许失败重试
+                        else:
+                            # API 失败时不更新 _last_alarm_count，下次同计数消息可重试
+                            print(f"[SituationMonitor] 告警详情获取失败 (count={alarm_count})，将在下次消息中重试")
+                    else:
+                        self._last_alarm_count = alarm_count  # 0 条告警无需获取详情
                     self._push_log(LOG_TYPE_ALARM, f"实时告警数: {alarm_count}",
                                    detail=detail)
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                print(f"[SituationMonitor] alarmStatistic 解析异常: {e}")
             return
 
         # 2. 飞行计划统计（flowStatistic）— 复合键比较所有子计数
@@ -447,10 +475,15 @@ class SituationMonitor:
                         "rejectedCount": rejected,
                         "cancelledCount": cancelled,
                     }
-                    # 额外增强：通过 REST API 获取实时计划列表详情
+                    # 额外增强：通过 REST API / Redis 获取实时计划列表详情
                     plan_list = self._fetch_plan_details()
                     if plan_list:
                         detail["plans"] = plan_list
+                        # 交叉校验：若实际计划数 > WS 统计数，标记不一致
+                        actual_count = len(plan_list)
+                        if actual_count > plan_count:
+                            detail["redisCount"] = actual_count
+                            detail["countMismatch"] = True
                     self._push_log(LOG_TYPE_PLAN, msg, detail=detail)
             except (json.JSONDecodeError, ValueError, TypeError):
                 pass
@@ -681,14 +714,28 @@ class SituationMonitor:
                 })
             return details if details else None
         except Exception as e:
-            print(f"[SituationMonitor] 获取告警详情失败: {e}")
+            msg = f"告警详情 API 请求失败: {e}"
+            print(f"[SituationMonitor] {msg}")
+            if self._streamer:
+                try:
+                    self._streamer.push("sim_status", msg)
+                except Exception:
+                    pass
             return None
 
     def _fetch_plan_details(self) -> Optional[List[Dict[str, Any]]]:
+        """获取实时飞行计划列表，API 优先，Redis 兜底。"""
+        plans = self._fetch_plan_details_from_api()
+        if plans:
+            return plans
+        # REST API 失败，回退到 Redis
+        return self._fetch_plan_details_from_redis()
+
+    def _fetch_plan_details_from_api(self) -> Optional[List[Dict[str, Any]]]:
         """从 ATC REST API POST /flight/plan/realtimePlanPage 获取实时计划列表。
 
         Returns:
-            [{planNo, planName, status, uavCode, ...}, ...] 或 None
+            [{planNo, planName, status, statusName, uavIdentifyCode, ...}, ...] 或 None
         """
         try:
             token = self._get_token()
@@ -740,7 +787,54 @@ class SituationMonitor:
                 })
             return details if details else None
         except Exception as e:
-            print(f"[SituationMonitor] 获取飞行计划详情失败: {e}")
+            msg = f"飞行计划 API 请求失败: {e}"
+            print(f"[SituationMonitor] {msg}")
+            if self._streamer:
+                try:
+                    self._streamer.push("sim_status", msg)
+                except Exception:
+                    pass
+            return None
+
+    def _fetch_plan_details_from_redis(self) -> Optional[List[Dict[str, Any]]]:
+        """从 Redis BIZ_DATA:UAV_ROUTE 读取飞行计划作为兜底。
+
+        Returns:
+            [{planNo, planName, status, statusName, uavIdentifyCode, ...}, ...] 或 None
+        """
+        try:
+            client = RedisClient(
+                getattr(_env, "redis_ip", "127.0.0.1"),
+                getattr(_env, "redis_port", "6379"),
+                getattr(_env, "redis_password", ""),
+            )
+            all_data = client.hgetall("BIZ_DATA:UAV_ROUTE")
+            if not all_data:
+                return None
+
+            plans = []
+            for uid, raw in all_data.items():
+                try:
+                    obj = json.loads(raw) if isinstance(raw, str) else raw
+                    fp_list = obj.get("flightPlanList", []) if isinstance(obj, dict) else []
+                    if fp_list:
+                        for fp in fp_list:
+                            plans.append({
+                                "planNo": uid,
+                                "planName": fp.get("flightTaskName", ""),
+                                "status": "",
+                                "statusName": "待处理",
+                                "uavIdentifyCode": uid,
+                                "startTime": "",
+                                "endTime": "",
+                                "_source": "redis",
+                            })
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            return plans if plans else None
+        except Exception as e:
+            msg = f"Redis 读取飞行计划失败: {e}"
+            print(f"[SituationMonitor] {msg}")
             return None
 
     # ── 日志推送 ────────────────────────────────────────────────

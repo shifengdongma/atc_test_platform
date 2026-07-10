@@ -103,11 +103,12 @@ $RequiredPkgs = @(
     @{Name="pytest"; Pip="pytest"},
     @{Name="pytest_cov"; Pip="pytest-cov"},
     @{Name="requests"; Pip="requests"},
-    @{Name="websocket"; Pip="websocket-client"}
+    @{Name="websocket"; Pip="websocket-client"},
+    @{Name="eventlet"; Pip="eventlet"}
 )
 
 # 构建批量 import 脚本 → 写入临时文件，避免 -c 传参过长/转义问题
-$CheckScript = "import sys; missing=[]`n"
+$CheckScript = "import sys; import warnings; warnings.filterwarnings('ignore'); missing=[]`n"
 foreach ($pkg in $RequiredPkgs) {
     $CheckScript += "try:`n"
     $CheckScript += "    import $($pkg.Name)`n"

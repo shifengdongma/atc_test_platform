@@ -14,6 +14,15 @@ var modeDescriptions = {
   plan: '📐 Redis计划插值：从Redis读飞行计划，沿航段插值生成遥测。实时监听Redis变更。'
 };
 
+// 每种仿真模式对应的工具脚本
+var modeScriptTags = {
+  dynamic: 'simulation_core.py (Simulator 引擎 → sim_manager.py)',
+  replay: 'tools/run_kafka_alive.py (循环回放 → sim_manager.py)',
+  replay_once: 'tools/run_kafka.py (DataSource 单次回放)',
+  scene: 'tools/run_kafka_scene.py (SceneEmitter 场景注入)',
+  plan: 'tools/run_plan.py (PlanRunner Redis插值)'
+};
+
 var $ = function(sel) { return document.querySelector(sel); };
 
 // ── DOM ───────────────────────────────────────────────────────────
@@ -56,6 +65,9 @@ function setRunningState(running) {
 // ── 更新模式描述 ───────────────────────────────────────────────────
 function updateMode() {
   elDesc.textContent = modeDescriptions[elMode.value] || '';
+  // 更新调用脚本标注
+  var scriptTag = document.getElementById('mode-script-tag');
+  if (scriptTag) scriptTag.textContent = modeScriptTags[elMode.value] || '';
   ['scene-params','replay-params','plan-params'].forEach(function(id) {
     var p = document.getElementById(id);
     if (p) p.style.display = 'none';
@@ -63,9 +75,11 @@ function updateMode() {
   if (elMode.value === 'scene') {
     var sp = document.getElementById('scene-params');
     if (sp) sp.style.display = '';
+    refreshSceneFileList();
   } else if (elMode.value === 'replay' || elMode.value === 'replay_once') {
     var rp = document.getElementById('replay-params');
     if (rp) rp.style.display = '';
+    refreshReplayFileList();
   } else if (elMode.value === 'plan') {
     var pp = document.getElementById('plan-params');
     if (pp) pp.style.display = '';
@@ -88,9 +102,52 @@ async function loadPlanRouteList() {
   }
 }
 
+// ── 场景文件列表 ─────────────────────────────────────────────────
+async function refreshSceneFileList() {
+  var sel = document.getElementById('scene-file-select');
+  if (!sel) return;
+  try {
+    var data = await apiGet('/api/data/files');
+    if (data.files) {
+      sel.innerHTML = data.files.map(function(f) {
+        return '<option value="' + f.name + '">' + f.name + ' (' + f.records + '条)</option>';
+      }).join('');
+    }
+  } catch (e) { sel.innerHTML = '<option>加载失败</option>'; }
+}
+
+// ── replay 文件列表 ─────────────────────────────────────────────
+async function refreshReplayFileList() {
+  try {
+    var data = await apiGet('/api/data/files');
+    if (data.files) {
+      var dataSel = document.getElementById('replay-data-file');
+      var routeSel = document.getElementById('replay-route-file');
+      if (dataSel) {
+        dataSel.innerHTML = data.files.map(function(f) {
+          return '<option value="' + f.name + '"' + (f.name.indexOf('kafka_data') >= 0 ? ' selected' : '') + '>' + f.name + '</option>';
+        }).join('');
+      }
+      if (routeSel) {
+        routeSel.innerHTML = data.files.map(function(f) {
+          return '<option value="' + f.name + '"' + (f.name.indexOf('redis_route') >= 0 ? ' selected' : '') + '>' + f.name + '</option>';
+        }).join('');
+      }
+    }
+  } catch (e) {}
+}
+
 // Plan 模式刷新按钮
 var btnPlanRefresh = document.getElementById('btn-plan-refresh-routes');
 if (btnPlanRefresh) btnPlanRefresh.addEventListener('click', loadPlanRouteList);
+
+// Scene 模式刷新按钮
+var btnRefScene = document.getElementById('btn-refresh-scene-files');
+if (btnRefScene) btnRefScene.addEventListener('click', refreshSceneFileList);
+
+// Replay 模式刷新按钮
+var btnRefReplay = document.getElementById('btn-refresh-replay-files');
+if (btnRefReplay) btnRefReplay.addEventListener('click', refreshReplayFileList);
 
 // ── 加载配置 ───────────────────────────────────────────────────────
 async function fetchConfig() {
@@ -204,7 +261,7 @@ async function loadTaskList() {
     var data = await apiGet('/api/schedule/tasks');
     if (!data.tasks || !data.tasks.length) {
       el.innerHTML = '<div class="empty-hint">暂无定时任务</div>';
-      loadTaskHistory([]);
+      loadTaskHistory();
       return;
     }
     el.innerHTML = data.tasks.map(function(t) {

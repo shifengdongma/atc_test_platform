@@ -14,7 +14,7 @@ sys.path.insert(0, _ROOT)
 
 from simulation_core import Simulator
 
-MOCK_DIR = os.path.join(_ROOT, "mock")
+MOCK_DIR = os.path.join(_ROOT, "..", "data", "mock")
 REDIS_ROUTE_PATH = os.path.join(MOCK_DIR, "redis_route.json")
 KAFKA_DATA_PATH = os.path.join(MOCK_DIR, "kafka_data.json")
 

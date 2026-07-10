@@ -27,7 +27,7 @@ if _TOOLS_DIR not in sys.path:
 
 def _mock_path(filename: str) -> str:
     """返回 mock/ 目录下的完整路径"""
-    mock_dir = os.path.join(_SCRIPT_DIR, "mock")
+    mock_dir = os.path.join(_SCRIPT_DIR, "..", "data", "mock")
     os.makedirs(mock_dir, exist_ok=True)
     return os.path.join(mock_dir, filename)
 
@@ -80,7 +80,7 @@ def gen_parallel(
     from tools.create_data_scenes import run_parallel
 
     if output is None:
-        output = "mock/kafka_data_parallel.json"
+        output = "../data/mock/kafka_data_parallel.json"
 
     ns = argparse.Namespace(
         count=count,
@@ -271,7 +271,7 @@ def gen_status(
 
 
 def gen_scale(
-    source: str = "mock/kafka_data_yfk.json",
+    source: str = "../data/mock/kafka_data_yfk.json",
     count: int = 100,
     center_lng: float = 89.2306,
     center_lat: float = 38.19424,
@@ -286,7 +286,7 @@ def gen_scale(
     from tools.create_data_scenes import run_scale
 
     if output is None:
-        output = "mock/kafka_data_alarm_100.json"
+        output = "../data/mock/kafka_data_alarm_100.json"
 
     ns = argparse.Namespace(
         source=source,

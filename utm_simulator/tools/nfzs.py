@@ -18,7 +18,7 @@ from redis_client import RedisClient
 
 # 路径与 Redis 配置（与 run_kafka.py 保持一致）
 SOURCE_DIR = os.path.join(_root, "_source")
-MOCK_DIR = os.path.join(_root, "mock")
+MOCK_DIR = os.path.join(_root, "..", "data", "mock")
 NFZS_JSON_PATH = os.path.join(SOURCE_DIR, "nfzs.json")
 MOCK_NFZS_JSON_PATH = os.path.join(MOCK_DIR, "nfzs.json")
 REDIS_AIRSPACE_KEY = "BIZ_DATA:AIRSPACE"

@@ -37,7 +37,7 @@ import os
 from collections import defaultdict
 
 # mock 数据目录：位于本脚本的上级目录中的 mock 文件夹
-MOCK_DIR = os.path.join(os.path.dirname(__file__), '..', 'mock')
+MOCK_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'mock')
 
 
 def java_hash_code(s: str) -> int:

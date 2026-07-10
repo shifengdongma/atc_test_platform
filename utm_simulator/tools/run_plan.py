@@ -26,6 +26,7 @@ from env import redis_ip, redis_port, redis_password, kafka_url
 import env as _env
 
 REDIS_FLIGHT_PLAN_KEY = "BIZ_DATA:UAV_ROUTE"
+REDIS_TELEMETRY_KEY = "BIZ_DATA:UAV_TELEMETRY"  # dynamic 模式遥测桥接
 KAFKA_UAV_DATA_TOPIC = "uav_runtime_data"
 KAFKA_TRACE_TOPIC = "uav_runtime_trace"
 FETCH_INTERVAL_SEC = 60.0
@@ -174,12 +175,12 @@ def _telemetry_dict(uid: str, registered_code: str, samp: Dict[str, Any], now_ms
         "geodeticAltitude": samp["alt"],
         "verticalSpeed": samp["v_speed"],
         "relativeAltitude": 0.0,
-        "ressureAltitude": 0.0,
+        "pressureAltitude": 0.0,
         "operatingStatus": samp["operating_status"],
         "coordinateSystemType": 0,
         "horizontalAccuracy": 1,
-        "verticalAccuracy": 1,
-        "speedAccuracy": 1,
+        "verticalAccuracy": 0,
+        "speedAccuracy": 0,
         "timestamp": now_ms,
         "timestampAccuracy": 0,
         "sourceType": 1,
@@ -318,7 +319,9 @@ class PlanRunner:
                 print(f"计划已结束并移除: {k}")
 
     def tick_send(self) -> None:
-        """移除已到期计划后，为剩余计划各采样一条遥测并批量发送。"""
+        """移除已到期计划后，为剩余计划各采样一条遥测并批量发送；
+        同时转发 dynamic 模式写入 Redis 的遥测数据到 Kafka。
+        """
         self._remove_expired()
         now = time.time()
         now_ms = int(now * 1000)
@@ -328,6 +331,21 @@ class PlanRunner:
             _telemetry_dict(sim.uid, sim.registered_code, sim.sample(now), now_ms)
             for sim in plans
         ]
+
+        # ── 转发 dynamic 模式遥测（Redis → Kafka 桥接） ──────────────
+        # dynamic 模式下 SimulationManager 不直接使用 kafka-python
+        # （Windows 上其后台 I/O 线程与 Simulator ctypes 并发会 C-level 崩溃），
+        # 改为写遥测到 Redis，由本 PlanRunner tick 统一转发。
+        try:
+            raw = self.redis_client.client.get(REDIS_TELEMETRY_KEY)
+            if raw:
+                dyn_batch = json.loads(raw) if isinstance(raw, (str, bytes)) else raw
+                if isinstance(dyn_batch, list) and dyn_batch:
+                    batch.extend(dyn_batch)
+                self.redis_client.client.delete(REDIS_TELEMETRY_KEY)
+        except Exception:
+            pass
+
         if batch:
             self.kafka_producer.send_bulk(batch, KAFKA_UAV_DATA_TOPIC)
 

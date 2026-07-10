@@ -377,7 +377,7 @@ class SimulatorAPIIntegration:
         Returns:
             模板数据字典
         """
-        template_dir = os.path.join(_root, "flight_task_templates")
+        template_dir = os.path.join(_root, "..", "data", "templates")
         file_path = os.path.join(template_dir, f"{template_name}.json")
 
         if not os.path.exists(file_path):
@@ -395,7 +395,7 @@ class SimulatorAPIIntegration:
     @staticmethod
     def list_templates() -> List[str]:
         """列出所有可用的飞行任务模板。"""
-        template_dir = os.path.join(_root, "flight_task_templates")
+        template_dir = os.path.join(_root, "..", "data", "templates")
         if not os.path.exists(template_dir):
             return []
         return [

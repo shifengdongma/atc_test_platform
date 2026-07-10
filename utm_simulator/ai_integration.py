@@ -26,6 +26,13 @@ _root = os.path.dirname(os.path.abspath(__file__))
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
+# 公共模块路径（database/ common/ 已从 utm_simulator/ 移出到项目根目录）
+_database_path = os.path.join(_root, '..', 'database')
+_common_path = os.path.join(_root, '..', 'common')
+for _p in (_database_path, _common_path):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 
 # =====================================================================
 # 集成点注册表

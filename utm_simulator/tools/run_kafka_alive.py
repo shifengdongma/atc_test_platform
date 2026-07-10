@@ -19,7 +19,7 @@ from env import redis_ip, redis_port, redis_password, kafka_url
 import env as _env
 
 # mock 目录与 JSON 路径（相对项目根目录）
-MOCK_DIR = os.path.join(_root, "mock")
+MOCK_DIR = os.path.join(_root, "..", "data", "mock")
 REDIS_ROUTE_JSON_PATH = os.path.join(MOCK_DIR, "redis_route.json")
 KAFKA_DATA_JSON_PATH = os.path.join(MOCK_DIR, "kafka_data.json")
 kafka_uav_data_topic = 'uav_runtime_data'

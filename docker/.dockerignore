@@ -1,0 +1,74 @@
+# ── 版本控制 ─────────────────────────────────────────
+.git
+.gitignore
+.gitmodules
+.gitattributes
+
+# ── 项目配置与工具 ──────────────────────────────────
+.claude/
+.agent/
+.lingma/
+.superpowers/
+.idea/
+.vscode/
+.cursorrules
+*.code-workspace
+
+# ── 文档（非运行时必需）─────────────────────────────
+docs/
+*.md
+!README.md
+
+# ── 子模块 ──────────────────────────────────────────
+skills_hub/
+
+# ── Python 缓存 ─────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+*.egg
+.pytest_cache/
+
+# ── 临时与生成文件 ──────────────────────────────────
+tmp/
+utm_simulator/mock/
+*.log
+*.pid
+
+# ── 敏感配置（通过挂载注入）─────────────────────────
+**/env.py
+**/ha_env.py
+**/dev_env.py
+
+# ── 归档与历史文件 ──────────────────────────────────
+待归档/
+*_old/
+back/
+*.bak_*
+*.backup
+
+# ── 数据文件（运行时生成）───────────────────────────
+*.db
+*.sqlite3
+!database/data.db
+
+# ── 离线包与系统文件 ────────────────────────────────
+packages/
+*.whl
+*.tar.gz
+
+# ── IDE / 编辑器 ────────────────────────────────────
+.vscode/
+.idea/
+
+# ── OS 文件 ─────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Docker 自身 ─────────────────────────────────────
+docker/data/
+docker/logs/
+docker/.env

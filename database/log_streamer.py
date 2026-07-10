@@ -15,6 +15,13 @@ import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
+try:
+    import pymysql
+    _HAS_PYMYSQL = True
+except ImportError:
+    pymysql = None  # type: ignore
+    _HAS_PYMYSQL = False
+
 from db_manager import query, query_all, _now, init_tables
 
 # ── MySQL 持久化（可选，优雅降级） ─────────────────────────────────
@@ -64,6 +71,9 @@ class LogStreamer:
         self._mysql_enabled = _HAS_MYSQL
         self._mysql_client: Any = None
         self._cleanup_counter = 0
+        self._mysql_fail_count = 0
+        self._mysql_last_fail_time = 0.0
+        _MYSQL_COOLDOWN_SEC = 60.0
 
     def start(self) -> None:
         """启动日志采集。"""
@@ -159,21 +169,75 @@ class LogStreamer:
     # ── MySQL 持久化 ───────────────────────────────────────────────
 
     def _get_mysql_client(self):
-        """延迟初始化 MySQL 连接（失败则禁用后续写入）。"""
+        """延迟初始化 MySQL 连接（含保活检查 + 自动重连 + 冷却期，失败则禁用后续写入）。"""
         if not self._mysql_enabled:
-            return None
+            # 冷却期内跳过重试
+            if self._mysql_last_fail_time > 0 and time.time() - self._mysql_last_fail_time < self._MYSQL_COOLDOWN_SEC:
+                return None
+            # 冷却期过后允许重试一次
+            if self._mysql_last_fail_time > 0:
+                self._mysql_enabled = True
+                self._mysql_fail_count = 0
+            else:
+                return None
         if self._mysql_client is None:
             try:
                 self._mysql_client = MysqlDbClient()
                 if self._mysql_client.connect():
+                    # 验证连接：执行 SELECT 1 确保连接真正可用
+                    try:
+                        self._mysql_client.cursor.execute("SELECT 1")
+                        self._mysql_client.cursor.fetchone()
+                    except Exception:
+                        print("[LogStreamer] MySQL 连接验证失败 (SELECT 1)")
+                        try:
+                            self._mysql_client.close()
+                        except Exception:
+                            pass
+                        self._mysql_client = None
+                        self._mysql_enabled = False
+                        self._mysql_last_fail_time = time.time()
+                        return None
                     self._ensure_mysql_table()
                 else:
                     print("[LogStreamer] MySQL 连接失败，日志将仅保存在内存中")
                     self._mysql_client = None
                     self._mysql_enabled = False
+                    self._mysql_last_fail_time = time.time()
             except Exception as e:
                 print(f"[LogStreamer] MySQL 初始化异常: {e}")
                 self._mysql_enabled = False
+                self._mysql_last_fail_time = time.time()
+        # ── 连接保活检查 ──
+        if self._mysql_client is not None:
+            try:
+                self._mysql_client.conn.ping(reconnect=True)
+            except Exception:
+                print("[LogStreamer] MySQL 连接已断开，尝试重连...")
+                try:
+                    if self._mysql_client.connect():
+                        # 验证新连接
+                        try:
+                            self._mysql_client.cursor.execute("SELECT 1")
+                            self._mysql_client.cursor.fetchone()
+                        except Exception:
+                            print("[LogStreamer] MySQL 重连后验证失败")
+                            self._mysql_client.close()
+                            self._mysql_client = None
+                            self._mysql_enabled = False
+                            self._mysql_last_fail_time = time.time()
+                            return None
+                        print("[LogStreamer] MySQL 重连成功")
+                    else:
+                        print("[LogStreamer] MySQL 重连失败，禁用持久化")
+                        self._mysql_client = None
+                        self._mysql_enabled = False
+                        self._mysql_last_fail_time = time.time()
+                except Exception as e:
+                    print(f"[LogStreamer] MySQL 重连异常: {e}")
+                    self._mysql_client = None
+                    self._mysql_enabled = False
+                    self._mysql_last_fail_time = time.time()
         return self._mysql_client
 
     def _ensure_mysql_table(self):
@@ -305,7 +369,7 @@ class LogStreamer:
                 client = self._get_mysql_client()
                 if client:
                     detail_json = json.dumps(detail, ensure_ascii=False) if detail is not None else ""
-                    client.insert("sim_system_logs", {
+                    result = client.insert("sim_system_logs", {
                         "time": entry["time"],
                         "type": entry["type"],
                         "type_name": entry["type_name"],
@@ -313,13 +377,32 @@ class LogStreamer:
                         "detail": detail_json,
                         "task_id": "",
                     })
-                    # 每约 3600 条日志触发一次旧日志清理（约每小时）
-                    self._cleanup_counter += 1
-                    if self._cleanup_counter >= 3600:
-                        self._cleanup_counter = 0
-                        self._cleanup_old_logs()
+                    if result is None:
+                        # insert 返回 None = 写入失败，累计失败次数
+                        self._mysql_fail_count += 1
+                        self._mysql_last_fail_time = time.time()
+                        if self._mysql_fail_count >= 5:
+                            print("[LogStreamer] MySQL 连续写入失败超过5次，禁用持久化")
+                            self._mysql_enabled = False
+                    else:
+                        # 写入成功，重置失败计数
+                        self._mysql_fail_count = 0
+                        # 每约 3600 条日志触发一次旧日志清理（约每小时）
+                        self._cleanup_counter += 1
+                        if self._cleanup_counter >= 3600:
+                            self._cleanup_counter = 0
+                            self._cleanup_old_logs()
             except Exception as e:
-                print(f"[LogStreamer] MySQL 写入异常: {e}")
+                # 区分 pymysql 特定错误（如连接断开）和通用异常
+                if _HAS_PYMYSQL and isinstance(e, pymysql.Error):
+                    print(f"[LogStreamer] MySQL pymysql 错误: {e}")
+                else:
+                    print(f"[LogStreamer] MySQL 写入异常: {e}")
+                self._mysql_fail_count += 1
+                self._mysql_last_fail_time = time.time()
+                if self._mysql_fail_count >= 5:
+                    print("[LogStreamer] MySQL 连续写入失败超过5次，禁用持久化")
+                    self._mysql_enabled = False
 
     def push_sim_log(self, message: str) -> None:
         """推送仿真运行日志（兼容 _add_log）。"""

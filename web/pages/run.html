@@ -90,14 +90,17 @@
 
         <div id="plan-params" style="display:none;">
           <div class="form-group">
-            <label for="plan-route-file">航线数据文件 (mock/)</label>
-            <select id="plan-route-file" style="width:100%;background:#0d1b2a;color:#82aaff;border:1px solid #2a3a5c;font-size:12px;"></select>
+            <label for="plan-route-file">航线数据文件 <span style="font-weight:normal;color:var(--text-dim);">(可选)</span></label>
+            <select id="plan-route-file" style="width:100%;background:#0d1b2a;color:#82aaff;border:1px solid #2a3a5c;font-size:12px;">
+              <option value="">— 不加载文件，直接从 Redis 读取已有航线 —</option>
+            </select>
             <button id="btn-refresh-plan-files" class="btn btn-small" style="margin-top:4px;">🔄 刷新文件列表</button>
+            <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">留空则直接使用 Redis 中已有的航线数据，无需本地文件</div>
           </div>
           <div class="form-group">
             <label>选择要仿真的航线 <span id="plan-route-summary"></span></label>
             <div id="plan-route-list" class="plan-route-list">
-              <div class="empty-hint">请先选择航线文件并加载，或在右侧地图中加载航线</div>
+              <div class="empty-hint">点击"刷新航线列表"从 Redis 加载已有航线</div>
             </div>
             <div style="margin-top:4px;display:flex;gap:4px;">
               <button id="btn-plan-select-all" class="btn btn-small">全选</button>

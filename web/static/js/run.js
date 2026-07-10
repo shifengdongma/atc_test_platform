@@ -264,7 +264,7 @@ async function refreshPlanFileList() {
   var sel = document.getElementById('plan-route-file');
   if (!sel) return;
   var files = await _loadFileListWithFormats('plan-route-file');
-  sel.innerHTML = files.map(function(f) {
+  sel.innerHTML = '<option value="">— 不加载文件，直接从 Redis 读取 —</option>' + files.map(function(f) {
     return '<option value="' + f.name + '"' + (f.name.indexOf('redis_route') >= 0 ? ' selected' : '') + '>' + f.name + '</option>';
   }).join('');
   if (_presetFileName) {
@@ -350,7 +350,9 @@ if (elBtnStart) elBtnStart.addEventListener('click', async function() {
     if (hasCheckboxes && typeof window.getSelectedPlanUids === 'function') {
       body.plan_selected_uids = window.getSelectedPlanUids();
     }
-    body.plan_route_file = (document.getElementById('plan-route-file')||{}).value || 'redis_route.json';
+    var planFile = (document.getElementById('plan-route-file')||{}).value;
+    if (planFile) body.plan_route_file = planFile;
+    // 不发送 plan_route_file 时后端跳过文件加载，直接从 Redis 读取
   }
   var result = await apiPost('/api/sim/start', body);
   if (result.success) {

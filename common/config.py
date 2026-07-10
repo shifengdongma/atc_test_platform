@@ -87,6 +87,7 @@ def _read_env_py() -> Optional[dict]:
         import importlib.util
         env_paths = [
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.py"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "utm_simulator", "env.py"),
             os.path.join(os.getcwd(), "env.py"),
         ]
         for env_path in env_paths:

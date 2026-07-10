@@ -179,9 +179,12 @@ class SimulationManager:
             return False
         self._kafka_init_attempted = True
         try:
+            # 完全照抄 PlanRunner 的 Kafka 创建方式（与 tools/run_plan.py:196-198 一致）
+            import env as _env
+            kafka_url = self.config.kafka.bootstrap_servers
+            mirror = getattr(_env, "kafka_url2", None)
             self.kafka_producer = KafkaProducerClient(
-                bootstrap_servers=self.config.kafka.bootstrap_servers,
-                bootstrap_servers_mirror=self.config.kafka.bootstrap_servers_mirror,
+                kafka_url, bootstrap_servers_mirror=mirror,
             )
             self._add_log("Kafka 生产者已连接")
             return True
@@ -251,11 +254,7 @@ class SimulationManager:
         self._plans = {}
 
         # ── 模式特定初始化 ──────────────────────────────────────────
-        # Kafka 生产者必须在 Simulator 之前创建（与 PlanRunner 顺序一致）—
-        # kafka-python 后台 I/O 线程若在 Simulator ctypes 操作之后启动，
-        # 在 Windows 上可能触发 C-level 崩溃。
         if mode == "dynamic":
-            self._ensure_kafka_producer()  # 先创建 Kafka 生产者
             self._init_dynamic_mode()
         elif mode == "replay":
             self._init_replay_mode(replay_data_file, replay_route_file)
@@ -546,19 +545,21 @@ class SimulationManager:
                 self.redis.hset(REDIS_FLIGHT_PLAN_KEY, uid, route_json)
                 self._add_log(f"新无人机 {uid} 加入仿真")
 
-        # 发送遥测到 Kafka（惰性初始化，失败时自动降级）
+        # 发送遥测到 Redis（telemetry_list → BIZ_DATA:UAV_TELEMETRY）
+        # dynamic 模式下不直接使用 kafka-python（Windows 上其后台 I/O 线程
+        # 与 Simulator ctypes 操作并发会导致 C-level 崩溃）。
+        # 改为写入 Redis，由 tools/run_plan.py 的 PlanRunner 统一转发到 Kafka。
         kafka_msgs = self._telemetry_list_to_kafka(telemetry_list)
-        if kafka_msgs and self._ensure_kafka_producer():
-            self.kafka_producer.send_bulk(kafka_msgs, KAFKA_UAV_DATA_TOPIC)
+        if kafka_msgs:
+            try:
+                telemetry_key = "BIZ_DATA:UAV_TELEMETRY"
+                payload = json.dumps(kafka_msgs, ensure_ascii=False)
+                self.redis.client.set(telemetry_key, payload)
+            except Exception as e:
+                self._add_log(f"遥测写 Redis 失败: {e}")
             self._kafka_sent_total += len(kafka_msgs)
             if self._tick_count % 30 == 0:
-                self._add_log(f"动态仿真: {len(kafka_msgs)} 条遥测, 累计 {self._kafka_sent_total} 条")
-            # 连接健康检查（每 30 tick）
-            if self._tick_count % 30 == 0:
-                r_ok = self.redis.client is not None
-                k_ok = self.kafka_producer.is_connected() if self.kafka_producer else False
-                if not r_ok or not k_ok:
-                    self._add_log(f"连接异常: Redis={'OK' if r_ok else 'DOWN'} Kafka={'OK' if k_ok else 'DOWN'}")
+                self._add_log(f"动态仿真: {len(kafka_msgs)} 条遥测→Redis, 累计 {self._kafka_sent_total} 条")
 
     # ── Replay 模式 tick ────────────────────────────────────────────
 

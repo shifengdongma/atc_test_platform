@@ -50,12 +50,25 @@ except (ImportError, NameError):
         pass
 
 # UTM_MYSQL_* 环境变量优先级最高（Docker 部署 + 安全注入）
-_MYSQL_HOST = os.environ.get("UTM_MYSQL_HOST", _MYSQL_HOST)
-_MYSQL_PORT = int(os.environ.get("UTM_MYSQL_PORT", _MYSQL_PORT))
-_MYSQL_USER = os.environ.get("UTM_MYSQL_USER", _MYSQL_USER)
-_MYSQL_PASSWORD = os.environ.get("UTM_MYSQL_PASSWORD", _MYSQL_PASSWORD)
-_MYSQL_DATABASE = os.environ.get("UTM_MYSQL_DB", _MYSQL_DATABASE)
-_MYSQL_CHARSET = os.environ.get("UTM_MYSQL_CHARSET", _MYSQL_CHARSET)
+# 注意：仅当环境变量非空时才覆盖默认值，避免 docker-compose 中 ${VAR:-} 空默认值覆盖正确配置
+_mysql_host_env = os.environ.get("UTM_MYSQL_HOST", "")
+if _mysql_host_env:
+    _MYSQL_HOST = _mysql_host_env
+_mysql_port_env = os.environ.get("UTM_MYSQL_PORT", "")
+if _mysql_port_env:
+    _MYSQL_PORT = int(_mysql_port_env)
+_mysql_user_env = os.environ.get("UTM_MYSQL_USER", "")
+if _mysql_user_env:
+    _MYSQL_USER = _mysql_user_env
+_mysql_password_env = os.environ.get("UTM_MYSQL_PASSWORD", "")
+if _mysql_password_env:
+    _MYSQL_PASSWORD = _mysql_password_env
+_mysql_db_env = os.environ.get("UTM_MYSQL_DB", "")
+if _mysql_db_env:
+    _MYSQL_DATABASE = _mysql_db_env
+_mysql_charset_env = os.environ.get("UTM_MYSQL_CHARSET", "")
+if _mysql_charset_env:
+    _MYSQL_CHARSET = _mysql_charset_env
 
 
 class MysqlDbClient:
@@ -95,13 +108,18 @@ class MysqlDbClient:
                 password=self.password,
                 database=self.database,
                 charset=self.charset,
-                cursorclass=pymysql.cursors.DictCursor
+                cursorclass=pymysql.cursors.DictCursor,
+                connect_timeout=10,
+                read_timeout=30,
+                write_timeout=30,
             )
             self.cursor = self.conn.cursor()
             print(f"[MysqlDbClient] 成功连接到 MySQL {self.host}:{self.port}, 数据库: {self.database}")
             return True
         except Exception as e:
             print(f"[MysqlDbClient] 数据库连接失败: {e}")
+            self.conn = None
+            self.cursor = None
             return False
 
     def query(self, table_name, columns=None, where=None, limit=None):

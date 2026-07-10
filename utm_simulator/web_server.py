@@ -27,7 +27,8 @@ if _root not in sys.path:
 # 公共模块路径（database/ common/ 已从 utm_simulator/ 移出到项目根目录）
 _database_path = os.path.join(_root, '..', 'database')
 _common_path = os.path.join(_root, '..', 'common')
-for _p in (_database_path, _common_path):
+_services_ai_path = os.path.join(_root, '..', 'services', 'ai')
+for _p in (_database_path, _common_path, _services_ai_path):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -71,7 +72,7 @@ DEFAULT_TARGET_DRONES = 1
 # ── Flask 应用初始化 ───────────────────────────────────────────────
 app = Flask(__name__, static_folder="../web/static", static_url_path="/static")
 app.config["SECRET_KEY"] = "utm_moc52_web_secret"
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+socketio = SocketIO(app, cors_allowed_origins="*")  # 自动检测 simple-websocket，避免 werkzeug WebSocket 升级 500
 
 # ── 全局状态（线程安全通过 _lock 保护） ────────────────────────────
 _lock = threading.Lock()

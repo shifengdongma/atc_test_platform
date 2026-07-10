@@ -45,29 +45,64 @@ _mysql_available: Optional[bool] = None  # None=未检测, True=可用, False=�
 
 
 def _get_client():
-    """获取 MySQL 客户端（延迟初始化 + 连接检测），不可用时返回 None。"""
+    """获取 MySQL 客户端（延迟初始化 + 连接检测 + 自动重连），不可用时返回 None。
+
+    线程安全：通过 _lock 保护模块级单例的创建/销毁/重连，避免多线程并发
+    访问导致 conn 状态不一致（如 "NoneType has no attribute settimeout"）。
+    """
     global _mysql_client, _mysql_available
+    # ── 无锁快速路径：已知不可用或未安装 ──
     if not _HAS_MYSQL_IMPORT:
         _mysql_available = False
         return None
     if _mysql_available is False:
         return None
-    if _mysql_client is None and _mysql_available is None:
-        try:
-            _mysql_client = MysqlDbClient()
-            if _mysql_client.connect():
-                _mysql_available = True
-                _ensure_mysql_tables()
-                print("[mysql_db_manager] MySQL 连接成功，使用 MySQL 持久化")
-            else:
-                print("[mysql_db_manager] MySQL 连接失败，降级到 SQLite")
+    with _lock:
+        # 双重检查：锁内再次确认状态未被其他线程改变
+        if _mysql_available is False:
+            return None
+        # ── 首次连接 ──
+        if _mysql_client is None and _mysql_available is None:
+            try:
+                _mysql_client = MysqlDbClient()
+                if _mysql_client.connect():
+                    _mysql_available = True
+                    _ensure_mysql_tables(client=_mysql_client)
+                    print("[mysql_db_manager] MySQL 连接成功，使用 MySQL 持久化")
+                else:
+                    print("[mysql_db_manager] MySQL 连接失败，降级到 SQLite")
+                    _mysql_client = None
+                    _mysql_available = False
+            except Exception as e:
+                print(f"[mysql_db_manager] MySQL 初始化异常: {e}，降级到 SQLite")
                 _mysql_client = None
                 _mysql_available = False
-        except Exception as e:
-            print(f"[mysql_db_manager] MySQL 初始化异常: {e}，降级到 SQLite")
-            _mysql_client = None
-            _mysql_available = False
-    return _mysql_client
+        # ── 连接保活检查（pymysql 连接可能被服务端/网络关闭） ──
+        if _mysql_client is not None and _mysql_available is True:
+            try:
+                _mysql_client.conn.ping(reconnect=True)
+            except Exception as e:
+                print(f"[mysql_db_manager] MySQL ping 失败: {e}，尝试新建连接...")
+                # 关闭旧连接，创建全新客户端实例（避免 SSL 状态残留导致 BAD_LENGTH）
+                try:
+                    _mysql_client.close()
+                except Exception:
+                    pass
+                _mysql_client = None
+                try:
+                    _mysql_client = MysqlDbClient()
+                    if _mysql_client.connect():
+                        _ensure_mysql_tables(client=_mysql_client)
+                        print("[mysql_db_manager] MySQL 重连成功")
+                    else:
+                        print("[mysql_db_manager] MySQL 重连失败，降级到 SQLite")
+                        _mysql_client = None
+                        _mysql_available = False
+                except Exception as e2:
+                    print(f"[mysql_db_manager] MySQL 重连异常: {e2}，降级到 SQLite")
+                    _mysql_client = None
+                    _mysql_available = False
+        return _mysql_client
 
 
 # ── MySQL DDL ──────────────────────────────────────────────────────
@@ -129,14 +164,22 @@ _MYSQL_TABLE_DDL = {
 }
 
 
-def _ensure_mysql_tables():
-    """在 MySQL 中创建所有表（如不存在）。"""
-    client = _get_client()
+def _ensure_mysql_tables(client=None):
+    """在 MySQL 中创建所有表（如不存在），创建后验证表确实存在。
+
+    Args:
+        client: 可选，已连接的 MysqlDbClient 实例。由 _get_client() 持锁调用时
+                传入以避免锁内递归调用 _get_client() 导致死锁。
+    """
+    if client is None:
+        client = _get_client()
     if not client:
         return
     for name, ddl in _MYSQL_TABLE_DDL.items():
         try:
             client.execute(ddl)
+            # DDL 返回 None（非查询语句），需额外验证表确实存在
+            client.cursor.execute(f"SELECT 1 FROM `{name}` LIMIT 0")
             print(f"[mysql_db_manager] MySQL 表已就绪: {name}")
         except Exception as e:
             print(f"[mysql_db_manager] 建表失败 {name}: {e}")

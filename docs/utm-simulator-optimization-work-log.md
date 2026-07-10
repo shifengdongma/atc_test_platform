@@ -1542,3 +1542,74 @@ _bindingInProgress 防递归保护
 2. ✅ **数据管理适用模式显示**: 文件列表新增彩色模式徽章列，一目了然
 3. ✅ **文件→模式智能绑定**: 选中 JSON 文件后模式下拉框自动过滤，不兼容模式不显示
 4. ✅ **自动切换**: 当前模式与文件不兼容时自动切换到第一个兼容模式
+
+---
+
+### 2026-07-10: Docker部署报错修复 — WebSocket 500 + MySQL连接稳定性
+
+> 来源: `docs/docker报错日志.md` — Linux 服务器 Docker 重新部署后系统后台日志
+> 调试方式: 逐行追踪日志→代码调用链，定位 5 条报错链路的精确根因
+
+#### 报错分析
+
+Docker 容器部署到 Linux 服务器后，后台日志出现 5 类错误：
+
+| # | 报错 | 频率 | 影响 |
+|---|------|------|------|
+| 1 | `GET /socket.io/?EIO=4&transport=websocket` → 500 `AssertionError: write() before start_response` | 每次页面加载 | WebSocket 实时推送完全不可用 |
+| 2 | `query_all 失败: (2006, "MySQL server has gone away (SSLError: BAD_LENGTH)")` | 间歇性 | MySQL 持久化降级到 SQLite |
+| 3 | `query 失败: 'NoneType' object has no attribute 'settimeout'` | 间歇性 | 线程竞态导致连接对象损坏 |
+| 4 | `SQL 执行失败: (0, '')` + 误报 `表已就绪` | 每次重连后 | DDL 执行成功但连接已断，静默失败 |
+| 5 | `数据库未连接，请先调用 connect()` | 偶发 | LogStreamer 独立连接初始化时序 |
+
+#### 根因定位
+
+**报错 1 — WebSocket 500**：
+- `web_server.py:75` 强制 `async_mode="threading"`，Werkzeug 开发服务器在线程模式下处理 WebSocket 升级时，在 `start_response` 前写入空字节体触发断言失败
+- `simple-websocket` 已在 `requirements.txt` 中安装，但因 `async_mode` 显式指定而未被使用
+
+**报错 2 — SSL BAD_LENGTH**：
+- MySQL 服务端/防火墙关闭空闲 TCP 连接 → `ping(reconnect=True)` 触发重连
+- 旧代码复用同一 `MysqlDbClient` 对象调用 `connect()`，pymysql 内部 SSL 上下文保留失败状态
+- `connect()` 无超时参数，连接挂起无保护
+
+**报错 3 — NoneType settimeout（线程竞态）**：
+- `mysql_db_manager.py:40` 定义了 `_lock = threading.Lock()` 但**从未使用**
+- 多个 Flask 请求线程并发调用 `_get_client()`，Thread A 重连修改 `_mysql_client.conn` 同时 Thread B 读取 → conn 为 None → pymysql 内部 `socket.settimeout()` 崩溃
+
+**报错 4 — (0, '') + 误报"表已就绪"**：
+- `_ensure_mysql_tables()` 调用 `execute(DDL)` → DDL 自动提交成功但 `commit()` 失败（连接已断）→ `execute()` 返回 None
+- 旧代码不检查返回值，直接打印"表已就绪"，实际表可能未创建
+
+**报错 5 — 数据库未连接**：
+- `log_streamer.py` 持有独立 `MysqlDbClient` 实例，首次 `execute()` 调用触发懒连接，日志输出了连接中状态
+
+#### 修复内容
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-10 | `utm_simulator/web_server.py:75` | 修改 | ✅ 完成 | 去掉 `async_mode="threading"`，Flask-SocketIO 自动检测 `simple-websocket` |
+| 2026-07-10 | `atc_api_autotest/api_tools/mysqldbclient.py:101-123` | 修改 | ✅ 完成 | `connect()` 添加 `connect_timeout=10, read_timeout=30, write_timeout=30`；失败时 `self.conn = None; self.cursor = None` |
+| 2026-07-10 | `database/mysql_db_manager.py:47-105` | 修改 | ✅ 完成 | `_get_client()` 添加 `with _lock:` 线程安全保护（双重检查锁）；ping 失败后 `close()` + 创建全新 `MysqlDbClient()` 实例（避免 SSL 状态残留） |
+| 2026-07-10 | `database/mysql_db_manager.py:166-178` | 修改 | ✅ 完成 | `_ensure_mysql_tables(client=None)` 添加可选 client 参数（避免锁内递归死锁）；DDL 后 `SELECT 1 FROM table LIMIT 0` 验证表确实存在 |
+
+#### 修复覆盖矩阵
+
+| 报错 | 根因 | 修复位置 | 修复方式 |
+|------|------|---------|---------|
+| #1 WebSocket 500 | `async_mode="threading"` 与 Werkzeug 不兼容 | `web_server.py:75` | 去掉显式 async_mode → 自动检测 simple-websocket |
+| #2 SSL BAD_LENGTH | 旧实例重连 SSL 状态残留 | `mysql_db_manager.py:82-95` + `mysqldbclient.py:112-114` | 新建实例 + 超时参数 |
+| #3 NoneType settimeout | `_get_client()` 无线程锁 | `mysql_db_manager.py:60` | `with _lock:` 保护全局单例 |
+| #4 (0, '') 误报 | `_ensure_mysql_tables()` 不验证结果 | `mysql_db_manager.py:167` | `SELECT 1` 验证 + 异常捕获 |
+| #5 数据库未连接 | LogStreamer 独立连接首次懒初始化 | `mysqldbclient.py:121-122` | connect() 失败清理 conn/cursor |
+
+#### 本次汇总
+
+| 操作 | 文件数 |
+|------|--------|
+| 修改 | 3（web_server.py + mysqldbclient.py + mysql_db_manager.py） |
+| 修复报错链路 | 5 条 |
+| 新增线程安全保护 | 1（`_get_client()` 加锁） |
+| 新增连接超时 | 3（connect/read/write_timeout） |
+| 新增表验证 | 1（SELECT 1 兜底验证） |
+| 状态 | ✅ 已完成，待 Docker 重新部署验证 |

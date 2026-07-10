@@ -250,8 +250,12 @@ class SimulationManager:
         self._logs = []
         self._plans = {}
 
-        # 模式特定初始化
+        # ── 模式特定初始化 ──────────────────────────────────────────
+        # Kafka 生产者必须在 Simulator 之前创建（与 PlanRunner 顺序一致）—
+        # kafka-python 后台 I/O 线程若在 Simulator ctypes 操作之后启动，
+        # 在 Windows 上可能触发 C-level 崩溃。
         if mode == "dynamic":
+            self._ensure_kafka_producer()  # 先创建 Kafka 生产者
             self._init_dynamic_mode()
         elif mode == "replay":
             self._init_replay_mode(replay_data_file, replay_route_file)

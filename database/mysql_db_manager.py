@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import time
 from typing import Any, Dict, List, Optional
 
 # 确保 mysqldbclient 可导入
@@ -42,6 +43,8 @@ _lock = threading.Lock()
 # ── MySQL 连接单例 ─────────────────────────────────────────────────
 _mysql_client: Optional[Any] = None
 _mysql_available: Optional[bool] = None  # None=未检测, True=可用, False=不可用
+_mysql_last_fail_time: float = 0.0       # 最近一次连接失败的时间戳
+_MYSQL_RETRY_COOLDOWN: float = 60.0      # 失败后冷却秒数，期间不再尝试 MySQL
 
 
 def _get_client():
@@ -49,14 +52,27 @@ def _get_client():
 
     线程安全：通过 _lock 保护模块级单例的创建/销毁/重连，避免多线程并发
     访问导致 conn 状态不一致（如 "NoneType has no attribute settimeout"）。
+
+    冷却机制：连接失败后 60 秒内不再重试 MySQL，直接降级 SQLite，
+    避免每次请求都重试 → 失败 → 降级的刷屏日志。
     """
-    global _mysql_client, _mysql_available
+    global _mysql_client, _mysql_available, _mysql_last_fail_time
     # ── 无锁快速路径：已知不可用或未安装 ──
     if not _HAS_MYSQL_IMPORT:
         _mysql_available = False
         return None
     if _mysql_available is False:
-        return None
+        # 检查冷却期是否已过，冷却期内直接返回 None
+        if time.time() - _mysql_last_fail_time < _MYSQL_RETRY_COOLDOWN:
+            return None
+        # 冷却期已过，允许重试一次
+        with _lock:
+            if _mysql_available is False:
+                if time.time() - _mysql_last_fail_time < _MYSQL_RETRY_COOLDOWN:
+                    return None
+                # 重置状态，允许重新尝试连接
+                _mysql_available = None
+                _mysql_client = None
     with _lock:
         # 双重检查：锁内再次确认状态未被其他线程改变
         if _mysql_available is False:
@@ -66,6 +82,20 @@ def _get_client():
             try:
                 _mysql_client = MysqlDbClient()
                 if _mysql_client.connect():
+                    # 验证连接确实可用（防止连接成功但立即断开的情况）
+                    try:
+                        _mysql_client.cursor.execute("SELECT 1")
+                        _mysql_client.cursor.fetchone()
+                    except Exception as ve:
+                        print(f"[mysql_db_manager] MySQL 连接验证失败: {ve}，降级到 SQLite")
+                        try:
+                            _mysql_client.close()
+                        except Exception:
+                            pass
+                        _mysql_client = None
+                        _mysql_available = False
+                        _mysql_last_fail_time = time.time()
+                        return None
                     _mysql_available = True
                     _ensure_mysql_tables(client=_mysql_client)
                     print("[mysql_db_manager] MySQL 连接成功，使用 MySQL 持久化")
@@ -73,10 +103,12 @@ def _get_client():
                     print("[mysql_db_manager] MySQL 连接失败，降级到 SQLite")
                     _mysql_client = None
                     _mysql_available = False
+                    _mysql_last_fail_time = time.time()
             except Exception as e:
                 print(f"[mysql_db_manager] MySQL 初始化异常: {e}，降级到 SQLite")
                 _mysql_client = None
                 _mysql_available = False
+                _mysql_last_fail_time = time.time()
         # ── 连接保活检查（pymysql 连接可能被服务端/网络关闭） ──
         if _mysql_client is not None and _mysql_available is True:
             try:
@@ -92,16 +124,32 @@ def _get_client():
                 try:
                     _mysql_client = MysqlDbClient()
                     if _mysql_client.connect():
+                        # 验证新连接确实可用
+                        try:
+                            _mysql_client.cursor.execute("SELECT 1")
+                            _mysql_client.cursor.fetchone()
+                        except Exception as ve:
+                            print(f"[mysql_db_manager] MySQL 重连后验证失败: {ve}，降级到 SQLite")
+                            try:
+                                _mysql_client.close()
+                            except Exception:
+                                pass
+                            _mysql_client = None
+                            _mysql_available = False
+                            _mysql_last_fail_time = time.time()
+                            return None
                         _ensure_mysql_tables(client=_mysql_client)
                         print("[mysql_db_manager] MySQL 重连成功")
                     else:
                         print("[mysql_db_manager] MySQL 重连失败，降级到 SQLite")
                         _mysql_client = None
                         _mysql_available = False
+                        _mysql_last_fail_time = time.time()
                 except Exception as e2:
                     print(f"[mysql_db_manager] MySQL 重连异常: {e2}，降级到 SQLite")
                     _mysql_client = None
                     _mysql_available = False
+                    _mysql_last_fail_time = time.time()
         return _mysql_client
 
 

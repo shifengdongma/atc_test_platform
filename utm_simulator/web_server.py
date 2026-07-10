@@ -72,7 +72,9 @@ DEFAULT_TARGET_DRONES = 1
 # ── Flask 应用初始化 ───────────────────────────────────────────────
 app = Flask(__name__, static_folder="../web/static", static_url_path="/static")
 app.config["SECRET_KEY"] = "utm_moc52_web_secret"
-socketio = SocketIO(app, cors_allowed_origins="*")  # 自动检测 simple-websocket，避免 werkzeug WebSocket 升级 500
+# eventlet 异步模式 — 使用 eventlet 原生 WSGI 服务器处理 WebSocket，
+# 彻底避免 Werkzeug 开发服务器的 "write() before start_response" 500 错误
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 # ── 全局状态（线程安全通过 _lock 保护） ────────────────────────────
 _lock = threading.Lock()

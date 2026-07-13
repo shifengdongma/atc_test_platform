@@ -626,8 +626,8 @@ def _get_dm_client():
     # dmdbclient.py 需要: import dmPython; from env import ...
     _parent = os.path.dirname(_dm_dir)  # atc_api_autotest/ 或 atc_data_factory/
     for _p in (_dm_dir, _parent):
-        if _p not in sys.path:
-            sys.path.insert(0, _p)
+        if _p not in _sys.path:
+            _sys.path.insert(0, _p)
 
     try:
         import importlib.util as _util
@@ -668,7 +668,7 @@ def query_available_routes(keyword: str = "", limit: int = 100) -> List[Dict[str
     try:
         where = None
         if keyword:
-            where = f"(NAME LIKE '%{keyword}%' OR route_name LIKE '%{keyword}%')"
+            where = f"route_name LIKE '%{keyword}%'"
 
         for table_name in ["air_route", "AIR_ROUTE"]:
             try:
@@ -676,7 +676,7 @@ def query_available_routes(keyword: str = "", limit: int = 100) -> List[Dict[str
                 if data:
                     for row in data:
                         rid = row.get("ID") or row.get("id") or row.get("Id")
-                        name = row.get("NAME") or row.get("route_name") or row.get("ROUTE_NAME", "")
+                        name = row.get("route_name") or row.get("ROUTE_NAME") or row.get("NAME", "")
                         if name:
                             routes.append({
                                 "id": str(rid) if rid is not None else "",
@@ -708,7 +708,7 @@ def validate_route_correlation(linked_route: str) -> Dict[str, Any]:
 
     try:
         for table_name in ["air_route", "AIR_ROUTE"]:
-            for name_col in ["NAME", "route_name", "ROUTE_NAME"]:
+            for name_col in ["route_name", "ROUTE_NAME"]:
                 try:
                     where = f"{name_col} = '{linked_route}'"
                     data = client.query(table_name=table_name, where=where)

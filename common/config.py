@@ -206,6 +206,23 @@ def _load_mysql_config() -> MysqlConfig:
     )
 
 
+def load_mysql_config() -> MysqlConfig:
+    """获取本项目 MySQL 配置（带缓存）。
+
+    供数据库模块独立调用，无需加载完整 AppConfig。
+
+    Returns:
+        MysqlConfig 实例
+    """
+    global _cached_mysql_config
+    if _cached_mysql_config is None:
+        _cached_mysql_config = _load_mysql_config()
+    return _cached_mysql_config
+
+
+_cached_mysql_config: Optional[MysqlConfig] = None
+
+
 def load_config(env_name: Optional[str] = None) -> AppConfig:
     """加载应用配置。
 

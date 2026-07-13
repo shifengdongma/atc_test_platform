@@ -2029,3 +2029,39 @@ Docker 容器部署到 Linux 服务器后，后台日志出现 5 类错误：
 | 核心修复 | 模块缓存冲突 + dmdbclient路径 + env环境配置 |
 
 | 状态 | ✅ 已完成（航线查询90条 + 数据生成功能恢复） |
+
+
+---
+
+### 2026-07-13 第七次修复: 碰撞预警修复 + 参数名统一 + 文件命名规范
+
+> 问题: (1) 碰撞预警 `make_telemetry_point()` 参数 `ts` 与调用方 `timestamp_ms=` 不匹配
+>       (2) `air_route_segment` 表不存在，实际为 `air_route_element`，且列名不匹配
+>       (3) BATCH_CONFIGS 输出文件统一命名为 `kafka_data_scene{N}.json`，无法区分场景
+
+#### 解决方案
+
+1. **参数统一**: `create_data_scenes.py` 的 `make_telemetry_point()` 参数 `ts` → `timestamp_ms`
+2. **表名修正**: `air_route_segment` → `air_route_element`（5个文件，共28处）
+3. **列名修正**: WHERE 子句 `AIR_ROUTE_ID`→`route_id`、`SEGMENT_SEQ`→`sequence`、移除不存在 `TYPE` 列
+4. **文件命名**: BATCH_CONFIGS 11个场景输出名改为 `{区域名}_{场景类型}.json`
+
+#### 修复文件
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `utm_simulator/tools/create_data_scenes.py` | 修改 | 参数名+表名+列名+文件名 4项修复 |
+| `utm_simulator/tools/create_data_scene.py` | 修改 | 表名修正 |
+| `test_data_create/飞行计划告警轨迹点位生成.py` | 修改 | 表名+列名修正 |
+| `test_data_create/偏离航路数据生成.py` | 修改 | 表名+列名修正 |
+
+#### 汇总
+
+| 操作 | 数量 |
+|------|------|
+| 修改文件 | 4 |
+| 表名修正 | segment→element（28处） |
+| 参数修正 | ts→timestamp_ms |
+| 文件命名 | 11个预设场景改为中文描述名 |
+
+| 状态 | ✅ 已完成 |

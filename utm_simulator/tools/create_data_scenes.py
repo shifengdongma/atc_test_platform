@@ -23,7 +23,7 @@
   python create_data_scenes.py deviate --route-name "跨顺义三河段" --deviate-offset 600
   python create_data_scenes.py collision --route-names "航线A,航线B"
   python create_data_scenes.py status --scene3 --count 5
-  python create_data_scenes.py check-id --files ../data/mock/kafka_data_scene2.json
+  python create_data_scenes.py check-id --files ../data/mock/新疆空域2_平行飞行.json
   python create_data_scenes.py batch
 """
 
@@ -80,37 +80,37 @@ RE_EARTH = 6371000.0  # 地球半径（米）
 # 用于 batch 子命令一键生成多场景
 BATCH_CONFIGS = [
     {"subcommand": "parallel", "count": 100, "center_lng": 87.407734, "center_lat": 43.450822,
-     "output": "../data/mock/kafka_data_scene1.json", "label": "新疆空域1-平行飞行", "altitude": 50,
+     "output": "../data/mock/新疆空域1_平行飞行.json", "label": "新疆空域1-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 10, "altitude": 30}, {"count": 90, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 82.382178, "center_lat": 40.171273,
-     "output": "../data/mock/kafka_data_scene2.json", "label": "新疆空域2-平行飞行", "altitude": 50,
+     "output": "../data/mock/新疆空域2_平行飞行.json", "label": "新疆空域2-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 85.507436, "center_lat": 32.604875,
-     "output": "../data/mock/kafka_data_scene3.json", "label": "西藏空域1-平行飞行", "altitude": 50,
+     "output": "../data/mock/西藏空域1_平行飞行.json", "label": "西藏空域1-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 91.725056, "center_lat": 38.264847,
-     "output": "../data/mock/kafka_data_scene4.json", "label": "青海空域1-平行飞行", "altitude": 50,
+     "output": "../data/mock/青海空域1_平行飞行.json", "label": "青海空域1-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 91.769785, "center_lat": 35.956547,
-     "output": "../data/mock/kafka_data_scene5.json", "label": "青海空域2-平行飞行", "altitude": 50,
+     "output": "../data/mock/青海空域2_平行飞行.json", "label": "青海空域2-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 96.105003, "center_lat": 35.859452,
-     "output": "../data/mock/kafka_data_scene6.json", "label": "青海空域3-平行飞行", "altitude": 50,
+     "output": "../data/mock/青海空域3_平行飞行.json", "label": "青海空域3-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 99.344645, "center_lat": 35.914791,
-     "output": "../data/mock/kafka_data_scene7.json", "label": "青海空域4-平行飞行", "altitude": 50,
+     "output": "../data/mock/青海空域4_平行飞行.json", "label": "青海空域4-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 96.119904, "center_lat": 40.486873,
-     "output": "../data/mock/kafka_data_scene8.json", "label": "甘肃空域1-平行飞行", "altitude": 50,
+     "output": "../data/mock/甘肃空域1_平行飞行.json", "label": "甘肃空域1-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 102.361720, "center_lat": 38.180031,
-     "output": "../data/mock/kafka_data_scene9.json", "label": "甘肃空域2-平行飞行", "altitude": 50,
+     "output": "../data/mock/甘肃空域2_平行飞行.json", "label": "甘肃空域2-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 101.537149, "center_lat": 41.134612,
-     "output": "../data/mock/kafka_data_scene10.json", "label": "内蒙空域1-平行飞行", "altitude": 50,
+     "output": "../data/mock/内蒙空域1_平行飞行.json", "label": "内蒙空域1-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 105.377261, "center_lat": 40.571124,
-     "output": "../data/mock/kafka_data_scene11.json", "label": "内蒙空域2-平行飞行", "altitude": 50,
+     "output": "../data/mock/内蒙空域2_平行飞行.json", "label": "内蒙空域2-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
 ]
 
@@ -119,7 +119,7 @@ BATCH_CONFIGS = [
 def make_telemetry_point(
     uid: str,
     reg_sign: str,
-    ts: int,
+    timestamp_ms: int,
     lon: float,
     lat: float,
     alt: float,
@@ -162,7 +162,7 @@ def make_telemetry_point(
         "horizontalAccuracy": 1,
         "verticalAccuracy": 0,
         "speedAccuracy": 0,
-        "timestamp": ts,
+        "timestamp": timestamp_ms,
         "timestampAccuracy": 0,
         "sourceType": source_type,
         "addInf": add_inf if add_inf is not None else {},
@@ -312,7 +312,7 @@ def generate_trajectory(
             lat = lerp(lat1, lat2, t)
             alt = lerp(alt1, alt2, t)
             trajectory.append(make_telemetry_point(
-                uid=uid, reg_sign=reg_sign or uid, ts=current_time_ms,
+                uid=uid, reg_sign=reg_sign or uid, timestamp_ms=current_time_ms,
                 lon=lon, lat=lat, alt=alt, speed=speed_ms, heading=heading,
                 classification=classification, status=operating_status,
                 vertical_speed=v_speed,
@@ -322,7 +322,7 @@ def generate_trajectory(
     last = waypoints[-1]
     last_heading = calc_heading(waypoints[-2]["lat"], waypoints[-2]["lon"], last["lat"], last["lon"]) if len(waypoints) >= 2 else 0.0
     trajectory.append(make_telemetry_point(
-        uid=uid, reg_sign=reg_sign or uid, ts=current_time_ms,
+        uid=uid, reg_sign=reg_sign or uid, timestamp_ms=current_time_ms,
         lon=last["lon"], lat=last["lat"], alt=last.get("alt", 30.0),
         speed=0.0, heading=last_heading, classification=classification,
         status=operating_status,
@@ -471,10 +471,9 @@ def query_air_route_single(route_name: Optional[str] = None) -> Optional[Dict[st
 
 
 def query_route_elements(route_id: Any) -> List[Dict[str, float]]:
-    """查询 air_route_segment 表获取航路中心线坐标点（下游 ATC_DKWRJ_TEST 数据库）。
+    """查询 air_route_element 表获取航路中心线坐标点（下游 ATC_DKWRJ_TEST 数据库）。
 
-    仅查询 TYPE=2 的航段，按 SEGMENT_SEQ 排序。
-    从每段的 START_POINT_LON/LAT 和 END_POINT_LON/LAT 构建连续航路点列表。
+    按 sequence 排序，从每段的 start_point_lon/lat 和 end_point_lon/lat 构建连续航路点列表。
     """
     if not HAS_DB:
         return []
@@ -485,12 +484,11 @@ def query_route_elements(route_id: Any) -> List[Dict[str, float]]:
 
     route_id_val = str(route_id)
     try:
-        # 下游数据库表名: air_route_segment / AIR_ROUTE_SEGMENT
-        # 字段: AIR_ROUTE_ID, SEGMENT_SEQ, TYPE, START_POINT_LON/LAT, END_POINT_LON/LAT,
-        #       START_POINT_HEIGHT, END_POINT_HEIGHT, WIDTH, PROTECT_HEIGHT
-        for table_name in ["air_route_segment", "AIR_ROUTE_SEGMENT"]:
+        # 下游数据库表名: air_route_element / AIR_ROUTE_ELEMENT
+        # 字段: route_id, sequence, start_point_lon/lat, end_point_lon/lat
+        for table_name in ["air_route_element", "AIR_ROUTE_ELEMENT"]:
             try:
-                where = f"AIR_ROUTE_ID = '{route_id_val}' AND TYPE = 2 ORDER BY SEGMENT_SEQ ASC"
+                where = f"route_id = '{route_id_val}' ORDER BY sequence ASC"
                 data = client.query(table_name=table_name, where=where)
                 if data:
                     points = []
@@ -949,7 +947,7 @@ def _build_waypoints(args) -> List[Dict[str, Any]]:
             if routes:
                 route = routes[0]
                 route_id_db = route.get("ID") or route.get("id") or route.get("Id")
-                # 优先从 air_route_segment 表获取高精度航路坐标点
+                # 优先从 air_route_element 表获取高精度航路坐标点
                 if route_id_db is not None:
                     db_points = query_route_elements(route_id_db)
                 else:
@@ -1771,7 +1769,8 @@ def run_check_id(args):
     if args.files:
         files = args.files
     else:
-        files = [os.path.join(mock_dir, f'kafka_data_scene{i}.json') for i in range(2, 12)]
+        # 从 BATCH_CONFIGS 获取输出文件名
+        files = [os.path.join(mock_dir, os.path.basename(cfg['output'])) for cfg in BATCH_CONFIGS]
 
     all_records = []
     for fpath in files:

@@ -517,7 +517,7 @@ def query_air_route(route_name: str) -> Optional[Dict[str, Any]]:
 
 def query_route_elements(route_id: Any) -> List[Dict[str, float]]:
     """
-    查询 air_route_segment 表（下游 ATC_DKWRJ_TEST 数据库），根据 AIR_ROUTE_ID 获取航路中心线坐标点。
+    查询 air_route_element 表（下游 ATC_DKWRJ_TEST 数据库），根据 AIR_ROUTE_ID 获取航路中心线坐标点。
     仅查询 TYPE=2 的航段，按 SEGMENT_SEQ 排序。
     返回航路点列表，每个点为 {"lon": float, "lat": float}。
     """
@@ -530,9 +530,9 @@ def query_route_elements(route_id: Any) -> List[Dict[str, float]]:
 
     try:
         route_id_val = str(route_id)
-        for table_name in ["air_route_segment", "AIR_ROUTE_SEGMENT"]:
+        for table_name in ["air_route_element", "AIR_ROUTE_ELEMENT"]:
             try:
-                where = f"AIR_ROUTE_ID = '{route_id_val}' AND TYPE = 2 ORDER BY SEGMENT_SEQ ASC"
+                where = f"route_id = '{route_id_val}' ORDER BY sequence ASC"
                 data = client.query(table_name=table_name, where=where)
                 if data:
                     points = []
@@ -1230,19 +1230,19 @@ def main():
     vert_alt = route_record.get("vertical_altitude") or route_record.get("VERTICAL_ALTITUDE")
     width = route_record.get("width") or route_record.get("WIDTH")
 
-    # 获取航线 ID（用于查询 air_route_segment）
+    # 获取航线 ID（用于查询 air_route_element）
     route_id = route_record.get("ID") or route_record.get("id") or route_record.get("Id")
 
-    # 优先从 air_route_segment 表查询航路中心线坐标
+    # 优先从 air_route_element 表查询航路中心线坐标
     if route_id is not None:
-        print(f"[信息] 从 air_route_segment 查询航路点 (route_id={route_id})")
+        print(f"[信息] 从 air_route_element 查询航路点 (route_id={route_id})")
         route_points = query_route_elements(route_id)
     else:
         route_points = []
 
-    # 兜底：如果 air_route_segment 查不到，退回到解析 polygon 字段
+    # 兜底：如果 air_route_element 查不到，退回到解析 polygon 字段
     if len(route_points) < 2:
-        print("[警告] air_route_segment 未查询到航路点，尝试解析 polygon 字段")
+        print("[警告] air_route_element 未查询到航路点，尝试解析 polygon 字段")
         polygon_val = (
             route_record.get("polygon")
             or route_record.get("POLYGON")
@@ -1251,7 +1251,7 @@ def main():
         route_points = parse_polygon(polygon_val)
 
     if len(route_points) < 2:
-        print("[错误] 航线航路点不足 2 个，请检查 air_route_segment 数据或 polygon 字段格式")
+        print("[错误] 航线航路点不足 2 个，请检查 air_route_element 数据或 polygon 字段格式")
         sys.exit(1)
     # 检测并截断闭合环：如果航路终点接近起点（<500米），可能是闭合多边形
     # 截取单程数据，避免飞行器绕圈往返

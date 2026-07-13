@@ -1678,6 +1678,15 @@ def api_db_preview_file(file_id):
     return jsonify(result)
 
 
+@app.route("/api/data/db/routes", methods=["GET"])
+def api_db_routes_list():
+    """查询达梦数据库中可用航线列表（供数据生成航线下拉选择）。"""
+    mgr = _get_json_mgr()
+    keyword = request.args.get("keyword", "")
+    routes = mgr.query_available_routes(keyword=keyword)
+    return jsonify({"routes": routes})
+
+
 @app.route("/api/data/db/files/<int:file_id>/validate-route", methods=["GET"])
 def api_db_validate_route(file_id):
     """校验文件关联的航线是否在数据库中存在。"""

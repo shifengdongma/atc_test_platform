@@ -333,7 +333,7 @@ def save_file(data: Dict[str, Any]) -> int:
         if "alarm_type" not in data or not data.get("alarm_type"):
             data["alarm_type"] = _detect_alarm_type(name, content[:4096])
         if "simulator_id" not in data or not data.get("simulator_id"):
-            data["simulator_id"] = _extract_simulator_id(content[:65536])
+            data["simulator_id"] = _extract_simulator_id(content[:131072])
         if "linked_route" not in data or not data.get("linked_route"):
             data["linked_route"] = _detect_linked_route(name, content[:4096])
 
@@ -414,9 +414,9 @@ def import_from_mock() -> Dict[str, Any]:
                     # 文件大小变化，标记为更新
                     updated += 1
 
-                # 读取采样用于元数据检测
+                # 读取采样用于元数据检测（128KB，确保多UAV文件能提取到足够ID）
                 with open(fpath, "r", encoding="utf-8") as f:
-                    sample = f.read(65536)
+                    sample = f.read(131072)
 
                 category = _detect_category(fname, sample)
                 alarm_type = _detect_alarm_type(fname, sample)
@@ -584,10 +584,70 @@ def read_file_content_partial(file_id: int, max_chars: int = 102400) -> Dict[str
     }
 
 
-# ── 航线关联校验 ────────────────────────────────────────────────────
+# ── 航线查询与校验 ──────────────────────────────────────────────────
+
+def query_available_routes(keyword: str = "", limit: int = 100) -> List[Dict[str, Any]]:
+    """从达梦数据库 ATC_DKWRJ_TEST.air_route 查询可用航线列表。
+
+    供前端数据生成的航线下拉选择使用。
+
+    Returns:
+        [{"id": ..., "name": "航线名", "departure": "起点", "arrival": "终点"}, ...]
+    """
+    routes = []
+    try:
+        import importlib.util as _util
+        _dm_paths = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "..", "atc_api_autotest", "api_tools", "dmdbclient.py"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "..", "atc_data_factory", "script", "dmdbclient.py"),
+        ]
+        _dm_spec = None
+        for _p in _dm_paths:
+            if os.path.exists(_p):
+                _dm_spec = _util.spec_from_file_location("_dmdbclient2", _p)
+                break
+        if _dm_spec is None:
+            return routes
+
+        _dm_module = _util.module_from_spec(_dm_spec)
+        _dm_spec.loader.exec_module(_dm_module)
+        DmDbClient = _dm_module.DmDbClient
+
+        client = DmDbClient()
+        if not client.connect():
+            return routes
+
+        where = None
+        if keyword:
+            where = f"(NAME LIKE '%{keyword}%' OR route_name LIKE '%{keyword}%')"
+
+        for table_name in ["air_route", "AIR_ROUTE"]:
+            try:
+                data = client.query(table_name=table_name, where=where, limit=limit)
+                if data:
+                    for row in data:
+                        rid = row.get("ID") or row.get("id") or row.get("Id")
+                        name = row.get("NAME") or row.get("route_name") or row.get("ROUTE_NAME", "")
+                        routes.append({
+                            "id": str(rid) if rid is not None else "",
+                            "name": str(name) if name else "",
+                        })
+                    break
+            except Exception:
+                continue
+        client.close()
+    except Exception as e:
+        print(f"[json_data_manager] 查询航线列表失败: {e}")
+    return routes
+
 
 def validate_route_correlation(linked_route: str) -> Dict[str, Any]:
-    """校验关联航线名称是否在数据库 air_route 表中存在。
+    """校验关联航线名称是否在达梦数据库 ATC_DKWRJ_TEST.air_route 表中存在。
+
+    直接通过 dmdbclient 连接达梦数据库查询，不依赖 create_data_scenes 模块。
+    兼容 NAME / route_name 字段名。
 
     Returns:
         {"valid": True/False/None, "message": str}
@@ -596,42 +656,55 @@ def validate_route_correlation(linked_route: str) -> Dict[str, Any]:
     if not linked_route:
         return {"valid": False, "message": "未指定航线"}
 
-    # 尝试从 create_data_scenes 导入查询函数
     try:
-        import importlib.util
-        # 尝试动态导入 — 该模块依赖 mysqldbclient
-        spec = importlib.util.find_spec("create_data_scenes")
-        if spec is None:
-            # 尝试从 tools 路径加载
-            tools_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                "..", "utm_simulator", "tools",
-            )
-            if tools_path not in __import__("sys").path:
-                __import__("sys").path.insert(0, tools_path)
-            spec = importlib.util.find_spec("create_data_scenes")
+        # 直接导入 dmdbclient（与 create_data_scenes.py 相同的导入路径）
+        import importlib.util as _util
+        _dm_paths = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "..", "atc_api_autotest", "api_tools", "dmdbclient.py"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "..", "atc_data_factory", "script", "dmdbclient.py"),
+        ]
+        _dm_spec = None
+        for _p in _dm_paths:
+            if os.path.exists(_p):
+                _dm_spec = _util.spec_from_file_location("_dmdbclient", _p)
+                break
+        if _dm_spec is None:
+            return {"valid": None, "message": "未找到 dmdbclient.py，无法连接达梦数据库"}
 
-        if spec is not None:
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            route_data = module.query_air_route_single(route_name=linked_route)
-            if route_data:
-                return {
-                    "valid": True,
-                    "message": f'航线 "{linked_route}" 在数据库中确认存在',
-                }
-            else:
-                return {
-                    "valid": False,
-                    "message": f'航线 "{linked_route}" 在数据库中不存在',
-                }
+        _dm_module = _util.module_from_spec(_dm_spec)
+        _dm_spec.loader.exec_module(_dm_module)
+        DmDbClient = _dm_module.DmDbClient
+
+        client = DmDbClient()
+        if not client.connect():
+            return {"valid": None, "message": "无法连接到达梦数据库"}
+
+        # 查询 air_route 表，兼容 NAME 和 route_name 字段
+        for table_name in ["air_route", "AIR_ROUTE"]:
+            for name_col in ["NAME", "route_name", "ROUTE_NAME"]:
+                try:
+                    where = f"{name_col} = '{linked_route}'"
+                    data = client.query(table_name=table_name, where=where)
+                    if data:
+                        client.close()
+                        return {
+                            "valid": True,
+                            "message": f'航线 "{linked_route}" 在数据库中确认存在',
+                        }
+                except Exception:
+                    continue
+        client.close()
+        return {
+            "valid": False,
+            "message": f'航线 "{linked_route}" 在数据库中不存在',
+        }
     except Exception as e:
         return {
             "valid": None,
             "message": f"无法连接航线数据库进行验证: {e}",
         }
-
-    return {"valid": None, "message": "无法导入航线查询模块"}
 
 
 # ── 分类管理 ────────────────────────────────────────────────────────

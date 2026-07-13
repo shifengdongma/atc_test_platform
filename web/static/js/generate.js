@@ -126,8 +126,10 @@ $('#btn-gen-deviate-adv').addEventListener('click', async function() {
 
 // ── 碰撞 ───────────────────────────────────────────────────────────
 $('#btn-gen-collision').addEventListener('click', async function() {
+  var routeA = $('#col-route-a').value, routeB = $('#col-route-b').value;
+  if (!routeA || !routeB) { showToast('请选择两条航线', 'error'); return; }
   var body = {
-    route_names: $('#col-route-names').value, uids: $('#col-uids').value,
+    route_names: routeA + ',' + routeB, uids: $('#col-uids').value,
     meeting_threshold: parseInt($('#col-meeting-threshold').value)||10,
     collision_time: parseInt($('#col-collision-time').value)||300
   };
@@ -268,7 +270,45 @@ $('#btn-ai-generate').addEventListener('click', async function() {
   }
 });
 
+// ── 航线列表加载 ───────────────────────────────────────────────────
+async function loadRouteSelects() {
+  try {
+    var data = await apiGet('/api/data/db/routes');
+    var routes = data.routes || [];
+    var opts = routes.map(function(r) {
+      return '<option value="' + escHtml(r.name) + '">' + escHtml(r.name) + '</option>';
+    }).join('');
+    if (!opts) opts = '<option value="">— 暂无可用航线 —</option>';
+
+    // 高级偏离的航线选择
+    var daSel = $('#da-route-name');
+    if (daSel && daSel.tagName === 'SELECT') {
+      var cur = daSel.value;
+      daSel.innerHTML = '<option value="">— 选择或输入航线 —</option>' + opts;
+      daSel.value = cur;
+    }
+    // 碰撞预警的航线A/B选择
+    ['col-route-a', 'col-route-b'].forEach(function(id) {
+      var sel = $('#' + id);
+      if (sel) {
+        var cur = sel.value;
+        sel.innerHTML = '<option value="">— 选择航线 —</option>' + opts;
+        sel.value = cur;
+      }
+    });
+  } catch(e) {
+    console.error('加载航线列表失败:', e);
+  }
+}
+
+// 刷新按钮
+var btnDaRefresh = $('#btn-da-route-refresh');
+if (btnDaRefresh) {
+  btnDaRefresh.addEventListener('click', loadRouteSelects);
+}
+
 // ── 初始化 ─────────────────────────────────────────────────────────
 initGenTabs();
 loadAITemplates();
+loadRouteSelects();
 })();

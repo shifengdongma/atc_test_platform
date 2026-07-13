@@ -138,7 +138,7 @@
         <div class="sub-tab-content" id="subtab-deviate-adv">
           <div class="subtab-desc">↗️ 基于数据库中已有航线，生成无人机偏离航线的高级场景。支持水平偏移、高度偏移或同时偏移，含平滑过渡渐变。</div>
           <div class="gen-form">
-            <div class="form-row"><label>航线名</label><input type="text" id="da-route-name" value="铁门关至吐鲁番"><div class="param-hint">air_route 数据库表中的航线名称，用于查询航路点坐标</div></div>
+            <div class="form-row"><label>航线名</label><div style="display:flex;gap:4px;"><select id="da-route-name" style="flex:1;"><option value="">— 加载中... —</option></select><button id="btn-da-route-refresh" class="btn btn-small" title="刷新航线列表">🔄</button></div><div class="param-hint">从下游数据库 air_route 表查询的可用航线，也可直接输入名称</div></div>
             <div class="form-row"><label>偏离量 <small>(米)</small></label><input type="number" id="da-deviate-offset" value="3000" step="100"><div class="param-hint">偏离原航线的距离，单位为米</div></div>
             <div class="form-row"><label>偏离起始 <small>(秒)</small></label><input type="number" id="da-deviate-start" value="20" step="1"><div class="param-hint">起飞后第几秒开始产生偏离，之前正常飞行</div></div>
             <div class="form-row"><label>偏离模式</label><select id="da-deviate-mode"><option value="horizontal">水平偏移</option><option value="vertical">高度偏移</option><option value="both">水平+高度同时偏移</option></select><div class="param-hint">horizontal=仅改变水平位置 | vertical=仅改变高度 | both=水平和高度同时偏移</div></div>
@@ -150,7 +150,8 @@
         <div class="sub-tab-content" id="subtab-collision">
           <div class="subtab-desc">💥 生成两架无人机在交汇点相向/交叉飞行的轨迹数据，模拟短期冲突告警场景。基于数据库中已有航线计算交汇点。</div>
           <div class="gen-form">
-            <div class="form-row"><label>航线名 <small>(逗号分隔2条)</small></label><input type="text" id="col-route-names" value="跨顺义三河段,三河区航路"><div class="param-hint">air_route 表中的两条航线名称，用英文逗号分隔。脚本会查找这两条航线的交汇点</div></div>
+            <div class="form-row"><label>航线A</label><select id="col-route-a" style="width:100%;"><option value="">— 加载中... —</option></select><div class="param-hint">选择第一条航线，将与航线B查找交汇点</div></div>
+            <div class="form-row"><label>航线B</label><select id="col-route-b" style="width:100%;"><option value="">— 加载中... —</option></select><div class="param-hint">选择第二条航线</div></div>
             <div class="form-row"><label>UID <small>(逗号分隔2个)</small></label><input type="text" id="col-uids" value="CW000000000000000004,CH000000000000000003"><div class="param-hint">两架无人机的唯一识别码，用逗号分隔，分别对应上面两条航线</div></div>
             <div class="form-row"><label>相遇阈值 <small>(米)</small></label><input type="number" id="col-meeting-threshold" value="10" step="1"><div class="param-hint">两机距离小于此阈值时判定为相遇/碰撞风险</div></div>
             <div class="form-row"><label>碰撞时间 <small>(秒)</small></label><input type="number" id="col-collision-time" value="300" step="10"><div class="param-hint">两机预计在起飞后多少秒到达交汇点并触发碰撞预警</div></div>

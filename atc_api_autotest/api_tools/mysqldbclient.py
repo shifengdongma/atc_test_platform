@@ -1,105 +1,63 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MySQL 数据库连接客户端
-支持模块化配置与外部调用，对接 1Panel 管理的 MySQL 实例
+MySQL 数据库连接客户端（纯客户端类，不包含项目配置）
+
+项目 MySQL 配置请使用 common/config.py 的 load_mysql_config() 获取。
+达梦数据库配置保持原有方式，在 dmdbclient.py 中不变。
+
+用法:
+    from common.config import load_mysql_config
+    from mysqldbclient import MysqlDbClient
+
+    cfg = load_mysql_config()
+    client = MysqlDbClient(host=cfg.host, port=cfg.port, user=cfg.user,
+                           password=cfg.password, database=cfg.database,
+                           charset=cfg.charset)
 """
 
 import pymysql
-import os
-import sys
-
-# ── MySQL 连接配置：优先级 utm_simulator/env.py > atc_api_autotest/env.py > UTM_MYSQL_* 环境变量 ──
-_MYSQL_HOST = "127.0.0.1"
-_MYSQL_PORT = 3306
-_MYSQL_USER = "root"
-_MYSQL_PASSWORD = ""
-_MYSQL_DATABASE = "utm_simulator"
-_MYSQL_CHARSET = "utf8mb4"
-
-# 1) 优先从 utm_simulator/env.py 导入（本项目专用 MySQL，存储配置/JSON/日志）
-_script_dir = os.path.dirname(os.path.abspath(__file__))                     # api_tools/
-_project_root = os.path.dirname(os.path.dirname(_script_dir))               # 项目根目录
-try:
-    _utm_path = os.path.join(_project_root, "utm_simulator")
-    if _utm_path not in sys.path:
-        sys.path.insert(0, _utm_path)
-    from env import (MYSQL_HOST, MYSQL_PORT, MYSQL_USER,
-                     MYSQL_PASSWORD, MYSQL_DATABASE, MYSQL_CHARSET)
-    _MYSQL_HOST = MYSQL_HOST
-    _MYSQL_PORT = MYSQL_PORT
-    _MYSQL_USER = MYSQL_USER
-    _MYSQL_PASSWORD = MYSQL_PASSWORD
-    _MYSQL_DATABASE = MYSQL_DATABASE
-    _MYSQL_CHARSET = MYSQL_CHARSET
-except (ImportError, NameError):
-    # 2) 回退到 atc_api_autotest/env.py（ATC 测试数据库，读取航线/日志等业务数据）
-    try:
-        _atc_path = os.path.dirname(_script_dir)  # atc_api_autotest/
-        if _atc_path not in sys.path:
-            sys.path.insert(0, _atc_path)
-        from env import (MYSQL_HOST, MYSQL_PORT, MYSQL_USER,
-                         MYSQL_PASSWORD, MYSQL_DATABASE, MYSQL_CHARSET)
-        _MYSQL_HOST = MYSQL_HOST
-        _MYSQL_PORT = MYSQL_PORT
-        _MYSQL_USER = MYSQL_USER
-        _MYSQL_PASSWORD = MYSQL_PASSWORD
-        _MYSQL_DATABASE = MYSQL_DATABASE
-        _MYSQL_CHARSET = MYSQL_CHARSET
-    except (ImportError, NameError):
-        pass
-
-# UTM_MYSQL_* 环境变量优先级最高（Docker 部署 + 安全注入）
-# 注意：仅当环境变量非空时才覆盖默认值，避免 docker-compose 中 ${VAR:-} 空默认值覆盖正确配置
-_mysql_host_env = os.environ.get("UTM_MYSQL_HOST", "")
-if _mysql_host_env:
-    _MYSQL_HOST = _mysql_host_env
-_mysql_port_env = os.environ.get("UTM_MYSQL_PORT", "")
-if _mysql_port_env:
-    _MYSQL_PORT = int(_mysql_port_env)
-_mysql_user_env = os.environ.get("UTM_MYSQL_USER", "")
-if _mysql_user_env:
-    _MYSQL_USER = _mysql_user_env
-_mysql_password_env = os.environ.get("UTM_MYSQL_PASSWORD", "")
-if _mysql_password_env:
-    _MYSQL_PASSWORD = _mysql_password_env
-_mysql_db_env = os.environ.get("UTM_MYSQL_DB", "")
-if _mysql_db_env:
-    _MYSQL_DATABASE = _mysql_db_env
-_mysql_charset_env = os.environ.get("UTM_MYSQL_CHARSET", "")
-if _mysql_charset_env:
-    _MYSQL_CHARSET = _mysql_charset_env
 
 
 class MysqlDbClient:
     """MySQL 数据库连接客户端
 
-    支持作为模块被外部导入调用：
-        from mysqldbclient import MysqlDbClient
-        client = MysqlDbClient()
-        client.connect()
-        data = client.query(table_name="uav_info", columns=["id", "name"])
-        client.close()
+    所有连接参数必须显式传入，不再从 env.py/环境变量隐秘读取。
+    项目配置统一由 common/config.py 管理。
 
-    也支持 with 语句：
-        with MysqlDbClient() as client:
-            data = client.query(table_name="uav_info")
+    用法:
+        from common.config import load_mysql_config
+        from mysqldbclient import MysqlDbClient
+        cfg = load_mysql_config()
+        client = MysqlDbClient(host=cfg.host, port=cfg.port, user=cfg.user,
+                               password=cfg.password, database=cfg.database,
+                               charset=cfg.charset)
+        client.connect()
+        data = client.query(table_name="sim_json_files", limit=5)
+        client.close()
     """
 
-    def __init__(self, host=None, port=None, user=None, password=None,
-                 database=None, charset=None, read_timeout=60, write_timeout=60):
-        """初始化客户端，参数为空时自动使用 env.py/环境变量配置
+    def __init__(self, host="127.0.0.1", port=3306, user="root",
+                 password="", database="utm_simulator", charset="utf8mb4",
+                 read_timeout=60, write_timeout=60):
+        """初始化客户端。
 
         Args:
-            read_timeout: 读取超时秒数（默认60，DDL操作可能需要更长时间）
-            write_timeout: 写入超时秒数（默认60）
+            host: MySQL 主机地址
+            port: MySQL 端口
+            user: 用户名
+            password: 密码
+            database: 数据库名
+            charset: 字符集
+            read_timeout: 读取超时秒数
+            write_timeout: 写入超时秒数
         """
-        self.host = host if host is not None else _MYSQL_HOST
-        self.port = port if port is not None else _MYSQL_PORT
-        self.user = user if user is not None else _MYSQL_USER
-        self.password = password if password is not None else _MYSQL_PASSWORD
-        self.database = database if database is not None else _MYSQL_DATABASE
-        self.charset = charset if charset is not None else _MYSQL_CHARSET
+        self.host = host
+        self.port = port
+        self.user = user
+        self.password = password
+        self.database = database
+        self.charset = charset
         self.read_timeout = read_timeout
         self.write_timeout = write_timeout
         self.conn = None

@@ -47,6 +47,25 @@ _mysql_last_fail_time: float = 0.0       # 最近一次连接失败的时间戳
 _MYSQL_RETRY_COOLDOWN: float = 60.0      # 失败后冷却秒数，期间不再尝试 MySQL
 
 
+def _create_mysql_client(read_timeout=120, write_timeout=120):
+    """使用 common/config.py 统一配置创建 MysqlDbClient 实例。"""
+    try:
+        _common_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common")
+        if _common_path not in sys.path:
+            sys.path.insert(0, _common_path)
+        from config import load_mysql_config
+        cfg = load_mysql_config()
+        return MysqlDbClient(
+            host=cfg.host, port=cfg.port, user=cfg.user,
+            password=cfg.password, database=cfg.database,
+            charset=cfg.charset,
+            read_timeout=read_timeout, write_timeout=write_timeout,
+        )
+    except Exception as e:
+        print(f"[mysql_db_manager] 加载 MySQL 配置失败: {e}，使用默认值")
+        return MysqlDbClient(read_timeout=read_timeout, write_timeout=write_timeout)
+
+
 def _get_client():
     """获取 MySQL 客户端（延迟初始化 + 连接检测 + 自动重连），不可用时返回 None。
 
@@ -80,7 +99,7 @@ def _get_client():
         # ── 首次连接 ──
         if _mysql_client is None and _mysql_available is None:
             try:
-                _mysql_client = MysqlDbClient(read_timeout=120, write_timeout=120)
+                _mysql_client = _create_mysql_client(read_timeout=120, write_timeout=120)
                 if _mysql_client.connect():
                     # 验证连接确实可用（防止连接成功但立即断开的情况）
                     try:
@@ -122,7 +141,7 @@ def _get_client():
                     pass
                 _mysql_client = None
                 try:
-                    _mysql_client = MysqlDbClient(read_timeout=120, write_timeout=120)
+                    _mysql_client = _create_mysql_client(read_timeout=120, write_timeout=120)
                     if _mysql_client.connect():
                         # 验证新连接确实可用
                         try:

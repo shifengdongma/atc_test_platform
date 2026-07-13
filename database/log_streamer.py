@@ -38,6 +38,28 @@ except (ImportError, Exception):
     _HAS_MYSQL = False
     MysqlDbClient = None
 
+# 从统一配置加载 MySQL 连接参数
+try:
+    _common_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common")
+    if _common_path not in sys.path:
+        sys.path.insert(0, _common_path)
+    from config import load_mysql_config as _load_mysql_cfg
+    _mysql_cfg = _load_mysql_cfg()
+except Exception:
+    _mysql_cfg = None
+    _load_mysql_cfg = None
+
+def _create_mysql_client():
+    """使用统一配置创建 MysqlDbClient。"""
+    if _mysql_cfg:
+        return MysqlDbClient(
+            host=_mysql_cfg.host, port=_mysql_cfg.port, user=_mysql_cfg.user,
+            password=_mysql_cfg.password, database=_mysql_cfg.database,
+            charset=_mysql_cfg.charset,
+        )
+    return MysqlDbClient()
+
+
 LOG_TABLE = "sim_task_logs"
 
 # 日志类型
@@ -184,7 +206,7 @@ class LogStreamer:
                 return None
         if self._mysql_client is None:
             try:
-                self._mysql_client = MysqlDbClient()
+                self._mysql_client = _create_mysql_client()
                 if self._mysql_client.connect():
                     # 验证连接：执行 SELECT 1 确保连接真正可用
                     try:

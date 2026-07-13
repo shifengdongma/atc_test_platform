@@ -56,12 +56,24 @@ class SimulationConfig:
 
 
 @dataclass
+class MysqlConfig:
+    """MySQL 连接配置（本项目 utm_simulator 库，配置/JSON/日志持久化）。"""
+    host: str = "127.0.0.1"
+    port: int = 3306
+    user: str = "root"
+    password: str = ""
+    database: str = "utm_simulator"
+    charset: str = "utf8mb4"
+
+
+@dataclass
 class AppConfig:
     """应用全局配置。"""
     env: str = "dev"
     log_level: str = "INFO"
     redis: RedisConfig = field(default_factory=RedisConfig)
     kafka: KafkaConfig = field(default_factory=KafkaConfig)
+    mysql: MysqlConfig = field(default_factory=MysqlConfig)
     simulation: SimulationConfig = field(default_factory=SimulationConfig)
 
 
@@ -133,6 +145,67 @@ def _env_float(key: str, default: float = 0.0) -> float:
     return default
 
 
+def _load_mysql_config() -> MysqlConfig:
+    """加载本项目 MySQL 配置。
+
+    优先级：
+    1. 环境变量 UTM_MYSQL_*
+    2. utm_simulator/env.py（本项目专用 MySQL）
+    3. atc_api_autotest/env.py（回退）
+    4. 默认值
+    """
+    host = "127.0.0.1"
+    port = 3306
+    user = "root"
+    password = ""
+    database = "utm_simulator"
+    charset = "utf8mb4"
+
+    # 尝试从 utm_simulator/env.py 导入
+    try:
+        import importlib.util
+        _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        env_paths = [
+            os.path.join(_root, "utm_simulator", "env.py"),
+            os.path.join(_root, "atc_api_autotest", "env.py"),
+        ]
+        for env_path in env_paths:
+            if not os.path.exists(env_path):
+                continue
+            spec = importlib.util.spec_from_file_location("_mysql_env_loader", env_path)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                host = getattr(mod, "MYSQL_HOST", host)
+                port = getattr(mod, "MYSQL_PORT", port)
+                user = getattr(mod, "MYSQL_USER", user)
+                password = getattr(mod, "MYSQL_PASSWORD", password)
+                database = getattr(mod, "MYSQL_DATABASE", database)
+                charset = getattr(mod, "MYSQL_CHARSET", charset)
+                break
+    except Exception:
+        pass
+
+    # 环境变量覆盖（最高优先级）
+    if os.environ.get("UTM_MYSQL_HOST"):
+        host = os.environ["UTM_MYSQL_HOST"]
+    if os.environ.get("UTM_MYSQL_PORT"):
+        port = int(os.environ["UTM_MYSQL_PORT"])
+    if os.environ.get("UTM_MYSQL_USER"):
+        user = os.environ["UTM_MYSQL_USER"]
+    if os.environ.get("UTM_MYSQL_PASSWORD"):
+        password = os.environ["UTM_MYSQL_PASSWORD"]
+    if os.environ.get("UTM_MYSQL_DB"):
+        database = os.environ["UTM_MYSQL_DB"]
+    if os.environ.get("UTM_MYSQL_CHARSET"):
+        charset = os.environ["UTM_MYSQL_CHARSET"]
+
+    return MysqlConfig(
+        host=host, port=port, user=user,
+        password=password, database=database, charset=charset,
+    )
+
+
 def load_config(env_name: Optional[str] = None) -> AppConfig:
     """加载应用配置。
 
@@ -189,12 +262,16 @@ def load_config(env_name: Optional[str] = None) -> AppConfig:
         ids_index=_env_int("SIM_IDS_INDEX", 1),
     )
 
-    # 5. 组装 AppConfig
+    # 5. 构建 MysqlConfig（从 utm_simulator/env.py 或 atc_api_autotest/env.py 读取）
+    mysql = _load_mysql_config()
+
+    # 6. 组装 AppConfig
     return AppConfig(
         env=_env_str("ENV", "dev"),
         log_level=_env_str("LOG_LEVEL", "INFO"),
         redis=redis,
         kafka=kafka,
+        mysql=mysql,
         simulation=simulation,
     )
 

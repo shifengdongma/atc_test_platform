@@ -1954,3 +1954,35 @@ Docker 容器部署到 Linux 服务器后，后台日志出现 5 类错误：
 | 新增前端弹窗 | 1（告警类型管理） |
 
 | 状态 | ✅ 已完成（7 Python 文件语法检查通过） |
+
+---
+
+### 2026-07-13 第五次优化: MySQL 项目配置分离到 common/config.py
+
+> 问题: `mysqldbclient.py` 中将达梦数据库配置路径与项目 MySQL 配置混在一起，违反配置与代码分离原则
+
+#### 解决方案
+
+1. **新增 `MysqlConfig` 数据类** 到 `common/config.py`，统一管理本项目 MySQL 连接参数
+2. **新增 `load_mysql_config()` / `_load_mysql_config()`** — 优先级：`UTM_MYSQL_*` 环境变量 > `utm_simulator/env.py` > `atc_api_autotest/env.py` > 默认值
+3. **精简 `mysqldbclient.py`** — 移除全部模块级配置加载逻辑（~60行），`MysqlDbClient.__init__()` 要求显式传参
+4. **更新调用方** — `mysql_db_manager.py` 和 `log_streamer.py` 新增 `_create_mysql_client()` 辅助函数，通过 `common/config.py` 获取配置
+
+#### 修复文件
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `common/config.py` | 修改 | 新增 `MysqlConfig` 数据类 + `_load_mysql_config()` + `load_mysql_config()` |
+| `atc_api_autotest/api_tools/mysqldbclient.py` | 修改（精简） | 移除 ~60行配置加载代码，变为纯客户端类 |
+| `database/mysql_db_manager.py` | 修改 | 新增 `_create_mysql_client()` 使用统一配置 |
+| `database/log_streamer.py` | 修改 | 新增 `_create_mysql_client()` + 导入 `load_mysql_config` |
+
+#### 汇总
+
+| 操作 | 文件数 |
+|------|--------|
+| 修改 | 4 |
+| 新增数据类 | 1（`MysqlConfig`） |
+| 达梦配置 | 不变（`dmdbclient.py` 完全未动） |
+
+| 状态 | ✅ 已完成（4 Python 文件语法检查通过） |

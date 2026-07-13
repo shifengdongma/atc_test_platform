@@ -630,10 +630,19 @@ def _get_dm_client():
             _sys.path.insert(0, _p)
 
     try:
-        import importlib.util as _util
-        _spec = _util.spec_from_file_location("_dmdbclient_shared", _dm_file)
-        _mod = _util.module_from_spec(_spec)
-        _spec.loader.exec_module(_mod)
+        # dmdbclient.py 内部执行 from env import ...，但 web_server.py 已
+        # import env as _env（utm_simulator/env.py），导致 sys.modules['env']
+        # 被缓存。临时清除该缓存，让 dmdbclient.py 能正确导入
+        # atc_api_autotest/env.py（含 DB_HOST 等达梦配置）。
+        _cached_env = _sys.modules.pop("env", None)
+        try:
+            import importlib.util as _util
+            _spec = _util.spec_from_file_location("_dmdbclient_shared", _dm_file)
+            _mod = _util.module_from_spec(_spec)
+            _spec.loader.exec_module(_mod)
+        finally:
+            if _cached_env is not None:
+                _sys.modules["env"] = _cached_env
         _client = _mod.DmDbClient()
         if _client.connect():
             _dm_client = _client

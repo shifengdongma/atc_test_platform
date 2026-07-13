@@ -1,5 +1,11 @@
 # Claude 项目上下文
 
+## Python 环境（强制）
+
+- **环境名称**: `utm`（Python 3.11.15）
+- **Conda 路径**: `C:\ProgramData\anaconda3\Scripts\conda.exe`
+- **运行脚本**: `conda run -n utm python <script>` 或先 `conda activate utm`
+
 ## 项目简介
 
 低空空管自动化系统测试项目，包含：
@@ -13,10 +19,12 @@
 
 | 目录 | 说明 |
 |------|------|
-| `utm_moc52_develop/` | 无人机模拟器核心代码 |
-| `atc_auto_test/` | 自动化测试框架与用例 |
-| `ha_test/` | 高可用与混沌测试 |
-| `utm_test_cases/` | 测试场景与用例管理 |
+| `utm_simulator/` | 无人机模拟器核心代码 |
+| `atc_api_autotest/` | 自动化测试框架与用例 |
+| `atc_ha_test/` | 高可用与混沌测试 |
+| `database/` | 数据库管理层（MySQL/达梦/SQLite） |
+| `common/` | 公共配置与工具模块 |
+| `docs/` | 项目文档与工作日志 |
 
 ## 常用命令
 
@@ -25,14 +33,18 @@
 conda activate utm
 
 # 运行模拟器
-python main.py
+cd utm_simulator && python main.py
 
 # 运行测试
-pytest atc_auto_test/
+cd atc_api_autotest && python run_testcase.py
+
+# 高可用测试
+cd atc_ha_test && python ha_iomp_server_reboot.py
 ```
 
 ## 注意事项
 
-- 所有 Python 脚本使用 `utm` Conda 环境
+- 所有 Python 脚本使用 `utm` Conda 环境（Python 3.11.15）
 - Kafka/Redis 连接配置在 `env.py`
 - 测试数据注意清理，避免磁盘占用过大
+- 达梦数据库需要 `dmPython` 驱动（需单独安装）

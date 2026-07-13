@@ -1986,3 +1986,46 @@ Docker 容器部署到 Linux 服务器后，后台日志出现 5 类错误：
 | 达梦配置 | 不变（`dmdbclient.py` 完全未动） |
 
 | 状态 | ✅ 已完成（4 Python 文件语法检查通过） |
+
+
+---
+
+### 2026-07-13 第六次修复: 达梦数据库连线修复 + CLAUDE.md环境信息更新
+
+> 问题: (1) 航线查询 （ 别名）
+>       (2) dmPython 未安装到 utm 虚拟环境
+>       (3)  先  缓存了 ，
+>            dmdbclient.py 动态导入时  命中错误模块
+>       (4)  引用不存在的  路径
+>       (5) CLAUDE.md 中 conda 路径错误 + .claude/CLAUDE.md 目录结构过时
+
+#### 解决方案
+
+1. **dmPython 安装**: 从 PyPI 安装  到 utm 环境
+2. **模块缓存冲突修复**:  中临时 ，让 dmdbclient.py 正确导入 （含 DB_HOST），导入后恢复缓存
+3. **dmdbclient 路径修正**:  /  的 dmdbclient 路径从  改为 ，同步修复 env 缓存
+4. **NAME 列兼容恢复**: air_route 表实际列名为 （无 NAME 列），恢复 d0ae23d 的正确修改
+5. **CLAUDE.md 修复**: 根目录修正 conda 路径、 重写（含 utm 环境章节）、 新增 Python 环境章节
+
+#### 修复文件
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+|  | 修改 |  新增 sys.modules['env'] 缓存清除 + WHERE/提取/校验恢复 route_name |
+|  | 修改 | dmdbclient 路径修正 + env 缓存清除 |
+|  | 修改 | dmdbclient 路径修正 + env 缓存清除 |
+|  | 修改 | tools_expend_test 引用移除 |
+|  | 修改 | tools_expend_test 引用移除 |
+|  | 修改 | conda 路径修正 |
+|  | 重写 | +utm 环境章节 + 目录结构更新 |
+|  | 修改 | +Python 环境章节 + 版本号修正 |
+
+#### 汇总
+
+| 操作 | 数量 |
+|------|------|
+| 修改文件 | 8 |
+| 安装依赖 | 1（dmPython 2.5.32） |
+| 核心修复 | 模块缓存冲突 + dmdbclient路径 + env环境配置 |
+
+| 状态 | ✅ 已完成（航线查询90条 + 数据生成功能恢复） |

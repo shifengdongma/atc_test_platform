@@ -2,11 +2,18 @@
 
 本文件为 AI 辅助编码时的**最高优先级**规则与上下文，生成或修改代码时请严格遵循。
 
+## Python 环境（强制）
+
+- **环境名称**: `utm`（Python 3.11.15）
+- **Conda 路径**: `C:\ProgramData\anaconda3\Scripts\conda.exe`
+- **激活环境**: `conda activate utm`
+- **运行脚本**: `conda run -n utm python <script>`
+
 ## 项目概述
 
 - **名称**：utm_moc52
 - **用途**：UTM（无人机交通管理）仿真与数据注入服务。通过 Python 仿真多架无人机飞行过程，将**飞行计划**写入 Redis，将**实时遥测**写入 Kafka，供下游 UTM 系统、态势或算法使用。
-- **技术栈**：Python 3.10+、Redis、Kafka；可选 C++ UTM 核心库（pylib 封装）。
+- **技术栈**：Python 3.11.15、Redis、Kafka；可选 C++ UTM 核心库（pylib 封装）。
 
 ## 目录与文件约定
 

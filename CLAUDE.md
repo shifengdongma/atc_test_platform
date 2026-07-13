@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Python 环境（强制）
 
 - **环境名称**: `utm`（Python 3.11.15）
-- **Conda 路径**: `C:\wbData\anaconda3\Scripts\conda.exe`
+- **Conda 路径**: `C:\ProgramData\anaconda3\Scripts\conda.exe`
 - **运行脚本**: `conda run -n utm python <script>` 或先 `conda activate utm`
 
 ## 目录架构

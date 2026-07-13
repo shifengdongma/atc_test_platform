@@ -56,7 +56,7 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_SCRIPT_DIR)  # utm_moc52_develop 项目根目录
 
 # 添加 dmdbclient.py 所在路径，供数据库查询使用
-sys.path.insert(0, os.path.join(_ROOT, "tools_expend_test", "script"))
+# 路径已迁移到 atc_api_autotest/api_tools/（下一行）
 # 添加 uav_identifiers_extended.py 所在路径，供获取 UAV ID 使用
 sys.path.insert(0, os.path.join(_ROOT, "atc_api_autotest", "api_tools"))
 
@@ -478,7 +478,7 @@ def query_air_route(route_name: str) -> Optional[Dict[str, Any]]:
     if not client.connect():
         return None
 
-    where = f"(NAME = '{route_name}' OR route_name = '{route_name}')"
+    where = f"route_name = '{route_name}'"
     try:
         # 尝试不同大小写的表名
         for table_name in ["air_route", "AIR_ROUTE"]:

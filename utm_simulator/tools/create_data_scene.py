@@ -41,15 +41,23 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_SCRIPT_DIR)  # utm_moc52_develop
 _PROJECT_ROOT = os.path.dirname(_ROOT)  # Atc_Test2026
 
-# 添加 dmdbclient 路径
-sys.path.insert(0, os.path.join(_ROOT, "tools_expend_test", "script"))
+# 添加 dmdbclient 路径（atc_api_autotest/api_tools/）
+_DMDB_PATH = os.path.join(_ROOT, "..", "atc_api_autotest", "api_tools")
+if _DMDB_PATH not in sys.path:
+    sys.path.insert(0, _DMDB_PATH)
 
 # 尝试导入数据库客户端
+# 注意: web_server.py 已 import env as _env，sys.modules['env'] 可能已缓存，
+# 需临时清除让 dmdbclient.py 能正确导入 atc_api_autotest/env.py
+_cached_env_for_dm = sys.modules.pop("env", None)
 try:
     from dmdbclient import DmDbClient
     HAS_DB = True
 except ImportError:
     HAS_DB = False
+finally:
+    if _cached_env_for_dm is not None:
+        sys.modules["env"] = _cached_env_for_dm
 
 # ==================== 常量 ====================
 RE_EARTH = 6371000.0  # 地球半径（米）
@@ -253,7 +261,7 @@ def query_air_route(route_name: Optional[str] = None, route_id: Optional[int] = 
 
     conditions = []
     if route_name:
-        conditions.append(f"(NAME = '{route_name}' OR route_name = '{route_name}')")
+        conditions.append(f"route_name = '{route_name}'")
     if route_id is not None:
         conditions.append(f"ID = {route_id}")
 

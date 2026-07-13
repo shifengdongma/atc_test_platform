@@ -43,15 +43,24 @@ _ROOT = os.path.dirname(_SCRIPT_DIR)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-# 添加 dmdbclient 路径
-sys.path.insert(0, os.path.join(_ROOT, "tools_expend_test", "script"))
+# 添加 dmdbclient 路径（atc_api_autotest/api_tools/）
+_DMDB_PATH = os.path.join(_ROOT, "..", "atc_api_autotest", "api_tools")
+if _DMDB_PATH not in sys.path:
+    sys.path.insert(0, _DMDB_PATH)
 
 # ==================== 外部模块导入 ====================
+# 注意: web_server.py 已 import env as _env，导致 sys.modules['env'] 被缓存为
+# utm_simulator/env.py。dmdbclient.py 需要 atc_api_autotest/env.py（含 DB_HOST），
+# 因此需临时清除缓存。
+_cached_env_for_dm = sys.modules.pop("env", None)
 try:
     from dmdbclient import DmDbClient
     HAS_DB = True
 except ImportError:
     HAS_DB = False
+finally:
+    if _cached_env_for_dm is not None:
+        sys.modules["env"] = _cached_env_for_dm
 
 try:
     from uav_identifiers_extended import UAV_IDENTIFIERS_EXTENDED
@@ -428,8 +437,8 @@ def query_air_route(route_name: Optional[str] = None, route_id: Optional[Any] = 
 
     conditions = []
     if route_name:
-        # 下游数据库字段名为 NAME，同时兼容 route_name
-        conditions.append(f"(NAME = '{route_name}' OR route_name = '{route_name}')")
+        # 实际列名为 route_name（无 NAME 列）
+        conditions.append(f"route_name = '{route_name}'")
     if route_id is not None:
         conditions.append(f"ID = {route_id}")
     where = " AND ".join(conditions) if conditions else None
@@ -1103,8 +1112,8 @@ def run_deviate(args):
             print(f"[错误] 无法获取航线 '{args.route_name}' 的数据")
             sys.exit(1)
 
-    route_name_db = (route_record.get("NAME") or route_record.get("route_name")
-                     or route_record.get("ROUTE_NAME") or args.route_name)
+    route_name_db = (route_record.get("route_name") or route_record.get("ROUTE_NAME")
+                     or route_record.get("NAME") or args.route_name)
     min_safe_alt = (route_record.get("minimum_safe_altitude") or route_record.get("MINIMUM_SAFE_ALTITUDE")
                     or route_record.get("Minimum_Safe_Altitude"))
     vert_alt = route_record.get("vertical_altitude") or route_record.get("VERTICAL_ALTITUDE")

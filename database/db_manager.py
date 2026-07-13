@@ -86,7 +86,8 @@ _TABLE_DDL = {
             description TEXT DEFAULT '',
             is_builtin  INTEGER DEFAULT 0,
             sort_order  INTEGER DEFAULT 0,
-            created_at  TEXT DEFAULT ''
+            created_at  TEXT DEFAULT '',
+            updated_at  TEXT DEFAULT ''
         )
     """,
 }
@@ -111,16 +112,28 @@ def _get_conn() -> sqlite3.Connection:
 # ── 初始化 ──────────────────────────────────────────────────────────
 
 def init_tables() -> None:
-    """创建所有表（如不存在）。"""
+    """创建所有表（如不存在），并执行必要迁移。"""
     with _lock:
         conn = _get_conn()
         try:
             for name, ddl in _TABLE_DDL.items():
                 conn.execute(ddl)
                 print(f"[DB] 表已就绪: {name}")
+            # 迁移：为已存在的 sim_alarm_types 表补加 updated_at 列
+            _migrate_add_column(conn, "sim_alarm_types", "updated_at",
+                                "TEXT DEFAULT ''")
             conn.commit()
         finally:
             conn.close()
+
+
+def _migrate_add_column(conn, table: str, column: str, col_def: str) -> None:
+    """安全添加列（如不存在）。SQLite 不支持 IF NOT EXISTS for ALTER TABLE。"""
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}")
+        print(f"[DB] 迁移: {table}.{column} 列已添加")
+    except Exception:
+        pass  # 列已存在，忽略
 
 
 # ── 通用 CRUD ───────────────────────────────────────────────────────

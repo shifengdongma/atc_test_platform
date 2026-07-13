@@ -239,7 +239,8 @@ _MYSQL_TABLE_DDL = {
             `description` VARCHAR(256) DEFAULT '' COMMENT '类型说明',
             `is_builtin`  TINYINT DEFAULT 0 COMMENT '是否内置(1=内置不可删除)',
             `sort_order`  INT DEFAULT 0,
-            `created_at`  DATETIME DEFAULT CURRENT_TIMESTAMP
+            `created_at`  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            `updated_at`  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='告警类型自定义表'
     """,
 }

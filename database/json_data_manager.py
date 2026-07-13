@@ -586,39 +586,86 @@ def read_file_content_partial(file_id: int, max_chars: int = 102400) -> Dict[str
 
 # ── 航线查询与校验 ──────────────────────────────────────────────────
 
+# 达梦数据库连接（懒加载单例，避免重复连接）
+_dm_client = None
+_dm_available = None  # None=未检测, True=可用, False=不可用
+
+
+def _get_dm_client():
+    """获取达梦数据库 DmDbClient 实例（懒加载 + 单例缓存）。
+
+    正确设置 sys.path 使 dmdbclient.py 能导入其依赖（dmPython + env.py）。
+    返回 (client, error_msg)，client 可用时为 DmDbClient 实例，否则为 None。
+    """
+    global _dm_client, _dm_available
+    if _dm_available is False:
+        return None, "达梦数据库不可用（已探测失败）"
+    if _dm_client is not None:
+        return _dm_client, None
+
+    # 查找 dmdbclient.py 文件路径
+    _db_dir = os.path.dirname(os.path.abspath(__file__))
+    _dm_paths = [
+        os.path.join(_db_dir, "..", "atc_api_autotest", "api_tools"),
+        os.path.join(_db_dir, "..", "atc_data_factory", "script"),
+    ]
+    _dm_file = None
+    _dm_dir = None
+    for _d in _dm_paths:
+        _f = os.path.join(_d, "dmdbclient.py")
+        if os.path.exists(_f):
+            _dm_file = _f
+            _dm_dir = _d
+            break
+
+    if _dm_file is None:
+        _dm_available = False
+        return None, "未找到 dmdbclient.py"
+
+    # 确保 dmdbclient.py 所在目录及其父目录在 sys.path 中
+    # dmdbclient.py 需要: import dmPython; from env import ...
+    _parent = os.path.dirname(_dm_dir)  # atc_api_autotest/ 或 atc_data_factory/
+    for _p in (_dm_dir, _parent):
+        if _p not in sys.path:
+            sys.path.insert(0, _p)
+
+    try:
+        import importlib.util as _util
+        _spec = _util.spec_from_file_location("_dmdbclient_shared", _dm_file)
+        _mod = _util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _client = _mod.DmDbClient()
+        if _client.connect():
+            _dm_client = _client
+            _dm_available = True
+            return _client, None
+        else:
+            _dm_available = False
+            return None, "无法连接到达梦数据库 (10.165.32.32:5237)"
+    except ImportError as e:
+        _dm_available = False
+        return None, f"缺少达梦数据库驱动 (dmPython): {e}"
+    except Exception as e:
+        _dm_available = False
+        return None, f"达梦数据库初始化失败: {e}"
+
+
 def query_available_routes(keyword: str = "", limit: int = 100) -> List[Dict[str, Any]]:
     """从达梦数据库 ATC_DKWRJ_TEST.air_route 查询可用航线列表。
 
     供前端数据生成的航线下拉选择使用。
 
     Returns:
-        [{"id": ..., "name": "航线名", "departure": "起点", "arrival": "终点"}, ...]
+        [{"id": ..., "name": "航线名"}, ...]
     """
     routes = []
+    client, err = _get_dm_client()
+    if client is None:
+        if err:
+            print(f"[json_data_manager] 航线列表查询不可用: {err}")
+        return routes
+
     try:
-        import importlib.util as _util
-        _dm_paths = [
-            os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                         "..", "atc_api_autotest", "api_tools", "dmdbclient.py"),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                         "..", "atc_data_factory", "script", "dmdbclient.py"),
-        ]
-        _dm_spec = None
-        for _p in _dm_paths:
-            if os.path.exists(_p):
-                _dm_spec = _util.spec_from_file_location("_dmdbclient2", _p)
-                break
-        if _dm_spec is None:
-            return routes
-
-        _dm_module = _util.module_from_spec(_dm_spec)
-        _dm_spec.loader.exec_module(_dm_module)
-        DmDbClient = _dm_module.DmDbClient
-
-        client = DmDbClient()
-        if not client.connect():
-            return routes
-
         where = None
         if keyword:
             where = f"(NAME LIKE '%{keyword}%' OR route_name LIKE '%{keyword}%')"
@@ -630,14 +677,14 @@ def query_available_routes(keyword: str = "", limit: int = 100) -> List[Dict[str
                     for row in data:
                         rid = row.get("ID") or row.get("id") or row.get("Id")
                         name = row.get("NAME") or row.get("route_name") or row.get("ROUTE_NAME", "")
-                        routes.append({
-                            "id": str(rid) if rid is not None else "",
-                            "name": str(name) if name else "",
-                        })
+                        if name:
+                            routes.append({
+                                "id": str(rid) if rid is not None else "",
+                                "name": str(name),
+                            })
                     break
             except Exception:
                 continue
-        client.close()
     except Exception as e:
         print(f"[json_data_manager] 查询航线列表失败: {e}")
     return routes
@@ -646,7 +693,6 @@ def query_available_routes(keyword: str = "", limit: int = 100) -> List[Dict[str
 def validate_route_correlation(linked_route: str) -> Dict[str, Any]:
     """校验关联航线名称是否在达梦数据库 ATC_DKWRJ_TEST.air_route 表中存在。
 
-    直接通过 dmdbclient 连接达梦数据库查询，不依赖 create_data_scenes 模块。
     兼容 NAME / route_name 字段名。
 
     Returns:
@@ -656,46 +702,23 @@ def validate_route_correlation(linked_route: str) -> Dict[str, Any]:
     if not linked_route:
         return {"valid": False, "message": "未指定航线"}
 
+    client, err = _get_dm_client()
+    if client is None:
+        return {"valid": None, "message": err or "达梦数据库不可用"}
+
     try:
-        # 直接导入 dmdbclient（与 create_data_scenes.py 相同的导入路径）
-        import importlib.util as _util
-        _dm_paths = [
-            os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                         "..", "atc_api_autotest", "api_tools", "dmdbclient.py"),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                         "..", "atc_data_factory", "script", "dmdbclient.py"),
-        ]
-        _dm_spec = None
-        for _p in _dm_paths:
-            if os.path.exists(_p):
-                _dm_spec = _util.spec_from_file_location("_dmdbclient", _p)
-                break
-        if _dm_spec is None:
-            return {"valid": None, "message": "未找到 dmdbclient.py，无法连接达梦数据库"}
-
-        _dm_module = _util.module_from_spec(_dm_spec)
-        _dm_spec.loader.exec_module(_dm_module)
-        DmDbClient = _dm_module.DmDbClient
-
-        client = DmDbClient()
-        if not client.connect():
-            return {"valid": None, "message": "无法连接到达梦数据库"}
-
-        # 查询 air_route 表，兼容 NAME 和 route_name 字段
         for table_name in ["air_route", "AIR_ROUTE"]:
             for name_col in ["NAME", "route_name", "ROUTE_NAME"]:
                 try:
                     where = f"{name_col} = '{linked_route}'"
                     data = client.query(table_name=table_name, where=where)
                     if data:
-                        client.close()
                         return {
                             "valid": True,
                             "message": f'航线 "{linked_route}" 在数据库中确认存在',
                         }
                 except Exception:
                     continue
-        client.close()
         return {
             "valid": False,
             "message": f'航线 "{linked_route}" 在数据库中不存在',
@@ -703,7 +726,7 @@ def validate_route_correlation(linked_route: str) -> Dict[str, Any]:
     except Exception as e:
         return {
             "valid": None,
-            "message": f"无法连接航线数据库进行验证: {e}",
+            "message": f"查询航线失败: {e}",
         }
 
 

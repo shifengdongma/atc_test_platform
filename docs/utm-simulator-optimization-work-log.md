@@ -1897,3 +1897,60 @@ Docker 容器部署到 Linux 服务器后，后台日志出现 5 类错误：
 | 修复 Redis 数据污染 | 1（精确 UID 追踪清理） |
 
 | 状态 | ✅ 已完成 |
+
+---
+
+### 2026-07-13 第四次优化: 数据管理导入去重 + 数据生成航线查询修复 + 告警类型管理 + 模拟器ID优化
+
+> 来源计划: `1-mock-2-https-dkkgsit-test-testdolphin-adaptive-peach.md`
+
+#### 问题
+
+1. **数据管理 `/mock` 导入无去重**: `import_from_mock()` 每次无条件覆盖所有已存在记录，缺乏基于文件大小的跳过逻辑
+2. **数据生成航线查询失败**: 脚本查询错误的表名 `air_route_element`（应为 `air_route_segment`）和错误的字段名（`start_point_lon`→`START_POINT_LON` 等），导致"无法获取航线"错误
+3. **告警类型不可管理**: 仅能自动检测，无法自定义添加/修改/删除
+4. **模拟器ID仅显示首条**: 一个JSON含多架无人机时只展示第一个ID
+
+#### 解决方案
+
+**1. 导入去重**: `import_from_mock()` 导入前对比 DB 中同名文件的 `size_bytes`，等大→跳过，异大→更新，新文件→新增
+
+**2. 航线查询修复**: 
+- 表名 `air_route_element` → `air_route_segment`（下游 ATC_DKWRJ_TEST 正确表名）
+- 字段名全部修正: `route_id`→`AIR_ROUTE_ID`, `sequence`→`SEGMENT_SEQ`, `start_point_lon`→`START_POINT_LON`, `end_point_lon`→`END_POINT_LON`
+- 移除 `is_deleted=0`，增加 `TYPE=2`（仅取航段，排除作业区 type=3）
+- where 条件同时兼容 `NAME` 和 `route_name`
+
+**3. 告警类型自定义管理**:
+- 新增 `sim_alarm_types` 表（SQLite + MySQL），6个内置类型自动播种（碰撞预警/偏航/最低安全高度/禁飞区/正常遥测/飞行计划）
+- API: `GET/POST /api/data/db/alarm-types`, `PUT/DELETE /api/data/db/alarm-types/<id>`
+- 前端: 管理弹窗（添加/编辑/删除/颜色选择），内置类型锁定不可删除，编辑弹窗下拉框动态加载
+
+**4. 模拟器ID多UAV提取**: `_extract_simulator_id()` 遍历 JSON 全部元素，去重提取 `uniqueProductIdentificationCode` + `realNameRegistrationSign`，最多展示前10个，超过显示"等N架"
+
+#### 修复文件
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `database/json_data_manager.py` | 修改 | `import_from_mock()` 跳过逻辑 + `_extract_simulator_id()` 多ID提取 + 告警类型CRUD函数 |
+| `database/db_manager.py` | 修改 | 新增 `sim_alarm_types` 表 DDL |
+| `database/mysql_db_manager.py` | 修改 | 新增 MySQL `sim_alarm_types` 表 + `simulator_id` VARCHAR(128→2048) |
+| `utm_simulator/tools/create_data_scenes.py` | 修改 | `query_air_route()` where兼容NAME + `query_route_elements()` 完全重写 + `_build_waypoints()` 优先segment |
+| `utm_simulator/tools/create_data_scene.py` | 修改 | `query_air_route()` where条件修复 |
+| `test_data_create/偏离航路数据生成(基于航路).py` | 修改 | 全套表名/字段名修正 |
+| `test_data_create/飞行计划告警轨迹点位生成(基于航路).py` | 修改 | 全套表名/字段名修正 |
+| `utm_simulator/web_server.py` | 修改 | 新增4个告警类型API + 导入日志消息优化 |
+| `web/pages/data.html` | 修改 | 新增告警类型管理弹窗+按钮 + 编辑弹窗下拉框动态化 |
+| `web/static/js/data.js` | 修改 | 导入结果显示优化 + 告警类型管理交互 + `formatSimulatorId()` 多ID格式化 |
+
+#### 汇总
+
+| 操作 | 数量 |
+|------|------|
+| 修改文件 | 10 |
+| 新增 API | 4（告警类型 CRUD） |
+| 修复航线查询脚本 | 4 个（表名 `air_route_element`→`air_route_segment`） |
+| 新增数据库表 | 1（`sim_alarm_types`） |
+| 新增前端弹窗 | 1（告警类型管理） |
+
+| 状态 | ✅ 已完成（7 Python 文件语法检查通过） |

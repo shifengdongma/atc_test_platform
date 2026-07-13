@@ -1766,7 +1766,7 @@ def api_db_import_mock():
     """从 mock/ 目录批量导入到数据库。"""
     mgr = _get_json_mgr()
     result = mgr.import_from_mock()
-    _add_log(f"已从 mock/ 导入 {result['imported']} 个文件到数据库")
+    _add_log(f"已从 mock/ 导入: {result.get('imported',0)} 新增, {result.get('updated',0)} 更新, {result.get('skipped',0)} 跳过")
     return jsonify(result)
 
 
@@ -1804,6 +1804,46 @@ def api_db_delete_category(name):
     """删除分类（清空关联文件的分类字段）。"""
     mgr = _get_json_mgr()
     result = mgr.delete_category(name)
+    return jsonify(result)
+
+
+# ── 告警类型自定义管理 API ─────────────────────────────────────────
+
+@app.route("/api/data/db/alarm-types", methods=["GET"])
+def api_db_alarm_types_list():
+    """获取所有告警类型（含自定义颜色、描述等）。"""
+    mgr = _get_json_mgr()
+    types = mgr.list_alarm_types_full()
+    return jsonify({"alarm_types": types})
+
+
+@app.route("/api/data/db/alarm-types", methods=["POST"])
+def api_db_alarm_types_add():
+    """新增自定义告警类型。"""
+    mgr = _get_json_mgr()
+    data = request.get_json(silent=True) or {}
+    result = mgr.add_alarm_type(
+        name=data.get("name", ""),
+        color=data.get("color", "#64748b"),
+        description=data.get("description", ""),
+    )
+    return jsonify(result)
+
+
+@app.route("/api/data/db/alarm-types/<int:type_id>", methods=["PUT"])
+def api_db_alarm_types_update(type_id):
+    """更新告警类型（名称/颜色/描述）。"""
+    mgr = _get_json_mgr()
+    data = request.get_json(silent=True) or {}
+    result = mgr.update_alarm_type(type_id, data)
+    return jsonify(result)
+
+
+@app.route("/api/data/db/alarm-types/<int:type_id>", methods=["DELETE"])
+def api_db_alarm_types_delete(type_id):
+    """删除告警类型（内置类型不可删除）。"""
+    mgr = _get_json_mgr()
+    result = mgr.delete_alarm_type(type_id)
     return jsonify(result)
 
 

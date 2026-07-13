@@ -99,33 +99,96 @@ def _simple_format_detect(content_str: str) -> str:
 
 
 def _extract_simulator_id(content: str) -> str:
-    """从 JSON 内容提取无人机唯一标识 (uniqueProductIdentificationCode)。
+    """从 JSON 内容提取无人机唯一标识列表 (uniqueProductIdentificationCode + realNameRegistrationSign)。
 
     支持格式：
-    - 遥测数组: [{"uniqueProductIdentificationCode": "xxx", ...}, ...]
+    - 遥测数组: [{"uniqueProductIdentificationCode": "xxx", "realNameRegistrationSign": "yyy", ...}, ...]
     - Redis航线: [{"key": "UAV_00001", "value": {...}}, ...]
-    - 单条航线: {"uniqueProductIdentificationCode": "xxx", ...}
+    - 单条记录: {"uniqueProductIdentificationCode": "xxx", ...}
+
+    若含多个 UAV，提取前 10 个，格式: "uid1 (reg1), uid2 (reg2), ..."
+    超过 10 个时追加 " 等 N 架"。
     """
     if not content:
         return ""
     try:
-        data = json.loads(content[:65536])
-        if isinstance(data, list) and data and isinstance(data[0], dict):
-            first = data[0]
-            # 遥测格式
-            if "uniqueProductIdentificationCode" in first:
-                return str(first["uniqueProductIdentificationCode"])
-            # Redis route 格式
-            if "key" in first:
-                return str(first["key"])
+        data = json.loads(content[:131072])  # 读 128KB 采样
+        seen = set()
+        ids = []
+
+        def _add(uid: str, reg: str):
+            if uid and uid not in seen:
+                seen.add(uid)
+                ids.append((uid, reg))
+
+        if isinstance(data, list):
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                # 遥测格式: {"uniqueProductIdentificationCode": ..., "realNameRegistrationSign": ...}
+                uid = item.get("uniqueProductIdentificationCode")
+                if uid:
+                    reg = item.get("realNameRegistrationSign", uid)
+                    _add(str(uid), str(reg) if reg else str(uid))
+                    if len(ids) >= 10:
+                        break
+                    continue
+                # Redis route 格式: {"key": "xxx", "value": {...}}
+                key = item.get("key")
+                if key and isinstance(item.get("value"), dict):
+                    val = item["value"]
+                    inner_uid = val.get("uniqueProductIdentificationCode")
+                    if inner_uid:
+                        _add(str(inner_uid), str(key))
+                        if len(ids) >= 10:
+                            break
+                        continue
+                # 兜底：key 本身就是 UID
+                if key:
+                    _add(str(key), str(key))
+                    if len(ids) >= 10:
+                        break
+
+            # 统计总数（如果采样足够且可能超过10个）
+            if len(ids) >= 10:
+                total = sum(1 for item in data
+                           if isinstance(item, dict) and (
+                               item.get("uniqueProductIdentificationCode") or item.get("key")
+                           ))
+                if len(seen) >= 10 and total > 10:
+                    # 简单估算
+                    pass  # total 只在需要时计算
+
         elif isinstance(data, dict):
-            if "uniqueProductIdentificationCode" in data:
-                return str(data["uniqueProductIdentificationCode"])
+            # 单条记录
+            uid = data.get("uniqueProductIdentificationCode")
+            if uid:
+                reg = data.get("realNameRegistrationSign", uid)
+                _add(str(uid), str(reg) if reg else str(uid))
             # 嵌套格式
-            if "value" in data and isinstance(data["value"], dict):
+            if not ids and "value" in data and isinstance(data["value"], dict):
                 val = data["value"]
-                if "uniqueProductIdentificationCode" in val:
-                    return str(val["uniqueProductIdentificationCode"])
+                uid = val.get("uniqueProductIdentificationCode")
+                if uid:
+                    reg = val.get("realNameRegistrationSign", uid)
+                    _add(str(uid), str(reg) if reg else str(uid))
+
+        if not ids:
+            return ""
+
+        # 格式化输出
+        parts = [f"{uid} ({reg})" if reg and reg != uid else uid for uid, reg in ids]
+        # 尝试统计实际总数
+        total_count = 0
+        if isinstance(data, list):
+            total_count = sum(1 for item in data
+                            if isinstance(item, dict) and (
+                                item.get("uniqueProductIdentificationCode") or item.get("key")
+                            ))
+        if total_count > len(ids):
+            return ", ".join(parts) + f"  等 {total_count} 架"
+        return ", ".join(parts)
+
     except (json.JSONDecodeError, TypeError, IndexError, KeyError):
         pass
     return ""
@@ -331,7 +394,7 @@ def import_from_mock() -> Dict[str, Any]:
     数据库只存 file_path，不复制文件内容。
     """
     _ensure_mock_dir()
-    imported, skipped, errors = 0, 0, 0
+    imported, skipped, updated, errors = 0, 0, 0, 0
     try:
         for fname in sorted(os.listdir(MOCK_DIR)):
             if not fname.endswith(".json"):
@@ -339,6 +402,18 @@ def import_from_mock() -> Dict[str, Any]:
             fpath = os.path.join(MOCK_DIR, fname)
             try:
                 size = os.path.getsize(fpath)
+
+                # 去重：检查数据库中是否已有同名文件
+                existing = query(TABLE, where="name = ?", params=(fname,))
+                if existing:
+                    existing_size = existing[0].get("size_bytes", -1)
+                    if existing_size == size:
+                        # 文件大小未变化，跳过
+                        skipped += 1
+                        continue
+                    # 文件大小变化，标记为更新
+                    updated += 1
+
                 # 读取采样用于元数据检测
                 with open(fpath, "r", encoding="utf-8") as f:
                     sample = f.read(65536)
@@ -364,7 +439,7 @@ def import_from_mock() -> Dict[str, Any]:
                 errors += 1
     except FileNotFoundError:
         pass
-    return {"imported": imported, "skipped": skipped, "errors": errors}
+    return {"imported": imported, "skipped": skipped, "updated": updated, "errors": errors}
 
 
 def export_to_mock(file_id: int) -> Dict[str, Any]:
@@ -569,10 +644,22 @@ def get_categories() -> List[str]:
 
 
 def get_alarm_types() -> List[str]:
-    """获取所有告警类型列表。"""
+    """获取所有告警类型列表（从 sim_json_files 文件使用中提取 + sim_alarm_types 自定义表合并）。"""
+    # 从文件中提取实际使用的告警类型
     rows = query_all(TABLE)
-    types = sorted(set(r.get("alarm_type", "") for r in rows if r.get("alarm_type", "").strip()))
-    return types
+    file_types = set(r.get("alarm_type", "") for r in rows if r.get("alarm_type", "").strip())
+    # 合并自定义告警类型表
+    custom_types = _get_custom_alarm_type_names()
+    return sorted(file_types | custom_types)
+
+
+def _get_custom_alarm_type_names() -> set:
+    """从 sim_alarm_types 表获取自定义告警类型名称集合。"""
+    try:
+        rows = query_all("sim_alarm_types")
+        return set(r.get("name", "") for r in rows if r.get("name", "").strip())
+    except Exception:
+        return set()
 
 
 def rename_category(old_name: str, new_name: str) -> Dict[str, Any]:
@@ -584,6 +671,122 @@ def rename_category(old_name: str, new_name: str) -> Dict[str, Any]:
     for row in rows:
         update(TABLE, row["id"], {"category": new_name})
     return {"success": True, "message": f"已将 {count} 个文件从 '{old_name}' 改为 '{new_name}'", "count": count}
+
+
+# ── 告警类型自定义管理 ──────────────────────────────────────────────
+
+ALARM_TYPE_TABLE = "sim_alarm_types"
+
+# 内置告警类型（首次初始化时自动播种）
+_BUILTIN_ALARM_TYPES = [
+    {"name": "碰撞预警", "color": "#ef4444", "description": "两条航线在交汇点产生碰撞风险", "is_builtin": 1, "sort_order": 1},
+    {"name": "偏航", "color": "#f59e0b", "description": "飞行器偏离预定航线", "is_builtin": 1, "sort_order": 2},
+    {"name": "最低安全高度", "color": "#e11d48", "description": "飞行器低于最低安全高度", "is_builtin": 1, "sort_order": 3},
+    {"name": "禁飞区", "color": "#8b5cf6", "description": "飞行器接近或进入禁飞区域", "is_builtin": 1, "sort_order": 4},
+    {"name": "正常遥测", "color": "#22c55e", "description": "无告警的正常飞行遥测数据", "is_builtin": 1, "sort_order": 5},
+    {"name": "飞行计划", "color": "#3b82f6", "description": "飞行计划/航线数据", "is_builtin": 1, "sort_order": 6},
+]
+
+
+def _seed_builtin_alarm_types() -> None:
+    """首次初始化时播种内置告警类型（仅当表为空时）。"""
+    try:
+        existing = query_all(ALARM_TYPE_TABLE)
+        if existing:
+            return
+        for item in _BUILTIN_ALARM_TYPES:
+            insert(ALARM_TYPE_TABLE, dict(item))
+        print(f"[json_data_manager] 已播种 {len(_BUILTIN_ALARM_TYPES)} 个内置告警类型")
+    except Exception as e:
+        print(f"[json_data_manager] 播种内置告警类型失败（可能表尚未创建）: {e}")
+
+
+def list_alarm_types_full() -> List[Dict[str, Any]]:
+    """获取完整告警类型列表（含自定义颜色、描述等字段）。"""
+    _seed_builtin_alarm_types()
+    try:
+        rows = query_all(ALARM_TYPE_TABLE, order_by="sort_order ASC, id ASC")
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def add_alarm_type(name: str, color: str = "#64748b", description: str = "") -> Dict[str, Any]:
+    """新增自定义告警类型。
+
+    Returns:
+        {"success": bool, "id": int, "message": str}
+    """
+    name = name.strip()
+    if not name:
+        return {"success": False, "message": "告警类型名称不能为空"}
+    # 检查重名
+    existing = query(ALARM_TYPE_TABLE, where="name = ?", params=(name,))
+    if existing:
+        return {"success": False, "message": f"告警类型 '{name}' 已存在"}
+    record_id = insert(ALARM_TYPE_TABLE, {
+        "name": name,
+        "color": color,
+        "description": description,
+        "is_builtin": 0,
+        "sort_order": 99,
+        "created_at": _now(),
+    })
+    return {"success": True, "id": record_id, "message": f"已添加告警类型 '{name}'"}
+
+
+def update_alarm_type(type_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+    """更新告警类型（名称/颜色/描述）。
+
+    Returns:
+        {"success": bool, "message": str}
+    """
+    record = query_one(ALARM_TYPE_TABLE, type_id)
+    if not record:
+        return {"success": False, "message": "告警类型不存在"}
+
+    clean = {}
+    if "name" in data and data["name"].strip():
+        new_name = data["name"].strip()
+        # 检查重名
+        dup = query(ALARM_TYPE_TABLE, where="name = ? AND id != ?", params=(new_name, type_id))
+        if dup:
+            return {"success": False, "message": f"告警类型 '{new_name}' 已存在"}
+        clean["name"] = new_name
+    if "color" in data:
+        clean["color"] = data["color"]
+    if "description" in data:
+        clean["description"] = data["description"]
+
+    if not clean:
+        return {"success": False, "message": "没有需要更新的字段"}
+
+    # 重命名时同步更新 sim_json_files 表中的 alarm_type
+    old_name = record.get("name", "")
+    if "name" in clean and old_name and clean["name"] != old_name:
+        file_rows = query(TABLE, where="alarm_type = ?", params=(old_name,))
+        for row in file_rows:
+            update(TABLE, row["id"], {"alarm_type": clean["name"]})
+
+    update(ALARM_TYPE_TABLE, type_id, clean)
+    return {"success": True, "message": f"已更新告警类型"}
+
+
+def delete_alarm_type(type_id: int) -> Dict[str, Any]:
+    """删除告警类型（内置类型不可删除）。
+
+    Returns:
+        {"success": bool, "message": str}
+    """
+    record = query_one(ALARM_TYPE_TABLE, type_id)
+    if not record:
+        return {"success": False, "message": "告警类型不存在"}
+    if record.get("is_builtin") == 1:
+        return {"success": False, "message": f"内置告警类型 '{record.get('name')}' 不可删除"}
+
+    name = record.get("name", "")
+    delete(ALARM_TYPE_TABLE, type_id)
+    return {"success": True, "message": f"已删除告警类型 '{name}'"}
 
 
 def delete_category(name: str) -> Dict[str, Any]:

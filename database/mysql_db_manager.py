@@ -177,7 +177,7 @@ _MYSQL_TABLE_DDL = {
             `category`     VARCHAR(64) DEFAULT 'route',
             `alarm_type`   VARCHAR(64) DEFAULT '' COMMENT '告警类型',
             `file_path`    VARCHAR(1024) DEFAULT '' COMMENT '本地文件路径',
-            `simulator_id` VARCHAR(128) DEFAULT '' COMMENT '模拟器ID(无人机唯一标识)',
+            `simulator_id` VARCHAR(2048) DEFAULT '' COMMENT '模拟器ID(无人机唯一标识，多个以逗号分隔)',
             `linked_route` VARCHAR(256) DEFAULT '' COMMENT '关联航线名称',
             `size_bytes`   INT DEFAULT 0,
             `source`       VARCHAR(32) DEFAULT 'manual' COMMENT '来源: manual/import/upload/generated',
@@ -211,6 +211,17 @@ _MYSQL_TABLE_DDL = {
             `started_at`  DATETIME,
             `finished_at` DATETIME
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='任务执行日志表'
+    """,
+    "sim_alarm_types": """
+        CREATE TABLE IF NOT EXISTS `sim_alarm_types` (
+            `id`          INT AUTO_INCREMENT PRIMARY KEY,
+            `name`        VARCHAR(128) NOT NULL UNIQUE,
+            `color`       VARCHAR(16) DEFAULT '#64748b' COMMENT '显示颜色',
+            `description` VARCHAR(256) DEFAULT '' COMMENT '类型说明',
+            `is_builtin`  TINYINT DEFAULT 0 COMMENT '是否内置(1=内置不可删除)',
+            `sort_order`  INT DEFAULT 0,
+            `created_at`  DATETIME DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='告警类型自定义表'
     """,
 }
 

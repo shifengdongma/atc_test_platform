@@ -242,7 +242,7 @@ def parse_polygon(polygon_val: Any) -> List[Dict[str, float]]:
 
 
 def query_air_route(route_name: Optional[str] = None, route_id: Optional[int] = None) -> List[Dict[str, Any]]:
-    """查询 air_route 表"""
+    """查询 air_route 表（下游 ATC_DKWRJ_TEST 数据库），兼容 NAME/route_name 字段名。"""
     if not HAS_DB:
         print("[错误] 数据库客户端不可用，请确保已安装 dmPython 且 dmdbclient.py 在路径中")
         return []
@@ -253,9 +253,9 @@ def query_air_route(route_name: Optional[str] = None, route_id: Optional[int] = 
 
     conditions = []
     if route_name:
-        conditions.append(f"route_name = '{route_name}'")
+        conditions.append(f"(NAME = '{route_name}' OR route_name = '{route_name}')")
     if route_id is not None:
-        conditions.append(f"id = {route_id}")
+        conditions.append(f"ID = {route_id}")
 
     where = " AND ".join(conditions) if conditions else None
 
@@ -264,7 +264,7 @@ def query_air_route(route_name: Optional[str] = None, route_id: Optional[int] = 
         for table_name in ["air_route", "AIR_ROUTE"]:
             try:
                 data = client.query(table_name=table_name, where=where)
-                if data is not None:
+                if data:
                     client.close()
                     return data
             except Exception:

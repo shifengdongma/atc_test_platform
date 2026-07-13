@@ -74,7 +74,7 @@ function renderFileRow(f) {
       '<button class="btn-tiny" onclick="downloadFile(' + f.id + ')" title="下载">⬇</button>' +
       '<button class="btn-tiny" onclick="deleteDbFile(' + f.id + ')" title="删除">🗑</button>' +
     '</td>' +
-    '<td style="font-family:Consolas,monospace;font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;" title="' + escHtml(f.simulator_id||'') + '">' + escHtml(f.simulator_id||'-') + '</td>' +
+    '<td style="font-family:Consolas,monospace;font-size:10px;max-width:140px;overflow:hidden;text-overflow:ellipsis;" title="' + escHtml(f.simulator_id||'') + '">' + formatSimulatorId(f.simulator_id) + '</td>' +
     '<td>' + routeHtml + '</td>' +
     '<td style="font-family:Consolas,monospace;color:#4CAF50;cursor:pointer;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" onclick="previewFile(' + f.id + ')" title="' + escHtml(f.name||'') + '">' + escHtml(f.name||'') + '</td>' +
     '<td>' + (f.size_bytes ? formatSize(f.size_bytes) : '-') + '</td>' +
@@ -299,6 +299,7 @@ window.editFile = async function(id) {
 
     $('#edit-modal').style.display = 'flex';
     $('#edit-modal').dataset.editId = id;
+    loadAlarmTypeSelect();
   } catch(e) { showToast('加载失败: ' + e.message, 'error'); }
 };
 
@@ -314,6 +315,7 @@ function showEditModal() {
   $('#edit-size-warning').style.display = 'none';
   $('#edit-modal').style.display = 'flex';
   delete $('#edit-modal').dataset.editId;
+  loadAlarmTypeSelect();
 }
 
 function hideEditModal() {
@@ -395,7 +397,9 @@ $('#file-upload-input').addEventListener('change', async function() {
 $('#btn-data-import').addEventListener('click', async function() {
   showToast('正在从 mock/ 导入...', 'info');
   var result = await apiPost('/api/data/db/import');
-  showToast('导入完成: ' + (result.imported||0) + ' 个文件, ' + (result.errors||0) + ' 个错误', 'success');
+  var msg = '导入完成: ' + (result.imported||0) + ' 新增, ' + (result.updated||0) + ' 更新, ' + (result.skipped||0) + ' 跳过';
+  if (result.errors) msg += ', ' + result.errors + ' 个错误';
+  showToast(msg, 'success');
   loadFiles(currentPage);
   loadCategoryFilter();
 });
@@ -581,6 +585,169 @@ $('#new-category-name').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') $('#btn-category-add').click();
 });
 
+// ── 告警类型管理弹窗 ──────────────────────────────────────────────
+var alarmTypeModal = $('#alarm-type-modal');
+
+function showAlarmTypeModal() {
+  alarmTypeModal.style.display = 'flex';
+  loadAlarmTypeList();
+}
+function hideAlarmTypeModal() {
+  alarmTypeModal.style.display = 'none';
+}
+
+$('#btn-alarm-type-manage').addEventListener('click', showAlarmTypeModal);
+$('#btn-alarm-type-modal-close').addEventListener('click', hideAlarmTypeModal);
+alarmTypeModal.addEventListener('click', function(e) {
+  if (e.target === this) hideAlarmTypeModal();
+});
+
+async function loadAlarmTypeList() {
+  var el = $('#alarm-type-list');
+  try {
+    var data = await apiGet('/api/data/db/alarm-types');
+    var types = data.alarm_types || [];
+    if (!types.length) {
+      el.innerHTML = '<div class="empty-hint">暂无告警类型</div>';
+      return;
+    }
+    el.innerHTML = types.map(function(t) {
+      var isBuiltin = t.is_builtin === 1;
+      var badge = '<span class="alarm-badge" style="background:' + escHtml(t.color || '#64748b') + '20;color:' + escHtml(t.color || '#64748b') + ';border:1px solid ' + escHtml(t.color || '#64748b') + ';padding:2px 8px;border-radius:4px;font-size:12px;display:inline-block;min-width:60px;text-align:center;">' + escHtml(t.name) + '</span>';
+      var lockIcon = isBuiltin ? ' 🔒' : '';
+      var actions = isBuiltin
+        ? '<span style="font-size:11px;color:var(--text-dim);">内置</span>'
+        : ('<button class="btn-tiny alarm-btn-rename">✏️</button>' +
+           '<button class="btn-tiny alarm-btn-delete">🗑</button>');
+      return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px;border-bottom:1px solid rgba(42,63,86,0.3);">' +
+        '<div style="display:flex;align-items:center;gap:10px;">' +
+          badge +
+          '<span class="alarm-desc" style="font-size:12px;color:var(--text-dim);">' + escHtml(t.description || '') + '</span>' +
+        '</div>' +
+        '<span class="alarm-row-actions" style="display:flex;gap:4px;align-items:center;">' +
+          '<input type="text" class="alarm-rename-input" value="' + escHtml(t.name) + '" style="display:none;width:120px;padding:2px 6px;background:#0d1b2a;border:1px solid var(--accent);color:var(--text);border-radius:3px;font-size:12px;">' +
+          '<input type="color" class="alarm-color-input" value="' + escHtml(t.color || '#64748b') + '" style="display:none;width:30px;height:24px;padding:0;border:1px solid var(--accent);border-radius:3px;">' +
+          '<button class="btn-tiny alarm-btn-save" style="display:none;color:#2ecc71;">✓</button>' +
+          '<button class="btn-tiny alarm-btn-cancel" style="display:none;">✕</button>' +
+          actions +
+          lockIcon +
+        '</span>' +
+      '</div>';
+    }).join('');
+
+    // 编辑按钮
+    el.querySelectorAll('.alarm-btn-rename').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var row = btn.closest('div');
+        row.querySelector('.alarm-desc').style.display = 'none';
+        row.querySelector('.alarm-row-actions').querySelector('.alarm-btn-rename').style.display = 'none';
+        row.querySelector('.alarm-row-actions').querySelector('.alarm-btn-delete').style.display = 'none';
+        row.querySelector('.alarm-rename-input').style.display = '';
+        row.querySelector('.alarm-color-input').style.display = '';
+        row.querySelector('.alarm-btn-save').style.display = '';
+        row.querySelector('.alarm-btn-cancel').style.display = '';
+        row.querySelector('.alarm-rename-input').focus();
+      });
+    });
+
+    // 取消按钮
+    el.querySelectorAll('.alarm-btn-cancel').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var row = btn.closest('div');
+        row.querySelector('.alarm-desc').style.display = '';
+        row.querySelector('.alarm-row-actions').querySelector('.alarm-btn-rename').style.display = '';
+        row.querySelector('.alarm-row-actions').querySelector('.alarm-btn-delete').style.display = '';
+        row.querySelector('.alarm-rename-input').style.display = 'none';
+        row.querySelector('.alarm-color-input').style.display = 'none';
+        row.querySelector('.alarm-btn-save').style.display = 'none';
+        row.querySelector('.alarm-btn-cancel').style.display = 'none';
+      });
+    });
+
+    // 保存按钮
+    el.querySelectorAll('.alarm-btn-save').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        var row = btn.closest('div');
+        var idx = Array.from(el.children).indexOf(row);
+        var t = types[idx];
+        if (!t) return;
+        var newName = row.querySelector('.alarm-rename-input').value.trim();
+        var newColor = row.querySelector('.alarm-color-input').value;
+        if (!newName) { showToast('名称不能为空', 'error'); return; }
+        var result = await apiPostWithMethod('/api/data/db/alarm-types/' + t.id, {
+          name: newName,
+          color: newColor,
+        }, 'PUT');
+        if (result.success) {
+          showToast(result.message, 'success');
+          loadAlarmTypeList();
+          loadCategoryFilter();
+        } else {
+          showToast(result.message || '更新失败', 'error');
+        }
+      });
+    });
+
+    // 删除按钮
+    el.querySelectorAll('.alarm-btn-delete').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        var row = btn.closest('div');
+        var idx = Array.from(el.children).indexOf(row);
+        var t = types[idx];
+        if (!t) return;
+        if (!confirm('确定删除告警类型 "' + t.name + '"？')) return;
+        var resp = await fetch('/api/data/db/alarm-types/' + t.id, { method: 'DELETE' });
+        var result = await resp.json();
+        showToast(result.message, result.success ? 'success' : 'error');
+        loadAlarmTypeList();
+        loadCategoryFilter();
+      });
+    });
+  } catch(e) {
+    el.innerHTML = '<div class="empty-hint">加载失败: ' + e.message + '</div>';
+  }
+}
+
+// 添加新告警类型
+$('#btn-alarm-type-add').addEventListener('click', async function() {
+  var name = $('#new-alarm-type-name').value.trim();
+  var color = $('#new-alarm-type-color').value;
+  if (!name) { showToast('请输入告警类型名称', 'error'); return; }
+  var result = await apiPostWithMethod('/api/data/db/alarm-types', {
+    name: name,
+    color: color,
+    description: '',
+  }, 'POST');
+  if (result.success) {
+    showToast(result.message, 'success');
+    $('#new-alarm-type-name').value = '';
+    loadAlarmTypeList();
+    loadCategoryFilter();
+  } else {
+    showToast(result.message || '添加失败', 'error');
+  }
+});
+
+$('#new-alarm-type-name').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') $('#btn-alarm-type-add').click();
+});
+
+// 动态填充编辑弹窗中的告警类型下拉框
+async function loadAlarmTypeSelect() {
+  var sel = $('#edit-alarm-type');
+  if (!sel) return;
+  var curVal = sel.value;
+  try {
+    var data = await apiGet('/api/data/db/alarm-types');
+    var types = data.alarm_types || [];
+    sel.innerHTML = '<option value="">自动检测</option>' +
+      types.map(function(t) {
+        return '<option value="' + escHtml(t.name) + '">' + escHtml(t.name) + '</option>';
+      }).join('');
+    sel.value = curVal;
+  } catch(e) { /* keep defaults */ }
+}
+
 // ── apiPostWithMethod — 支持 PUT/DELETE ─────────────────────────────
 async function apiPostWithMethod(url, body, method) {
   method = method || 'POST';
@@ -601,6 +768,24 @@ $('#data-alarm-type').addEventListener('change', function() { loadFiles(1); });
 $('#btn-data-refresh').addEventListener('click', function() { loadFiles(currentPage); });
 
 // ── 工具 ───────────────────────────────────────────────────────────
+function formatSimulatorId(simId) {
+  // 将逗号分隔的 UAV ID 列表格式化显示（最多展示前 2 个，超出显示 +N）
+  if (!simId) return '-';
+  var parts = simId.split(', ');
+  // 检查末尾是否有 " 等 N 架" 后缀
+  var last = parts[parts.length - 1];
+  var totalSuffix = '';
+  if (last && last.indexOf('等') === 0 && last.indexOf('架') > 0) {
+    totalSuffix = last;
+    parts.pop();
+  }
+  if (parts.length <= 2) {
+    return escHtml(simId);
+  }
+  var shown = parts.slice(0, 2).join(', ');
+  return escHtml(shown + ', ...' + (totalSuffix ? ' ' + totalSuffix : ' (+' + (parts.length - 2) + ')'));
+}
+
 function formatSize(bytes) {
   if (!bytes || bytes < 0) return '-';
   if (bytes < 1024) return bytes + ' B';

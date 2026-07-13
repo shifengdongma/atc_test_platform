@@ -3,7 +3,7 @@
 SQLite 数据库管理器 — 本地持久化存储
 
 使用 Python 标准库 sqlite3，数据库文件: utm_simulator/data.db
-管理 4 张表：sim_env_config / sim_json_files / sim_scheduled_tasks / sim_task_logs
+管理 5 张表：sim_env_config / sim_json_files / sim_scheduled_tasks / sim_task_logs / sim_alarm_types
 """
 
 from __future__ import annotations
@@ -76,6 +76,17 @@ _TABLE_DDL = {
             message     TEXT DEFAULT '',
             started_at  TEXT DEFAULT '',
             finished_at TEXT DEFAULT ''
+        )
+    """,
+    "sim_alarm_types": """
+        CREATE TABLE IF NOT EXISTS sim_alarm_types (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL UNIQUE,
+            color       TEXT DEFAULT '#64748b',
+            description TEXT DEFAULT '',
+            is_builtin  INTEGER DEFAULT 0,
+            sort_order  INTEGER DEFAULT 0,
+            created_at  TEXT DEFAULT ''
         )
     """,
 }

@@ -34,6 +34,7 @@
             <option value="">全部告警类型</option>
           </select>
           <button id="btn-category-manage" class="btn btn-small" title="管理分类">📂 分类</button>
+          <button id="btn-alarm-type-manage" class="btn btn-small" title="管理告警类型">🏷️ 告警</button>
           <button id="btn-data-refresh" class="btn btn-small">🔄 刷新</button>
           <button id="btn-data-upload" class="btn btn-small">📤 上传 JSON</button>
           <button id="btn-data-import" class="btn btn-small">📥 导入 mock/</button>
@@ -100,6 +101,24 @@
     </div>
   </div>
 
+  <!-- 告警类型管理弹窗 -->
+  <div id="alarm-type-modal" class="modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:100;justify-content:center;align-items:center;">
+    <div class="modal" style="background:var(--bg-panel);border:1px solid var(--border);border-radius:8px;padding:20px;width:480px;max-height:75vh;overflow-y:auto;">
+      <h3 style="margin-bottom:12px;">🏷️ 管理告警类型</h3>
+      <div style="display:flex;gap:6px;margin-bottom:10px;">
+        <input type="text" id="new-alarm-type-name" placeholder="告警类型名称" style="flex:1;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:13px;">
+        <input type="color" id="new-alarm-type-color" value="#64748b" style="width:36px;height:32px;padding:0;border:1px solid var(--border);border-radius:4px;cursor:pointer;" title="颜色">
+        <button id="btn-alarm-type-add" class="btn btn-small">➕ 添加</button>
+      </div>
+      <div id="alarm-type-list" style="max-height:320px;overflow-y:auto;">
+        <div class="empty-hint">加载中...</div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+        <button id="btn-alarm-type-modal-close" class="btn btn-small">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 编辑/新建弹窗 -->
   <div id="edit-modal" class="modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:100;justify-content:center;align-items:center;">
     <div class="modal" style="background:var(--bg-panel);border:1px solid var(--border);border-radius:8px;padding:20px;width:550px;max-height:85vh;overflow-y:auto;">
@@ -107,7 +126,7 @@
       <div style="margin-bottom:10px;"><label style="font-size:12px;color:var(--text-dim);">文件名 *</label><input type="text" id="edit-name" style="width:100%;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:13px;"></div>
       <div style="display:flex;gap:10px;margin-bottom:10px;">
         <div style="flex:1;"><label style="font-size:12px;color:var(--text-dim);">分类</label><input type="text" id="edit-category" list="category-datalist" style="width:100%;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:13px;" placeholder="输入或选择分类"><datalist id="category-datalist"></datalist></div>
-        <div style="flex:1;"><label style="font-size:12px;color:var(--text-dim);">告警类型</label><select id="edit-alarm-type" style="width:100%;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:13px;"><option value="">自动检测</option><option value="正常遥测">正常遥测</option><option value="碰撞预警">碰撞预警</option><option value="偏航">偏航</option><option value="最低安全高度">最低安全高度</option><option value="禁飞区">禁飞区</option><option value="飞行计划">飞行计划</option></select></div>
+        <div style="flex:1;"><label style="font-size:12px;color:var(--text-dim);">告警类型</label><select id="edit-alarm-type" style="width:100%;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:13px;"><option value="">自动检测</option></select></div>
       </div>
       <div style="display:flex;gap:10px;margin-bottom:10px;">
         <div style="flex:1;"><label style="font-size:12px;color:var(--text-dim);">模拟器ID</label><input type="text" id="edit-simulator-id" style="width:100%;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:13px;" placeholder="无人机唯一标识"></div>

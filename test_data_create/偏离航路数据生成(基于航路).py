@@ -478,7 +478,7 @@ def query_air_route(route_name: str) -> Optional[Dict[str, Any]]:
     if not client.connect():
         return None
 
-    where = f"route_name = '{route_name}'"
+    where = f"(NAME = '{route_name}' OR route_name = '{route_name}')"
     try:
         # 尝试不同大小写的表名
         for table_name in ["air_route", "AIR_ROUTE"]:
@@ -517,9 +517,9 @@ def query_air_route(route_name: str) -> Optional[Dict[str, Any]]:
 
 def query_route_elements(route_id: Any) -> List[Dict[str, float]]:
     """
-    查询 air_route_element 表，根据 route_id 获取航路中心线坐标点。
-    返回按 sequence 排序的航路点列表，每个点为 {"lon": float, "lat": float}。
-    兼容大小写表名和字段名。
+    查询 air_route_segment 表（下游 ATC_DKWRJ_TEST 数据库），根据 AIR_ROUTE_ID 获取航路中心线坐标点。
+    仅查询 TYPE=2 的航段，按 SEGMENT_SEQ 排序。
+    返回航路点列表，每个点为 {"lon": float, "lat": float}。
     """
     if not HAS_DB:
         return []
@@ -529,64 +529,49 @@ def query_route_elements(route_id: Any) -> List[Dict[str, float]]:
         return []
 
     try:
-        # 尝试不同大小写的表名和字段名
         route_id_val = str(route_id)
-        for table_name in ["air_route_element", "AIR_ROUTE_ELEMENT"]:
-            for route_id_col in ["route_id", "ROUTE_ID", "Route_Id"]:
-                for seq_col in ["sequence", "SEQUENCE", "Sequence"]:
-                    for lon_col in ["start_point_lon", "START_POINT_LON", "Start_Point_Lon"]:
-                        for lat_col in ["start_point_lat", "START_POINT_LAT", "Start_Point_Lat"]:
-                            try:
-                                # DmDbClient.query 不支持 order_by 参数，需拼接到 where 中
-                                where = f"{route_id_col} = '{route_id_val}' AND is_deleted = 0 ORDER BY {seq_col} ASC"
-                                data = client.query(
-                                    table_name=table_name,
-                                    where=where,
-                                )
-                                if data:
-                                    points = []
-                                    for row in data:
-                                        try:
-                                            # 读取起点
-                                            lon_val = row.get(lon_col) or row.get("start_point_lon") or row.get("START_POINT_LON")
-                                            lat_val = row.get(lat_col) or row.get("start_point_lat") or row.get("START_POINT_LAT")
-                                            # 读取终点（兼容大小写）
-                                            end_lon_val = (
-                                                row.get("end_point_lon")
-                                                or row.get("END_POINT_LON")
-                                                or row.get("End_Point_Lon")
-                                            )
-                                            end_lat_val = (
-                                                row.get("end_point_lat")
-                                                or row.get("END_POINT_LAT")
-                                                or row.get("End_Point_Lat")
-                                            )
-                                            
-                                            # 添加起点（第一个点或与前一个点不重复）
-                                            if lon_val is not None and lat_val is not None:
-                                                start_pt = {"lon": float(lon_val), "lat": float(lat_val)}
-                                                if not points:
-                                                    points.append(start_pt)
-                                                elif not (
-                                                    abs(start_pt["lon"] - points[-1]["lon"]) < 1e-9
-                                                    and abs(start_pt["lat"] - points[-1]["lat"]) < 1e-9
-                                                ):
-                                                    points.append(start_pt)
-                                            
-                                            # 添加终点
-                                            if end_lon_val is not None and end_lat_val is not None:
-                                                end_pt = {"lon": float(end_lon_val), "lat": float(end_lat_val)}
-                                                if not (
-                                                    abs(end_pt["lon"] - points[-1]["lon"]) < 1e-9
-                                                    and abs(end_pt["lat"] - points[-1]["lat"]) < 1e-9
-                                                ):
-                                                    points.append(end_pt)
-                                        except (ValueError, TypeError):
-                                            continue
-                                    client.close()
-                                    return points
-                            except Exception:
-                                continue
+        for table_name in ["air_route_segment", "AIR_ROUTE_SEGMENT"]:
+            try:
+                where = f"AIR_ROUTE_ID = '{route_id_val}' AND TYPE = 2 ORDER BY SEGMENT_SEQ ASC"
+                data = client.query(table_name=table_name, where=where)
+                if data:
+                    points = []
+                    for row in data:
+                        try:
+                            # 起点坐标（兼容大小写）
+                            s_lon = (row.get("START_POINT_LON") or row.get("start_point_lon")
+                                     or row.get("Start_Point_Lon"))
+                            s_lat = (row.get("START_POINT_LAT") or row.get("start_point_lat")
+                                     or row.get("Start_Point_Lat"))
+                            # 终点坐标（兼容大小写）
+                            e_lon = (row.get("END_POINT_LON") or row.get("end_point_lon")
+                                     or row.get("End_Point_Lon"))
+                            e_lat = (row.get("END_POINT_LAT") or row.get("end_point_lat")
+                                     or row.get("End_Point_Lat"))
+
+                            if s_lon is not None and s_lat is not None:
+                                start_pt = {"lon": float(s_lon), "lat": float(s_lat)}
+                                if not points:
+                                    points.append(start_pt)
+                                elif not (
+                                    abs(start_pt["lon"] - points[-1]["lon"]) < 1e-9
+                                    and abs(start_pt["lat"] - points[-1]["lat"]) < 1e-9
+                                ):
+                                    points.append(start_pt)
+
+                            if e_lon is not None and e_lat is not None:
+                                end_pt = {"lon": float(e_lon), "lat": float(e_lat)}
+                                if not (
+                                    abs(end_pt["lon"] - points[-1]["lon"]) < 1e-9
+                                    and abs(end_pt["lat"] - points[-1]["lat"]) < 1e-9
+                                ):
+                                    points.append(end_pt)
+                        except (ValueError, TypeError):
+                            continue
+                    client.close()
+                    return points
+            except Exception:
+                continue
         client.close()
         return []
     except Exception as e:
@@ -1240,23 +1225,24 @@ def main():
         or route_record.get("ROUTE_NAME")
         or args.route_name
     )
-    min_safe_alt = route_record.get("minimum_safe_altitude") or route_record.get("MINIMUM_SAFE_ALTITUDE")
+    min_safe_alt = (route_record.get("minimum_safe_altitude") or route_record.get("MINIMUM_SAFE_ALTITUDE")
+                    or route_record.get("Minimum_Safe_Altitude"))
     vert_alt = route_record.get("vertical_altitude") or route_record.get("VERTICAL_ALTITUDE")
     width = route_record.get("width") or route_record.get("WIDTH")
 
-    # 获取航线 ID（用于查询 air_route_element）
-    route_id = route_record.get("id") or route_record.get("ID") or route_record.get("Id")
+    # 获取航线 ID（用于查询 air_route_segment）
+    route_id = route_record.get("ID") or route_record.get("id") or route_record.get("Id")
 
-    # 优先从 air_route_element 表查询航路中心线坐标
+    # 优先从 air_route_segment 表查询航路中心线坐标
     if route_id is not None:
-        print(f"[信息] 从 air_route_element 查询航路点 (route_id={route_id})")
+        print(f"[信息] 从 air_route_segment 查询航路点 (route_id={route_id})")
         route_points = query_route_elements(route_id)
     else:
         route_points = []
 
-    # 兜底：如果 air_route_element 查不到，退回到解析 polygon 字段
+    # 兜底：如果 air_route_segment 查不到，退回到解析 polygon 字段
     if len(route_points) < 2:
-        print("[警告] air_route_element 未查询到航路点，尝试解析 polygon 字段")
+        print("[警告] air_route_segment 未查询到航路点，尝试解析 polygon 字段")
         polygon_val = (
             route_record.get("polygon")
             or route_record.get("POLYGON")
@@ -1265,7 +1251,7 @@ def main():
         route_points = parse_polygon(polygon_val)
 
     if len(route_points) < 2:
-        print("[错误] 航线航路点不足 2 个，请检查 air_route_element 数据或 polygon 字段格式")
+        print("[错误] 航线航路点不足 2 个，请检查 air_route_segment 数据或 polygon 字段格式")
         sys.exit(1)
     # 检测并截断闭合环：如果航路终点接近起点（<500米），可能是闭合多边形
     # 截取单程数据，避免飞行器绕圈往返

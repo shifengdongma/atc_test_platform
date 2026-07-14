@@ -45,6 +45,8 @@ def _safe_run(func, *args, **kwargs) -> Dict[str, Any]:
         return {"success": True, "result": result}
     except SystemExit as e:
         if e.code != 0 and e.code is not None:
+            if isinstance(e.code, str):
+                return {"success": False, "error": e.code}
             return {"success": False, "error": f"脚本异常退出(code={e.code})"}
         return {"success": True, "result": None}
     except Exception as e:

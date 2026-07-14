@@ -2065,3 +2065,309 @@ Docker 容器部署到 Linux 服务器后，后台日志出现 5 类错误：
 | 文件命名 | 11个预设场景改为中文描述名 |
 
 | 状态 | ✅ 已完成 |
+
+---
+
+### 2026-07-14 第八次修复: 碰撞告警错误提示优化
+
+> 问题: 碰撞告警场景生成无交汇点时，后端日志正确显示"未找到交汇点"但前端显示泛化的"脚本异常退出(code=1)"，未透传具体错误原因
+> 备注: 动态仿真 Kafka 遥测缺失问题的修复已回退 — dynamic 模式下 kafka-python 与 Simulator ctypes 的 C-level 堆污染冲突无法在进程内安全解决，需采用进程外桥接方案（如 PlanRunner 子进程）
+
+#### 根因分析
+
+`run_collision()` 中 `print("[错误] 未找到交汇点"); sys.exit(1)` → `_safe_run()` 捕获 SystemExit → 返回 `"脚本异常退出(code=1)"`，具体错误信息 `"未找到交汇点"` 仅打印到控制台，未传回前端。
+
+#### 解决方案
+
+1. **错误消息透传**: `run_collision()` 中 `sys.exit(1)` → `sys.exit("具体消息")`，利用 Python `sys.exit(str)` 将错误消息作为 SystemExit code
+2. **_safe_run 字符串识别**: 新增 `isinstance(e.code, str)` 检查，字符串 code 直接作为 error 返回给前端
+
+#### 修复文件
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `utm_simulator/tools/create_data_scenes.py` | 修改 | `run_collision()` 中 4 处 `sys.exit(1)` → `sys.exit("具体错误")` |
+| `utm_simulator/web_data_gen_bridge.py` | 修改 | `_safe_run()` 识别字符串类型 SystemExit code 并直接返回 |
+
+#### 汇总
+
+| 操作 | 数量 |
+|------|------|
+| 修改文件 | 2 |
+| 修复 Bug | 1 个（碰撞告警错误提示不准确） |
+| sys.exit 消息化 | 4 处 |
+
+| 状态 | ✅ 已完成 |
+
+---
+
+### 2026-07-14: 三大问题系统性修复 — 停止漏洞 + 监视目标数 + 日志采集
+
+> 参考计划: `C:\Users\keda\.claude\plans\1-ctrl-c-2-redis-kafka-redis-3-kafka-swift-yeti.md`
+
+#### 问题 1: Ctrl+C / 关闭仿真后数据注入残留
+
+**根因**: 
+- `web_server.py` SIGINT handler 只清理 `telemetry_bridge` 子进程，不调用 `_sim_runner.stop()`
+- `SimulationRunner._cleanup()` 无法访问 replay_once/scene 模式的 DataSource/SceneEmitter（局部变量）
+- `telemetry_bridge.py` 父进程检测间隔 3 秒，孤儿进程存活窗口过长
+- 碰撞告警消费者 `while True` 无退出条件
+
+**修复**:
+- `web_server.py` `_on_exit_signal()`: 增加 `_sim_runner.stop()` 调用
+- `web_server.py` `SimulationRunner`: 增加 `self._ds` / `self._emitter` 属性 + `_cleanup()` 清理
+- `telemetry_bridge.py`: `WaitForSingleObject` 超时 3000→1000ms
+- `web_server.py`: `while True` → `while _collision_consumer is not None`
+
+#### 问题 2: 非 plan 模式下游"监视目标数"为 0
+
+**根因**: ATC 依赖 Redis `BIZ_DATA:UAV_ROUTE` 写入事件激活追踪。PlanRunner 持续回写触发，其他模式仅写一次无后续触发。
+
+**修复**:
+- `sim_manager.py` `_init_dynamic_mode()`: 航线 JSON 解析 → `_shift_plan_times()` → 重新序列化
+- `sim_manager.py` `_tick_replay()`: 每 30s 刷新所有活跃 UAV 的 Redis 航线时间
+- `web_server.py` scene 分支: `self._emitter` 引用保存
+
+#### 问题 3: 日志缺失 trace / collision_alarm / WebSocket 数据
+
+**根因**:
+- `report_kafka_trace()` 全代码库零调用
+- collision_alarm 字段名 `involvedUavs`/`alertUavList` 与算法文档不符（实际为 `uavList` 嵌套在告警类型对象内）
+- dynamic 模式跳过所有 Kafka 消费
+- 前端缺少 `kafka_collision_alarm` 和 `ws_captured_data` 复选框
+
+**修复**:
+- `sim_manager.py` / `run_plan.py` trace 消费: 增加 `log_streamer.report_kafka_trace()` 推送
+- `web_server.py`: 依据算法文档重写告警字段提取（遍历顶层 key → `uavList`）
+- `web_server.py` `start()`: 移除 dynamic 模式对告警消费者的排除
+- `web/pages/logs.html`: 新增 2 个日志类型复选框
+
+#### 修改文件
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `utm_simulator/web_server.py` | 修改 | SIGINT handler + ds/emitter 引用 + collision_alarm 字段修复 + dynamic 告警启用 + bridge 子进程管理 |
+| `utm_simulator/sim_manager.py` | 修改 | dynamic 时间平移 + replay 周期性刷新 + trace LogStreamer 推送 |
+| `utm_simulator/tools/run_plan.py` | 修改 | trace LogStreamer 推送 |
+| `utm_simulator/tools/telemetry_bridge.py` | 修改 | 父进程检测间隔 3000→1000ms |
+| `web/pages/logs.html` | 修改 | 新增 2 个日志类型复选框 |
+
+#### 汇总
+
+| 操作 | 数量 |
+|------|------|
+| 修改文件 | 5 |
+| 修复 Bug | 3 大类（停止漏洞 / 监视目标数 / 日志缺失） |
+| 新增日志推送路径 | 3 处（sim_manager + run_plan trace → LogStreamer） |
+| 新增前端复选框 | 2 个 |
+| 语法验证 | ✅ 全部通过 |
+
+| 状态 | ✅ 已完成 |
+
+---
+
+### 2026-07-14: Docker 部署达梦/MySQL 数据库连接问题修复
+
+> 参考计划: `C:\Users\keda\.claude\plans\d-liyang-code-atc-test-platfrom-docs-doc-purring-cloud.md`
+> 参考文档: `docs\docker报错日志.md`
+
+#### 问题 1: 达梦数据库加密模块加载失败 (-70089)
+
+**根因**: dmPython Linux .so 动态链接 OpenSSL 1.1 (`libssl.so.1.1`)，`python:3.11-slim` (Debian 12 Bookworm) 只有 OpenSSL 3.x (`libssl.so.3`)。
+
+**修复**:
+- `docker/Dockerfile`: 加固 libssl1.1 安装流程（添加 `Acquire::AllowReleaseInfoChange` 重试 + `ldconfig -p` 验证）
+- `atc_api_autotest/api_tools/dmdbclient.py`: `connect()` 检测 -70089 错误码，给出 libssl1.1 缺失的明确提示
+- `database/json_data_manager.py`: `_get_dm_client()` 添加 60s 冷却期，避免短时间重复尝试
+
+#### 问题 2: MySQL 连接 127.0.0.1 被拒绝
+
+**根因**: `docker-compose.yml` 默认值 `1Panel-mysql-Jdmq` 是特定于 1Panel 环境的容器名；代码未区分"未配置"与"使用默认值"。
+
+**修复**:
+- `docker/docker-compose.yml`: 移除 MySQL host/user/password/db 的环境特定默认值，密码类变量加引号保护
+- `database/mysql_db_manager.py`: `_create_mysql_client()` 异常分支改为返回 `None` 而非创建默认 `MysqlDbClient(host="127.0.0.1")`
+
+#### 修改文件
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `docker/Dockerfile` | 修改 | libssl1.1 安装加固（重试 + 验证） |
+| `docker/docker-compose.yml` | 修改 | MySQL 默认值清理 + 密码变量引号保护 |
+| `database/mysql_db_manager.py` | 修改 | except 分支改为返回 None（避免 127.0.0.1 连接） |
+| `atc_api_autotest/api_tools/dmdbclient.py` | 修改 | -70089 错误给出 libssl1.1 提示 |
+| `database/json_data_manager.py` | 修改 | `_get_dm_client()` 添加 60s 失败冷却期 |
+
+#### 汇总
+
+| 操作 | 数量 |
+|------|------|
+| 修改文件 | 5 |
+| 修复 Bug | 2 个（达梦加密模块 + MySQL 误连 127.0.0.1） |
+| 加固改进 | 3 处（Dockerfile 验证 + dmdbclient 提示 + DM 冷却期） |
+
+| 状态 | ✅ 已完成 |
+
+---
+
+### 2026-07-14: Docker 数据库连接问题深度诊断增强（第二轮修复）
+
+> 参考计划: `d-liyang-code-atc-test-platfrom-docs-doc-luminous-hippo.md`
+> 参考文档: `docs\docker报错日志.md`
+
+#### 问题 1: 命名卷缓存旧代码导致 AttributeError（**核心发现**）
+
+**根因**: `docker-compose.yml` 中 `utm-database:/app/database` 是 Docker 命名卷，首次创建时从镜像复制内容后**永久保留**。镜像重建后，卷中旧 `json_data_manager.py`（不含 `query_available_routes` 函数）覆盖镜像新代码。
+
+**这就是用户重建容器多次仍然报错的原因。**
+
+**修复**:
+- `docker/docker-compose.yml`: 在 `utm-database` 卷挂载处和 `volumes` 声明处添加醒目的警告注释
+- `docker/entrypoint.sh`: 启动时 `grep` 检测 `json_data_manager.py` 是否包含 `query_available_routes`，缺失时输出 CRITICAL 警告和修复步骤
+- 提供 1Panel 用户操作指南：先备份 SQLite → 删除命名卷 → 重新构建 → 启动
+
+#### 问题 2: MySQL 配置来源不透明
+
+**根因**: `config.py:_load_mysql_config()` 无诊断日志，无法判断 MySQL host 来自 env.py 还是环境变量，也无法确认 `configured` 状态。
+
+**修复**:
+- `common/config.py`: `_load_mysql_config()` 增加完整的配置来源追踪日志（每个 env.py 路径、环境变量覆盖、最终摘要和 SOURCE 说明）
+- `database/mysql_db_manager.py`: `_create_mysql_client()` 打印 `configured/host/port/database` 决策信息；存储 `_mysql_conn_target` 供错误路径使用
+
+#### 问题 3: 达梦 OpenSSL 库验证不完整
+
+**根因**: Dockerfile 仅验证 `libssl.so.1.1`，未验证 `libcrypto.so.1.1`（dmPython 同时需要两者）。
+
+**修复**:
+- `docker/Dockerfile`: libssl1.1 安装拆分为独立 RUN 层；同时验证 `libssl.so.1.1` + `libcrypto.so.1.1`；添加 `dpkg -L` 确认包文件；添加 `ENV LD_LIBRARY_PATH`
+- `database/json_data_manager.py`: 模块加载时使用 `ctypes.CDLL` 检测两个 .so 库可用性；`_get_dm_client()` 首次调用打印 `LD_LIBRARY_PATH` 和 dmdbclient.py 路径；连接失败打印完整 traceback
+
+#### 问题 4: Docker 启动时缺乏综合诊断
+
+**修复**:
+- `docker/entrypoint.sh`: 新增"数据库配置诊断"区块，包含 MySQL 环境变量检查、env.py 解析与 127.0.0.1 警告、达梦 OpenSSL 库检测（`ldconfig -p`）、命名卷代码版本检查
+
+#### 修改文件
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `common/config.py` | 修改 | `_load_mysql_config()` 添加配置来源追踪日志 |
+| `database/mysql_db_manager.py` | 修改 | `_create_mysql_client()` 打印决策信息 + `_mysql_conn_target` |
+| `database/json_data_manager.py` | 修改 | 模块加载时 OpenSSL 库检测 + 达梦连接诊断增强 |
+| `docker/Dockerfile` | 修改 | libssl1.1 独立 RUN 层 + 双库验证 + LD_LIBRARY_PATH |
+| `docker/entrypoint.sh` | 修改 | 新增数据库配置诊断区块（MySQL/达梦/命名卷） |
+| `docker/docker-compose.yml` | 修改 | 命名卷陷阱警告注释（挂载处 + volumes 声明处） |
+
+#### 汇总
+
+| 操作 | 数量 |
+|------|------|
+| 修改文件 | 6 |
+| 新增诊断日志点 | 15+ 处 |
+| 加固 Dockerfile 验证 | 3 处（双库检查 + dpkg 验证 + LD_LIBRARY_PATH） |
+| 发现核心根因 | 1 个（命名卷缓存旧代码） |
+
+| 状态 | ✅ 已完成 |
+
+---
+
+### 2026-07-14: 达梦 dmPython -70089 加密模块加载失败修复（第三轮修复）
+
+> 参考文档: `docs/docker报错日志.md`、`docs/docke容器日志`
+
+#### 问题
+
+Docker 容器中达梦数据库连接持续报 `[CODE:-70089]Encryption module failed to load`，尽管：
+- `libssl.so.1.1` 和 `libcrypto.so.1.1` 已安装并通过 ldconfig 验证
+- `_check_ssl11()` 使用 `ctypes.CDLL(..., RTLD_GLOBAL)` 预加载通过
+- `LD_LIBRARY_PATH` 已设置
+
+**根因**: dmPython wheel 自带 `dmssl/libcrypto.so`（可能还有 `libssl.so`），在 Debian 12 (OpenSSL 3.x 为主) 环境中，dmPython C 扩展加载时优先使用自带的加密库，与系统 OpenSSL 1.1 库产生符号冲突，导致加密模块初始化失败。`ctypes.CDLL` 预加载虽将系统库符号导出到全局符号表，但 dmPython 扩展可能通过 RPATH 直接加载自带库，绕过了预加载的符号。
+
+#### 修复方案（三层防线）
+
+**第 1 层 — Dockerfile 源头替换（主要修复）**:
+- `pip install dmPython` 后，新增 RUN 步骤：扫描 site-packages/dmssl/ 目录
+- 将 `libcrypto.so`、`libssl.so` 替换为指向系统 `/usr/lib/x86_64-linux-gnu/lib{crypto,ssl}.so.1.1` 的软链接
+- 保留 `.bak` 备份，输出修复前后目录状态
+
+**第 2 层 — entrypoint.sh 运行时强制（安全网）**:
+- 启动 Python 前 `export LD_PRELOAD` 强制系统 OpenSSL 1.1 库最先加载
+- 文件不存在时静默跳过
+
+**第 3 层 — json_data_manager.py 预加载加固（兜底）**:
+- `_check_ssl11()` 改用绝对路径 `/usr/lib/x86_64-linux-gnu/lib{ssl,crypto}.so.1.1` 加载
+- 绝对路径失败时回退 soname 搜索，增强非标准路径环境的兼容性
+
+#### 修改文件
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `docker/Dockerfile` | 修改 | 新增 dmssl 自带加密库 → 系统 OpenSSL 1.1 软链接替换 |
+| `docker/entrypoint.sh` | 修改 | exec python 前添加 LD_PRELOAD 导出 |
+| `database/json_data_manager.py` | 修改 | `_check_ssl11()` 改用绝对路径 + 回退 soname |
+
+#### 汇总
+
+| 操作 | 数量 |
+|------|------|
+| 修改文件 | 3 |
+| 修复 Bug | 1 个（达梦加密模块 -70089） |
+| 防线层数 | 3 层（Dockerfile 源头 + entrypoint 运行时 + Python 预加载） |
+
+| 状态 | ❌ 部分无效（见下轮修正） |
+
+> ⚠ **修正说明**：第 1 层（Dockerfile 软链接替换 dmssl/libcrypto.so → 系统 OpenSSL 1.1）方案错误。dmPython 自带的加密库是达梦定制版本（含 Dameng 专有符号），替换后反而缺失关键符号。该层已在第四轮修复中回退。LD_PRELOAD + ctypes 预加载保留但不足以单独修复 -70089。
+
+---
+
+### 2026-07-14: 达梦 -70089 + MySQL Access denied 最终修复（第四轮）
+
+> 参考文档: `docs/docker容器日志.md`、`docs/docker报错日志.md`、`docs/命令语句.md`
+
+#### 达梦 -70089 根因定位（经容器内验证）
+
+前一轮的"软链接替换 dmssl/libcrypto.so"方案错误，已回退 Dockerfile 中的软链接步骤。经容器内逐步诊断确认：
+
+1. dmPython C 扩展（`.cpython-311-x86_64-linux-gnu.so`）不直接链接 libssl/libcrypto
+2. DPI 核心库 `libdmdpi-11ad26b6.so` 也不直接链接 OpenSSL
+3. **加密模块在运行时通过 `dlopen("libcrypto.so")` 动态加载**
+4. `ldconfig` 搜索路径中没有 dmssl 目录，DPI 库找不到自带的 `libcrypto.so`
+5. 将 dmssl 加入 `LD_LIBRARY_PATH` 后 -70089 消失，变为正常的认证错误 -2501 ✅
+
+**修复**：
+- `docker/Dockerfile`: `LD_LIBRARY_PATH` 首位加入 `/usr/local/lib/python3.11/site-packages/dmssl`
+- `docker/entrypoint.sh`: 保留 `LD_PRELOAD`（安全网）
+- `database/json_data_manager.py`: 保留增强的 `_check_ssl11()` 预加载
+
+#### MySQL Access denied 根因定位
+
+1. MySQL 用户 `utm@'%'` 认证插件为 `caching_sha2_password`
+2. 服务器 `mysql_native_password` 插件未加载，无法通过 ALTER USER 切换
+3. pymysql 需 SSL/TLS 连接才能完成 `caching_sha2_password` 认证
+4. 原 `mysqldbclient.py` 的 `connect()` 未传 SSL 参数
+
+**修复**：
+- `atc_api_autotest/api_tools/mysqldbclient.py`: `connect()` 新增 `ssl={}` 参数，启用 TLS 不验证证书
+
+容器内验证 `pymysql.connect(..., ssl={})` 连接成功 ✅
+
+#### 修改文件
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `docker/Dockerfile` | 修改 | LD_LIBRARY_PATH 首位加入 dmssl 目录；回退软链接替换步骤 |
+| `atc_api_autotest/api_tools/mysqldbclient.py` | 修改 | connect() 新增 ssl={} 支持 caching_sha2_password |
+| `docker/entrypoint.sh` | 无变化 | LD_PRELOAD 保留 |
+| `database/json_data_manager.py` | 无变化 | ctypes 预加载保留 |
+
+#### 汇总
+
+| 操作 | 数量 |
+|------|------|
+| 修改文件 | 2 |
+| 修复 Bug | 2 个（达梦 -70089 + MySQL Access denied） |
+| 回退错误方案 | 1 个（Dockerfile 软链接替换 dmssl） |
+| 诊断发现 | DPI 库 dlopen 加载路径是根因，非符号冲突 |
+
+| 状态 | ✅ 已完成 |

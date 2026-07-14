@@ -3,7 +3,7 @@
 定时任务调度器 — cron 表达式驱动的仿真任务自动执行
 
 使用后台线程每 30 秒检查 cron 匹配，触发仿真任务执行。
-任务和日志存储在 SQLite (data.db)。
+任务和日志通过 mysql_db_manager 存储（MySQL 优先，不可用时自动降级 SQLite）。
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Callable
 
-from db_manager import (
+from mysql_db_manager import (
     query, query_one, insert, update, delete, query_all, _now, init_tables,
 )
 

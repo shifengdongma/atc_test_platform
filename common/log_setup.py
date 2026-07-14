@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from datetime import datetime, timezone
 from typing import Optional
@@ -83,19 +84,24 @@ def setup_logging(
     root = logging.getLogger()
     root.setLevel(getattr(logging, log_level.upper(), logging.INFO))
 
-    # 控制台输出（可读格式 → stdout）
-    if not any(isinstance(h, ConsoleFormatter) for h in root.handlers):
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(ConsoleFormatter())
-        console_handler.setLevel(logging.DEBUG)
-        root.addHandler(console_handler)
+    # 根据 UTM_LOG_FORMAT 环境变量选择日志格式:
+    #   "json"   = 仅 JSON（适合生产环境日志采集）
+    #   "simple" = 仅可读文本（适合开发）
+    #   未设置   = 双输出（兼容旧行为）
+    _log_fmt = os.environ.get("UTM_LOG_FORMAT", "").lower()
 
-    # JSON 输出（结构格式 → stderr，不影响 stdout 管道）
-    if json_output:
-        json_handler = logging.StreamHandler(sys.stderr)
-        json_handler.setFormatter(JsonFormatter())
-        json_handler.setLevel(logging.INFO)
-        root.addHandler(json_handler)
+    if not root.handlers:
+        if _log_fmt in ("", "simple", "console"):
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setFormatter(ConsoleFormatter())
+            console_handler.setLevel(logging.DEBUG)
+            root.addHandler(console_handler)
+
+        if _log_fmt in ("", "json"):
+            json_handler = logging.StreamHandler(sys.stderr)
+            json_handler.setFormatter(JsonFormatter())
+            json_handler.setLevel(logging.INFO)
+            root.addHandler(json_handler)
 
     # 文件输出（可选）
     if log_file:
@@ -112,6 +118,12 @@ def setup_logging(
     # 降低第三方库日志噪音
     for noisy in ("kafka", "urllib3", "engineio", "socketio"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    # HTTP 请求日志：生产环境（Docker）用 WARNING 级别抑制每次请求的 INFO 日志
+    _http_log_level = os.environ.get("UTM_HTTP_LOG_LEVEL", "")
+    if _http_log_level:
+        logging.getLogger("werkzeug").setLevel(getattr(logging, _http_log_level.upper(), logging.WARNING))
+        logging.getLogger("_internal").setLevel(getattr(logging, _http_log_level.upper(), logging.WARNING))
 
     return root
 

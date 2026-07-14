@@ -22,7 +22,7 @@ except ImportError:
     pymysql = None  # type: ignore
     _HAS_PYMYSQL = False
 
-from db_manager import query, query_all, _now, init_tables
+from mysql_db_manager import query, query_all, _now, init_tables
 
 # ── MySQL 持久化（可选，优雅降级） ─────────────────────────────────
 try:
@@ -50,14 +50,17 @@ except Exception:
     _load_mysql_cfg = None
 
 def _create_mysql_client():
-    """使用统一配置创建 MysqlDbClient。"""
-    if _mysql_cfg:
+    """使用统一配置创建 MysqlDbClient。
+
+    MySQL 未显式配置时返回 None，调用方应跳过 MySQL 持久化。
+    """
+    if _mysql_cfg and _mysql_cfg.configured:
         return MysqlDbClient(
             host=_mysql_cfg.host, port=_mysql_cfg.port, user=_mysql_cfg.user,
             password=_mysql_cfg.password, database=_mysql_cfg.database,
             charset=_mysql_cfg.charset,
         )
-    return MysqlDbClient()
+    return None
 
 
 LOG_TABLE = "sim_task_logs"
@@ -207,6 +210,11 @@ class LogStreamer:
         if self._mysql_client is None:
             try:
                 self._mysql_client = _create_mysql_client()
+                if self._mysql_client is None:
+                    # MySQL 未配置，跳过持久化
+                    self._mysql_enabled = False
+                    self._mysql_last_fail_time = time.time()
+                    return None
                 if self._mysql_client.connect():
                     # 验证连接：执行 SELECT 1 确保连接真正可用
                     try:

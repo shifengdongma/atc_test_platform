@@ -425,10 +425,15 @@ def parse_polygon(polygon_val: Any) -> List[Dict[str, float]]:
 
 
 # ==================== 数据库查询 ====================
+_db_unavailable_warned = False
+
 def query_air_route(route_name: Optional[str] = None, route_id: Optional[Any] = None) -> List[Dict[str, Any]]:
     """查询 air_route 表（下游 ATC_DKWRJ_TEST 数据库），兼容 NAME/route_name 字段名。"""
+    global _db_unavailable_warned
     if not HAS_DB:
-        print("[错误] 数据库客户端不可用，请确保已安装 dmPython 且 dmdbclient.py 在路径中")
+        if not _db_unavailable_warned:
+            print("[警告] 达梦数据库不可用（dmPython 未安装），航线查询功能受限")
+            _db_unavailable_warned = True
         return []
 
     client = DmDbClient()
@@ -1439,7 +1444,7 @@ def run_collision(args):
     route_names = [name.strip() for name in args.route_names.split(",") if name.strip()]
     if len(route_names) < 2:
         print("[错误] 碰撞预警模式需要至少2条航线")
-        sys.exit(1)
+        sys.exit("碰撞预警模式需要至少2条航线")
 
     print(f"[碰撞预警模式] 共 {len(route_names)} 条航线")
     route_data_list = []
@@ -1447,7 +1452,7 @@ def run_collision(args):
         route_record = query_air_route_single(route_name)
         if not route_record:
             print(f"[错误] 无法获取航线 '{route_name}'")
-            sys.exit(1)
+            sys.exit(f"无法获取航线 '{route_name}'")
         route_id_db = route_record.get("ID") or route_record.get("id") or route_record.get("Id")
         route_points = query_route_elements(route_id_db) if route_id_db else []
         if len(route_points) < 2:
@@ -1455,14 +1460,14 @@ def run_collision(args):
             route_points = parse_polygon(polygon_val)
         if len(route_points) < 2:
             print(f"[错误] 航线 '{route_name}' 航路点不足")
-            sys.exit(1)
+            sys.exit(f"航线 '{route_name}' 航路点不足")
         route_data_list.append({"name": route_name, "record": route_record, "points": route_points})
 
     print(f"[碰撞预警模式] 检测航线 '{route_data_list[0]['name']}' 与 '{route_data_list[1]['name']}' 之间的交汇点")
     meeting_points = _find_meeting_points(route_data_list[0]["points"], route_data_list[1]["points"], args.meeting_threshold)
     if not meeting_points:
         print("[错误] 未找到交汇点")
-        sys.exit(1)
+        sys.exit("未找到交汇点")
 
     best_meeting = meeting_points[0]
     print(f"[碰撞预警模式] 交汇点: lon={best_meeting['lon']:.6f}, lat={best_meeting['lat']:.6f}, 距离={best_meeting['distance']:.1f}米")

@@ -421,9 +421,13 @@ class SimulationManager:
         generated = 0
         for _ in range(sim_cfg.target_drones):
             plan = self.simulator.generate_plan()
-            uid = plan.aircraft.uid.decode("utf-8")
+            uid = plan.aircraft.uid.decode("utf-8").rstrip("\x00")
             self._dynamic_uids.add(uid)
             route_json = self._plan_to_route_json(plan)
+            # 解析 → 平移时间 → 重新序列化（与 replay/plan 模式一致，确保 ATC 能激活追踪）
+            obj = json.loads(route_json)
+            self._shift_plan_times(obj)
+            route_json = json.dumps(obj, ensure_ascii=False)
             self.redis.hset(REDIS_FLIGHT_PLAN_KEY, uid, route_json)
             generated += 1
 
@@ -436,7 +440,7 @@ class SimulationManager:
             self._nfz_list = self.simulator.generate_nfzs(nfz_count)
             for nfz in self._nfz_list:
                 nfz_json = self._nfz_to_json(nfz)
-                nfz_id = nfz.uid.decode("utf-8") if isinstance(nfz.uid, bytes) else str(nfz.uid)
+                nfz_id = nfz.uid.decode("utf-8").rstrip("\x00") if isinstance(nfz.uid, bytes) else str(nfz.uid)
                 self.redis.hset(REDIS_AIRSPACE_KEY, nfz_id, nfz_json)
             self._add_log(f"已生成 {len(self._nfz_list)} 个禁飞区")
         except Exception as e:
@@ -577,7 +581,7 @@ class SimulationManager:
             need = sim_cfg.target_drones - active_count
             for _ in range(need):
                 plan = self.simulator.generate_plan()
-                uid = plan.aircraft.uid.decode("utf-8")
+                uid = plan.aircraft.uid.decode("utf-8").rstrip("\x00")
                 self._dynamic_uids.add(uid)
                 route_json = self._plan_to_route_json(plan)
                 self.redis.hset(REDIS_FLIGHT_PLAN_KEY, uid, route_json)
@@ -639,6 +643,15 @@ class SimulationManager:
                     pass
             if self._tick_count % 30 == 0:
                 self._add_log(f"Replay: {len(records)} 条/{len(self._replay_index)} 架, 累计 {self._kafka_sent_total} 条")
+
+        # 每 30 秒刷新所有活跃 UAV 的 Redis 航线时间，
+        # 以持续触发 ATC 的追踪激活（类似 PlanRunner 的 _shift_and_write_plan）
+        if self._tick_count % 30 == 0 and self._route_cache:
+            for uid in self._replay_index:
+                try:
+                    self._refresh_single_redis_route(uid)
+                except Exception:
+                    pass
 
     def _refresh_single_redis_route(self, uid: str) -> None:
         """某架机遥测跑完一轮后，按缓存刷新该机 Redis 航线（时间平移）。"""
@@ -726,6 +739,12 @@ class SimulationManager:
                                     })
                                 except Exception:
                                     pass
+                            # 推送 kafka_trace 日志到 LogStreamer（前端 /logs 面板可见）
+                            try:
+                                from database.log_streamer import get_streamer
+                                get_streamer().report_kafka_trace(len(filtered))
+                            except Exception:
+                                pass
                             if self._trace_msg_count % 50 == 0:
                                 self._add_log(f"Trace消费: 累计 {self._trace_msg_count} 条, 最近 {len(filtered)} 条")
             except Exception as e:
@@ -764,7 +783,7 @@ class SimulationManager:
             "routeList": route_list,
         }
         obj = {
-            "uniqueProductIdentificationCode": plan.aircraft.uid.decode("utf-8"),
+            "uniqueProductIdentificationCode": plan.aircraft.uid.decode("utf-8").rstrip("\x00"),
             "flightPlanList": [flight_plan],
         }
         return json.dumps(obj, ensure_ascii=False)

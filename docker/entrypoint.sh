@@ -53,6 +53,69 @@ else
     echo "  ⚠ 未配置 UTM_KAFKA_URL"
 fi
 
+# ── 数据库配置诊断 ────────────────────────────────────
+echo ""
+echo "=== 数据库配置诊断 ==="
+
+# MySQL
+echo "  [MySQL]"
+if [ -n "${UTM_MYSQL_HOST}" ]; then
+    echo "    ✓ UTM_MYSQL_HOST=${UTM_MYSQL_HOST}"
+    echo "    PORT=${UTM_MYSQL_PORT:-3306}, DB=${UTM_MYSQL_DB:-utm_simulator}, USER=${UTM_MYSQL_USER:-(默认)}"
+else
+    echo "    ⚠ UTM_MYSQL_HOST 未设置"
+    echo "    容器将尝试从 /app/utm_simulator/env.py 读取 MYSQL_HOST"
+    if [ -f "/app/utm_simulator/env.py" ]; then
+        ENV_MYSQL_HOST=$(grep -oP 'MYSQL_HOST\s*=\s*["'"'"']?\K[^"'"'"'\n]+' /app/utm_simulator/env.py 2>/dev/null || echo "无法解析")
+        echo "    env.py 中 MYSQL_HOST=${ENV_MYSQL_HOST}"
+        if [ "${ENV_MYSQL_HOST}" = "127.0.0.1" ] || [ "${ENV_MYSQL_HOST}" = "localhost" ]; then
+            echo "    ⚠⚠⚠ WARNING: env.py 中 MYSQL_HOST=${ENV_MYSQL_HOST}，容器内不可达！"
+            echo "    请在 1Panel 环境变量中设置 UTM_MYSQL_HOST=实际的MySQL地址"
+        fi
+    else
+        echo "    env.py 未挂载，MySQL 将保持未配置状态 (configured=False)"
+    fi
+fi
+
+# 达梦
+echo "  [达梦]"
+if [ -n "${UTM_DM_HOST}" ]; then
+    echo "    UTM_DM_HOST=${UTM_DM_HOST}, PORT=${UTM_DM_PORT:-5237}, SCHEMA=${UTM_DM_SCHEMA:-ATC_DKWRJ_TEST}"
+else
+    echo "    UTM_DM_HOST 未设置，使用默认值 10.165.32.32"
+fi
+echo "    OpenSSL 1.1 库检测:"
+if ldconfig -p 2>/dev/null | grep -q libssl.so.1.1; then
+    echo "      ✓ libssl.so.1.1 已安装"
+else
+    echo "      ✗ libssl.so.1.1 未安装！达梦加密模块将不可用 (-70089)"
+fi
+if ldconfig -p 2>/dev/null | grep -q libcrypto.so.1.1; then
+    echo "      ✓ libcrypto.so.1.1 已安装"
+else
+    echo "      ✗ libcrypto.so.1.1 未安装！达梦加密模块将不可用 (-70089)"
+fi
+
+# 命名卷代码版本检查
+echo "  [代码版本]"
+if [ -f "/app/database/json_data_manager.py" ]; then
+    if grep -q "query_available_routes" /app/database/json_data_manager.py 2>/dev/null; then
+        echo "    ✓ json_data_manager.py: 包含 query_available_routes"
+    else
+        echo "    ✗✗✗ CRITICAL: json_data_manager.py 版本过旧（缺少 query_available_routes）！"
+        echo "    命名卷缓存了旧代码，请执行以下步骤更新："
+        echo "      docker compose down"
+        echo "      docker volume rm atc_test_platfrom_utm-database"
+        echo "      docker compose build --no-cache"
+        echo "      docker compose up -d"
+    fi
+else
+    echo "    ⚠ /app/database/json_data_manager.py 未找到"
+fi
+
+echo "========================="
+echo ""
+
 # ── 启动 Web 服务 ────────────────────────────────────
 echo "[3/3] 启动 Web 控制台..."
 echo "  监听地址: http://0.0.0.0:${FLASK_PORT:-5000}"
@@ -70,5 +133,15 @@ cleanup() {
     exit 0
 }
 trap cleanup SIGTERM SIGINT
+
+# ── 达梦 dmPython 加密模块：强制预加载 OpenSSL 1.1 库 ──
+# dmPython 自带 dmssl/libcrypto.so 可能与系统库冲突导致 -70089
+# LD_PRELOAD 确保系统 OpenSSL 1.1 库最先被动态链接器加载
+if [ -f /usr/lib/x86_64-linux-gnu/libssl.so.1.1 ] && [ -f /usr/lib/x86_64-linux-gnu/libcrypto.so.1.1 ]; then
+    export LD_PRELOAD="/usr/lib/x86_64-linux-gnu/libssl.so.1.1:/usr/lib/x86_64-linux-gnu/libcrypto.so.1.1"
+    echo "  ✓ LD_PRELOAD 已设置 (OpenSSL 1.1 优先加载)"
+else
+    echo "  ⚠ 未找到 OpenSSL 1.1 库，LD_PRELOAD 跳过"
+fi
 
 exec python web_server.py

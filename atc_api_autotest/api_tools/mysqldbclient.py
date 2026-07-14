@@ -39,7 +39,8 @@ class MysqlDbClient:
 
     def __init__(self, host="127.0.0.1", port=3306, user="root",
                  password="", database="utm_simulator", charset="utf8mb4",
-                 read_timeout=60, write_timeout=60):
+                 read_timeout=60, write_timeout=60,
+                 use_ssl=True):
         """初始化客户端。
 
         Args:
@@ -60,12 +61,25 @@ class MysqlDbClient:
         self.charset = charset
         self.read_timeout = read_timeout
         self.write_timeout = write_timeout
+        self.use_ssl = use_ssl
         self.conn = None
         self.cursor = None
 
     def connect(self):
-        """建立数据库连接"""
+        """建立数据库连接
+
+        MySQL 8.0 默认认证插件 caching_sha2_password 需要 SSL/TLS
+        或 RSA 公钥交换。pymysql >= 0.10.0 支持该插件，但非 SSL
+        连接下需从服务器获取公钥。启用 use_ssl=True 可避免该问题。
+        """
         try:
+            # 构建 SSL 参数
+            # caching_sha2_password 认证需要 SSL 或 RSA 公钥交换
+            # ssl={} 启用 TLS 但不验证证书（容器环境通常无 CA 证书）
+            ssl_args = {}
+            if self.use_ssl:
+                ssl_args = {'ssl': {}}
+
             self.conn = pymysql.connect(
                 host=self.host,
                 port=self.port,
@@ -77,6 +91,7 @@ class MysqlDbClient:
                 connect_timeout=10,
                 read_timeout=self.read_timeout,
                 write_timeout=self.write_timeout,
+                **ssl_args,
             )
             self.cursor = self.conn.cursor()
             print(f"[MysqlDbClient] 成功连接到 MySQL {self.host}:{self.port}, 数据库: {self.database}")

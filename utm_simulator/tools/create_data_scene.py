@@ -249,10 +249,15 @@ def parse_polygon(polygon_val: Any) -> List[Dict[str, float]]:
     return []
 
 
+_db_unavailable_warned = False
+
 def query_air_route(route_name: Optional[str] = None, route_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """查询 air_route 表（下游 ATC_DKWRJ_TEST 数据库），兼容 NAME/route_name 字段名。"""
+    global _db_unavailable_warned
     if not HAS_DB:
-        print("[错误] 数据库客户端不可用，请确保已安装 dmPython 且 dmdbclient.py 在路径中")
+        if not _db_unavailable_warned:
+            print("[警告] 达梦数据库不可用（dmPython 未安装），航线查询功能受限")
+            _db_unavailable_warned = True
         return []
 
     client = DmDbClient()

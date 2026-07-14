@@ -589,17 +589,91 @@ def read_file_content_partial(file_id: int, max_chars: int = 102400) -> Dict[str
 # 达梦数据库连接（懒加载单例，避免重复连接）
 _dm_client = None
 _dm_available = None  # None=未检测, True=可用, False=不可用
+_dm_last_fail_time = 0.0
+_DM_RETRY_COOLDOWN = 60.0  # 连接失败后冷却秒数，期间不再重试达梦
+
+# ── OpenSSL 1.1 库可用性检测（达梦 dmPython 依赖） ────────────────
+# 在模块加载时检测一次，避免每次 _get_dm_client() 都重复检测
+_ssl11_available = None  # None=未检测, True=可用, False=不可用
+_ssl11_detail = ""       # 检测详情
+
+def _check_ssl11():
+    """检测 libssl.so.1.1 和 libcrypto.so.1.1 是否可加载。
+
+    使用绝对路径直接加载（避免 LD_LIBRARY_PATH 等搜索路径问题），
+    并以 RTLD_GLOBAL 将符号导出到全局符号表，使 dmPython 加密模块
+    在加载时能复用已载入的系统 OpenSSL 1.1 库。
+    """
+    global _ssl11_available, _ssl11_detail
+    if _ssl11_available is not None:
+        return _ssl11_available
+    import ctypes as _ct
+    # 按绝对路径加载 — 比 soname 搜索更可靠
+    _LIB_DIR = "/usr/lib/x86_64-linux-gnu"
+    _LIBS = [
+        ("libssl.so.1.1",    f"{_LIB_DIR}/libssl.so.1.1"),
+        ("libcrypto.so.1.1", f"{_LIB_DIR}/libcrypto.so.1.1"),
+    ]
+    missing = []
+    for _name, _path in _LIBS:
+        try:
+            _ct.CDLL(_path, _ct.RTLD_GLOBAL)
+        except OSError as _e:
+            # 回退用 soname 搜索
+            try:
+                _ct.CDLL(_name, _ct.RTLD_GLOBAL)
+            except OSError as _e2:
+                missing.append(f"{_name} ({_e2})")
+    if missing:
+        _ssl11_available = False
+        _ssl11_detail = "; ".join(missing)
+        print(f"[json_data_manager] OpenSSL 1.1 库检测失败: {_ssl11_detail}")
+        # 打印 ldconfig 输出辅助排查
+        import subprocess as _sp
+        try:
+            _result = _sp.run(["ldconfig", "-p"], capture_output=True, text=True, timeout=5)
+            _ssl_lines = [l for l in _result.stdout.split("\n") if "libssl" in l.lower() or "libcrypto" in l.lower()]
+            if _ssl_lines:
+                print(f"[json_data_manager] 系统中可用的 SSL/Crypto 库: {_ssl_lines}")
+            else:
+                print("[json_data_manager] 系统中未找到任何 libssl/libcrypto 库")
+        except Exception:
+            pass
+    else:
+        _ssl11_available = True
+        _ssl11_detail = "libssl.so.1.1 + libcrypto.so.1.1 可用"
+        print(f"[json_data_manager] OpenSSL 1.1 库检测通过: {_ssl11_detail}")
+    return _ssl11_available
+
+# 模块加载时执行检测
+_check_ssl11()
 
 
 def _get_dm_client():
-    """获取达梦数据库 DmDbClient 实例（懒加载 + 单例缓存）。
+    """获取达梦数据库 DmDbClient 实例（懒加载 + 单例缓存 + 失败冷却）。
 
     正确设置 sys.path 使 dmdbclient.py 能导入其依赖（dmPython + env.py）。
     返回 (client, error_msg)，client 可用时为 DmDbClient 实例，否则为 None。
+
+    冷却机制：达梦连接失败后 60 秒内不再重试，避免每次 API 请求都触发
+    注定失败的 dmPython.connect() 调用，减少日志刷屏。
     """
-    global _dm_client, _dm_available
+    global _dm_client, _dm_available, _dm_last_fail_time
+
+    # ── 首次调用时打印诊断信息 ──
+    if _dm_available is None and _dm_client is None:
+        _ld_path = os.environ.get("LD_LIBRARY_PATH", "(未设置)")
+        print(f"[json_data_manager] _get_dm_client: 首次尝试达梦连接，LD_LIBRARY_PATH={_ld_path}")
+        if not _ssl11_available:
+            print(f"[json_data_manager] _get_dm_client: ⚠ OpenSSL 1.1 库不可用 ({_ssl11_detail})，达梦连接将失败")
+
     if _dm_available is False:
-        return None, "达梦数据库不可用（已探测失败）"
+        # 检查冷却期是否已过
+        if time.time() - _dm_last_fail_time < _DM_RETRY_COOLDOWN:
+            return None, "达梦数据库不可用（已探测失败，冷却中）"
+        # 冷却期已过，允许重试一次
+        _dm_available = None
+        _dm_client = None
     if _dm_client is not None:
         return _dm_client, None
 
@@ -620,7 +694,11 @@ def _get_dm_client():
 
     if _dm_file is None:
         _dm_available = False
+        _dm_last_fail_time = time.time()
+        print(f"[json_data_manager] 未找到 dmdbclient.py，搜索路径: {_dm_paths}")
         return None, "未找到 dmdbclient.py"
+
+    print(f"[json_data_manager] _get_dm_client: 加载 dmdbclient.py from {_dm_file}")
 
     # 确保 dmdbclient.py 所在目录及其父目录在 sys.path 中
     # dmdbclient.py 需要: import dmPython; from env import ...
@@ -650,12 +728,21 @@ def _get_dm_client():
             return _client, None
         else:
             _dm_available = False
+            _dm_last_fail_time = time.time()
             return None, "无法连接到达梦数据库 (10.165.32.32:5237)"
     except ImportError as e:
         _dm_available = False
+        _dm_last_fail_time = time.time()
+        print(f"[json_data_manager] 达梦连接失败 — 缺少 dmPython 驱动: {e}")
+        import traceback as _tb
+        _tb.print_exc()
         return None, f"缺少达梦数据库驱动 (dmPython): {e}"
     except Exception as e:
         _dm_available = False
+        _dm_last_fail_time = time.time()
+        print(f"[json_data_manager] 达梦连接失败 — 异常详情: {e}")
+        import traceback as _tb
+        _tb.print_exc()
         return None, f"达梦数据库初始化失败: {e}"
 
 

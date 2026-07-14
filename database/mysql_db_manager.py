@@ -45,16 +45,32 @@ _mysql_client: Optional[Any] = None
 _mysql_available: Optional[bool] = None  # None=未检测, True=可用, False=不可用
 _mysql_last_fail_time: float = 0.0       # 最近一次连接失败的时间戳
 _MYSQL_RETRY_COOLDOWN: float = 60.0      # 失败后冷却秒数，期间不再尝试 MySQL
+_mysql_conn_target: str = ""             # 尝试连接的目标（host:port/database），用于诊断输出
 
 
 def _create_mysql_client(read_timeout=120, write_timeout=120):
-    """使用 common/config.py 统一配置创建 MysqlDbClient 实例。"""
+    """使用 common/config.py 统一配置创建 MysqlDbClient 实例。
+
+    若 MySQL 未通过环境变量或 env.py 显式配置（cfg.configured=False），
+    返回 None 以跳过 MySQL 连接，直接降级到 SQLite，避免 Docker 内向
+    127.0.0.1 发起注定失败的连接尝试。
+    """
+    global _mysql_conn_target
     try:
         _common_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common")
         if _common_path not in sys.path:
             sys.path.insert(0, _common_path)
         from config import load_mysql_config
         cfg = load_mysql_config()
+        _mysql_conn_target = f"{cfg.host}:{cfg.port}/{cfg.database}"
+        print(f"[mysql_db_manager] MySQL 配置: configured={cfg.configured}, "
+              f"host={cfg.host}, port={cfg.port}, database={cfg.database}")
+        if not cfg.configured:
+            # 未显式配置 MySQL（无环境变量、env.py 中无 MYSQL_HOST），跳过连接
+            print(f"[mysql_db_manager] MySQL 未配置 (UTM_MYSQL_HOST 未设置且 env.py 中无 MYSQL_HOST)，"
+                  f"跳过 MySQL 连接，直接使用 SQLite")
+            _mysql_conn_target = ""
+            return None
         return MysqlDbClient(
             host=cfg.host, port=cfg.port, user=cfg.user,
             password=cfg.password, database=cfg.database,
@@ -62,8 +78,9 @@ def _create_mysql_client(read_timeout=120, write_timeout=120):
             read_timeout=read_timeout, write_timeout=write_timeout,
         )
     except Exception as e:
-        print(f"[mysql_db_manager] 加载 MySQL 配置失败: {e}，使用默认值")
-        return MysqlDbClient(read_timeout=read_timeout, write_timeout=write_timeout)
+        print(f"[mysql_db_manager] 加载 MySQL 配置失败: {e}，跳过 MySQL")
+        _mysql_conn_target = ""
+        return None
 
 
 def _get_client():
@@ -79,6 +96,7 @@ def _get_client():
     # ── 无锁快速路径：已知不可用或未安装 ──
     if not _HAS_MYSQL_IMPORT:
         _mysql_available = False
+        print("[mysql_db_manager] mysqldbclient 模块导入失败，MysqlDbClient 不可用，降级到 SQLite")
         return None
     if _mysql_available is False:
         # 检查冷却期是否已过，冷却期内直接返回 None
@@ -100,6 +118,11 @@ def _get_client():
         if _mysql_client is None and _mysql_available is None:
             try:
                 _mysql_client = _create_mysql_client(read_timeout=120, write_timeout=120)
+                if _mysql_client is None:
+                    # MySQL 未显式配置（无环境变量/env.py），直接降级 SQLite，不报错
+                    _mysql_available = False
+                    _mysql_last_fail_time = time.time()
+                    return None
                 if _mysql_client.connect():
                     # 验证连接确实可用（防止连接成功但立即断开的情况）
                     try:
@@ -119,7 +142,7 @@ def _get_client():
                     _ensure_mysql_tables(client=_mysql_client)
                     print("[mysql_db_manager] MySQL 连接成功，使用 MySQL 持久化")
                 else:
-                    print("[mysql_db_manager] MySQL 连接失败，降级到 SQLite")
+                    print(f"[mysql_db_manager] MySQL 连接失败 ({_mysql_conn_target})，降级到 SQLite")
                     _mysql_client = None
                     _mysql_available = False
                     _mysql_last_fail_time = time.time()
@@ -133,7 +156,7 @@ def _get_client():
             try:
                 _mysql_client.conn.ping(reconnect=True)
             except Exception as e:
-                print(f"[mysql_db_manager] MySQL ping 失败: {e}，尝试新建连接...")
+                print(f"[mysql_db_manager] MySQL ping 失败 ({_mysql_conn_target}): {e}，尝试新建连接...")
                 # 关闭旧连接，创建全新客户端实例（避免 SSL 状态残留导致 BAD_LENGTH）
                 try:
                     _mysql_client.close()
@@ -160,7 +183,7 @@ def _get_client():
                         _ensure_mysql_tables(client=_mysql_client)
                         print("[mysql_db_manager] MySQL 重连成功")
                     else:
-                        print("[mysql_db_manager] MySQL 重连失败，降级到 SQLite")
+                        print(f"[mysql_db_manager] MySQL 重连失败 ({_mysql_conn_target})，降级到 SQLite")
                         _mysql_client = None
                         _mysql_available = False
                         _mysql_last_fail_time = time.time()

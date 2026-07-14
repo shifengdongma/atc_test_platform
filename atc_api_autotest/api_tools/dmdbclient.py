@@ -11,7 +11,15 @@ import sys
 
 # 将项目根目录加入 sys.path，确保能导入 env.py
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from env import DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_SCHEMA
+try:
+    from env import DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_SCHEMA
+except ImportError:
+    # Docker 环境中 env.py 可能未挂载，从环境变量读取
+    DB_HOST = os.environ.get("UTM_DM_HOST", "10.165.32.32")
+    DB_PORT = int(os.environ.get("UTM_DM_PORT", "5237"))
+    DB_USER = os.environ.get("UTM_DM_USER", "SYSDBA")
+    DB_PASSWORD = os.environ.get("UTM_DM_PASSWORD", "")
+    DB_SCHEMA = os.environ.get("UTM_DM_SCHEMA", "ATC_DKWRJ_TEST")
 
 class DmDbClient:
     """达梦数据库连接客户端
@@ -48,7 +56,11 @@ class DmDbClient:
             print(f"[DmDbClient] 成功连接到达梦数据库 {self.host}:{self.port}, 模式: {self.schema}")
             return True
         except Exception as e:
+            err_msg = str(e)
             print(f"[DmDbClient] 数据库连接失败: {e}")
+            if "-70089" in err_msg or "Encryption module" in err_msg:
+                print("[DmDbClient] 提示: 达梦加密模块需要 libssl.so.1.1 (OpenSSL 1.1)，"
+                      "请确保 Docker 镜像已安装 libssl1.1 兼容库")
             return False
 
     def query(self, table_name, columns=None, where=None, limit=None):

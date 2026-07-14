@@ -17,6 +17,8 @@ import sys
 import threading
 import time
 import traceback
+import atexit
+import signal
 from typing import Any, Dict, List, Optional
 
 # 确保项目根目录在 sys.path 中
@@ -72,9 +74,12 @@ DEFAULT_TARGET_DRONES = 1
 # ── Flask 应用初始化 ───────────────────────────────────────────────
 app = Flask(__name__, static_folder="../web/static", static_url_path="/static")
 app.config["SECRET_KEY"] = "utm_moc52_web_secret"
-# threading 模式 + simple-websocket 传输层
-# 不能用 eventlet：其 monkey_patch 会破坏 C++ Simulator 的线程导致进程崩溃
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+# WebSocket 异步模式选择：
+# - Windows: threading 模式 + simple-websocket（eventlet monkey_patch 会破坏 C++ Simulator 线程）
+# - Linux/Docker: eventlet 模式（werkzeug 开发服务器对 WebSocket 支持不完整，threading 模式会 500）
+_socket_async_mode = "eventlet" if os.name == "posix" else "threading"
+print(f"[web_server] async_mode={_socket_async_mode} (os={os.name})", flush=True)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode=_socket_async_mode)
 
 # ── 全局状态（线程安全通过 _lock 保护） ────────────────────────────
 _lock = threading.Lock()
@@ -117,6 +122,50 @@ _runtime_state: Dict[str, Any] = {
 
 # ── 仿真运行时对象（由 SimulationRunner 持有） ─────────────────────
 _sim_runner: Optional["SimulationRunner"] = None
+
+
+# ── 进程退出时清理桥接子进程 ──────────────────────────────────────
+def _kill_telemetry_bridge() -> None:
+    """终止遥测桥接子进程（atexit / signal handler）。"""
+    try:
+        if _sim_runner is not None:
+            bridge = getattr(_sim_runner, "_telemetry_bridge", None)
+            if bridge is not None and bridge.poll() is None:
+                bridge.terminate()
+                try:
+                    bridge.wait(timeout=3)
+                except Exception:
+                    try:
+                        bridge.kill()
+                    except Exception:
+                        pass
+                print("[web_server] 已清理遥测桥接子进程", flush=True)
+    except Exception:
+        pass
+
+
+def _on_exit_signal(signum, frame):
+    """SIGINT/SIGTERM 处理：停止仿真 → 清理桥接 → 强制退出。
+
+    Windows 上信号处理器运行在独立线程中，sys.exit() 只退出该线程，
+    必须用 os._exit() 强制终止整个进程。
+    """
+    print(f"\n[web_server] 收到信号 {signum}，清理资源...", flush=True)
+    # 1. 先停止仿真运行器（停止所有线程 + 清理 Redis/Kafka + 终止 bridge）
+    if _sim_runner is not None:
+        try:
+            _sim_runner.stop()
+        except Exception as e:
+            print(f"[web_server] 停止仿真异常: {e}", flush=True)
+    # 2. 兜底清理 bridge（_sim_runner 可能为 None 或 stop 未覆盖）
+    _kill_telemetry_bridge()
+    # 3. 强制退出进程（Windows 上 sys.exit() 无效，必须 os._exit()）
+    os._exit(0)
+
+
+atexit.register(_kill_telemetry_bridge)
+signal.signal(signal.SIGINT, _on_exit_signal)
+signal.signal(signal.SIGTERM, _on_exit_signal)
 
 
 _situation_monitor = None
@@ -186,25 +235,39 @@ def _start_collision_alarm_consumer():
             _collision_consumer.subscribe(["uav_collision_alarm"])
             print(f"[web_server] Kafka 冲突告警消费者已启动 (topic=uav_collision_alarm)")
 
-            while True:
+            while _collision_consumer is not None:
                 try:
                     messages = _collision_consumer.poll(timeout_ms=500)
                     for msg in messages:
-                        if isinstance(msg, dict):
-                            involved = len(msg.get("involvedUavs", msg.get("alertUavList", [])))
-                            alert_type = msg.get("alertType", msg.get("alertCategory", "未知"))
-                            try:
-                                _get_streamer().push(
-                                    "kafka_collision_alarm",
-                                    f"冲突告警: {alert_type} 涉及 {involved} 架无人机",
-                                    detail=msg
-                                )
-                            except Exception:
-                                pass
-                            try:
-                                socketio.emit("collision_alarm", msg)
-                            except Exception:
-                                pass
+                        # 告警消息可能是单个对象或数组（算法文档：数组，可同时包含多个告警）
+                        items = msg if isinstance(msg, list) else [msg]
+                        for item in items:
+                            if not isinstance(item, dict):
+                                continue
+                            # 提取告警类型和无人机列表
+                            # 算法文档格式: {"collisionShortAlert": {"uavList": [...], "status": ..., "alarmId": ...}}
+                            alert_types = []
+                            total_uavs = 0
+                            for key in item:
+                                alert_obj = item[key]
+                                if isinstance(alert_obj, dict):
+                                    alert_types.append(key)
+                                    uav_list = alert_obj.get("uavList", [])
+                                    total_uavs += len(uav_list) if isinstance(uav_list, list) else 0
+                            if alert_types:
+                                alert_type_str = ", ".join(alert_types)
+                                try:
+                                    _get_streamer().push(
+                                        "kafka_collision_alarm",
+                                        f"冲突告警: {alert_type_str} 涉及 {total_uavs} 架无人机",
+                                        detail={"alert_types": alert_types, "uav_count": total_uavs, "raw": item}
+                                    )
+                                except Exception:
+                                    pass
+                                try:
+                                    socketio.emit("collision_alarm", item)
+                                except Exception:
+                                    pass
                 except Exception:
                     pass
                 time.sleep(0.1)
@@ -250,6 +313,11 @@ class SimulationRunner:
         self._plan_runner = None
         # plan 模式：用户选择的航线 UID 白名单
         self._plan_selected_uids: Optional[set] = None
+        # 遥测桥接子进程（dynamic 模式，Redis → Kafka 进程外转发）
+        self._telemetry_bridge = None
+        # replay_once / scene 模式资源引用（供 _cleanup() 访问）
+        self._ds: Any = None           # replay_once 模式 DataSource
+        self._emitter: Any = None      # scene 模式 SceneEmitter
 
         # 检查连接状态 + 设置日志监控
         try:
@@ -436,6 +504,7 @@ class SimulationRunner:
                 _rk.KAFKA_DATA_JSON_PATH = os.path.join(mock_dir, data_file)
                 _rk.REDIS_ROUTE_JSON_PATH = os.path.join(mock_dir, route_file)
                 ds = _rk.DataSource()
+                self._ds = ds  # 保存引用供 _cleanup() 使用
                 with _lock:
                     _runtime_state["redis_connected"] = ds.redis_client.client is not None
                     _runtime_state["kafka_connected"] = ds.kafka_producer.is_connected()
@@ -496,6 +565,7 @@ class SimulationRunner:
                         timestamp_mode=scene_timestamp_mode,
                         loop=scene_loop,
                     )
+                    self._emitter = emitter  # 保存引用供 _cleanup() 使用
                     emitter.start()
                     with _lock:
                         _runtime_state["active_drones"] = len(emitter.uav_data_list)
@@ -567,6 +637,36 @@ class SimulationRunner:
             except Exception:
                 pass
             self._sim_mgr = None
+        # 清理 replay_once 模式 DataSource
+        if self._ds:
+            try:
+                self._ds.kafka_producer.close()
+            except Exception:
+                pass
+            try:
+                self._ds.kafka_consumer.close()
+            except Exception:
+                pass
+            self._ds = None
+        # 清理 scene 模式 SceneEmitter
+        if self._emitter:
+            try:
+                self._emitter.stop()
+            except Exception:
+                pass
+            self._emitter = None
+        # 终止遥测桥接子进程
+        if getattr(self, "_telemetry_bridge", None) and self._telemetry_bridge.poll() is None:
+            try:
+                self._telemetry_bridge.terminate()
+                self._telemetry_bridge.wait(timeout=3)
+            except Exception:
+                try:
+                    self._telemetry_bridge.kill()
+                except Exception:
+                    pass
+            self._telemetry_bridge = None
+            _add_log("遥测桥接子进程已终止")
         with _lock:
             _runtime_state["running"] = False
 
@@ -596,19 +696,50 @@ class SimulationRunner:
 
         # 启动 Kafka 冲突告警消费者
         # dynamic 模式下跳过：kafka-python 后台 I/O 线程与 Simulator ctypes
-        # 并发操作在 Windows 上会导致 C-level 崩溃（与 trace 消费者处理一致）
+        # 并发操作在 Windows 上会导致 C-level 堆损坏崩溃（已实际验证）
+        # 告警消费者与 Simulator 在同一进程内，kafka-python(librdkafka) 的后台线程
+        # 与 Simulator ctypes 操作并发时会触发 C-level 崩溃
         if self.mode != "dynamic":
             try:
                 _start_collision_alarm_consumer()
             except Exception as e:
                 print(f"[web_server] 冲突告警消费者启动失败: {e}")
         else:
-            print("[web_server] dynamic 模式，跳过 Kafka 冲突告警消费者")
+            print("[web_server] dynamic 模式，跳过 Kafka 冲突告警消费者（避免 ctypes 并发崩溃）")
+
+        # dynamic 模式：启动遥测桥接子进程（Redis → Kafka）
+        if self.mode == "dynamic":
+            self._start_telemetry_bridge()
 
         self._thread = threading.Thread(target=self._sim_loop, daemon=True)
         self._thread.start()
 
         socketio.emit("status_change", {"event": "started", "message": "仿真已启动"})
+
+    def _start_telemetry_bridge(self) -> None:
+        """启动遥测桥接子进程：将 Redis BIZ_DATA:UAV_TELEMETRY 转发到 Kafka。
+
+        运行在独立子进程中，与 Simulator (ctypes) 主进程完全隔离，
+        避免 Windows 上 kafka-python (librdkafka) 与 ctypes 堆污染导致的 C-level 崩溃。
+        """
+        import sys as _sys, subprocess as _sp
+        bridge_script = os.path.join(_root, "tools", "telemetry_bridge.py")
+        cfg = self._app_cfg
+        cmd = [
+            _sys.executable, bridge_script,
+            "--redis-host", cfg.redis.host,
+            "--redis-port", str(cfg.redis.port_int),
+            "--redis-password", cfg.redis.password,
+            "--kafka-url", cfg.kafka.bootstrap_servers,
+        ]
+        if cfg.kafka.bootstrap_servers_mirror:
+            cmd += ["--kafka-mirror-url", cfg.kafka.bootstrap_servers_mirror]
+        try:
+            self._telemetry_bridge = _sp.Popen(cmd, close_fds=True)
+            _add_log("遥测桥接子进程已启动")
+        except Exception as e:
+            print(f"[web_server] 遥测桥接启动失败: {e}")
+            self._telemetry_bridge = None
 
     def stop(self) -> None:
         """停止仿真。"""

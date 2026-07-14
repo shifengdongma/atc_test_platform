@@ -64,6 +64,7 @@ class MysqlConfig:
     password: str = ""
     database: str = "utm_simulator"
     charset: str = "utf8mb4"
+    configured: bool = False  # 是否通过环境变量或 env.py 显式配置（Docker 内未配时跳过连接）
 
 
 @dataclass
@@ -152,7 +153,11 @@ def _load_mysql_config() -> MysqlConfig:
     1. 环境变量 UTM_MYSQL_*
     2. utm_simulator/env.py（本项目专用 MySQL）
     3. atc_api_autotest/env.py（回退）
-    4. 默认值
+    4. 默认值（configured=False，调用方应跳过 MySQL 连接）
+
+    返回值中 configured 字段指示 MySQL 是否被显式配置：
+    - True:  通过环境变量或 env.py 提供了 MySQL host
+    - False: 所有配置源均未提供，使用默认值，调用方应优雅降级
     """
     host = "127.0.0.1"
     port = 3306
@@ -160,6 +165,8 @@ def _load_mysql_config() -> MysqlConfig:
     password = ""
     database = "utm_simulator"
     charset = "utf8mb4"
+    configured = False  # 是否显式配置
+    source = "默认值（MySQL 未配置，将跳过连接）"  # 配置来源追踪
 
     # 尝试从 utm_simulator/env.py 导入
     try:
@@ -171,38 +178,64 @@ def _load_mysql_config() -> MysqlConfig:
         ]
         for env_path in env_paths:
             if not os.path.exists(env_path):
+                print(f"[config] _load_mysql_config: env.py 不存在，跳过: {env_path}")
                 continue
             spec = importlib.util.spec_from_file_location("_mysql_env_loader", env_path)
             if spec and spec.loader:
                 mod = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(mod)
-                host = getattr(mod, "MYSQL_HOST", host)
+                env_host = getattr(mod, "MYSQL_HOST", None)
+                if env_host:  # env.py 中有 MYSQL_HOST 才认为已配置
+                    host = env_host
+                    configured = True
+                    source = f"env.py ({env_path})"
+                    print(f"[config] _load_mysql_config: 从 env.py 加载 MySQL 配置 host={host}, path={env_path}")
+                else:
+                    print(f"[config] _load_mysql_config: env.py 中未找到 MYSQL_HOST, path={env_path}")
                 port = getattr(mod, "MYSQL_PORT", port)
                 user = getattr(mod, "MYSQL_USER", user)
                 password = getattr(mod, "MYSQL_PASSWORD", password)
                 database = getattr(mod, "MYSQL_DATABASE", database)
                 charset = getattr(mod, "MYSQL_CHARSET", charset)
                 break
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[config] _load_mysql_config: 读取 env.py 异常: {e}")
 
     # 环境变量覆盖（最高优先级）
+    env_overrides = []
     if os.environ.get("UTM_MYSQL_HOST"):
+        old_host = host
         host = os.environ["UTM_MYSQL_HOST"]
+        configured = True
+        source = "环境变量 UTM_MYSQL_HOST"
+        env_overrides.append(f"host: {old_host} -> {host}")
     if os.environ.get("UTM_MYSQL_PORT"):
         port = int(os.environ["UTM_MYSQL_PORT"])
+        env_overrides.append(f"port={port}")
     if os.environ.get("UTM_MYSQL_USER"):
         user = os.environ["UTM_MYSQL_USER"]
+        env_overrides.append(f"user={user}")
     if os.environ.get("UTM_MYSQL_PASSWORD"):
         password = os.environ["UTM_MYSQL_PASSWORD"]
+        env_overrides.append("password=***")
     if os.environ.get("UTM_MYSQL_DB"):
         database = os.environ["UTM_MYSQL_DB"]
+        env_overrides.append(f"database={database}")
     if os.environ.get("UTM_MYSQL_CHARSET"):
         charset = os.environ["UTM_MYSQL_CHARSET"]
+        env_overrides.append(f"charset={charset}")
+    if env_overrides:
+        print(f"[config] _load_mysql_config: 环境变量覆盖 — {', '.join(env_overrides)}")
+
+    # ── 最终配置摘要 ──────────────────────────────────────────────
+    print(f"[config] _load_mysql_config: 最终 — host={host}, port={port}, "
+          f"user={user}, database={database}, configured={configured}")
+    print(f"[config] _load_mysql_config: 配置来源 — {source}")
 
     return MysqlConfig(
         host=host, port=port, user=user,
         password=password, database=database, charset=charset,
+        configured=configured,
     )
 
 

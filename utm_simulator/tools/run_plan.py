@@ -439,6 +439,12 @@ class PlanRunner:
                         f"\033[32m[uav_runtime_trace] {int(msg.get('timestamp', 0))} "
                         f"收到 {len(filtered)} 条\033[0m"
                     )
+                    # 推送 kafka_trace 日志到 LogStreamer（前端 /logs 面板可见）
+                    try:
+                        from database.log_streamer import get_streamer
+                        get_streamer().report_kafka_trace(len(filtered))
+                    except Exception:
+                        pass
             except Exception as e:
                 print(f"消费 uav_runtime_trace 异常: {e}")
             time.sleep(0.05)

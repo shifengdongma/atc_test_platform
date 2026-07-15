@@ -27,7 +27,7 @@ if _atc_tools not in sys.path:
 # ── 导入 MySQL 客户端 ──────────────────────────────────────────────
 from mysqldbclient import MysqlDbClient
 
-_lock = threading.Lock()
+_lock = threading.RLock()
 
 # ── MySQL 连接单例 ─────────────────────────────────────────────────
 _mysql_client: Optional[Any] = None
@@ -238,7 +238,7 @@ def _ensure_mysql_tables(client=None):
 
 
 def _cursor(client):
-    """每次查询创建独立 cursor，避免多线程共享同一 cursor 导致 Protocol error。"""
+    """每次查询创建独立 cursor。"""
     return client.conn.cursor()
 
 
@@ -255,99 +255,107 @@ def init_tables() -> None:
 
 
 def query_all(table: str, order_by: str = "id DESC") -> List[Dict[str, Any]]:
-    client = _get_client()
-    if not client:
-        return []
-    safe_order = order_by.replace("id", "`id`") if "id" in order_by and "`id`" not in order_by else order_by
-    sql = f"SELECT * FROM `{table}` ORDER BY {safe_order}"
-    cur = _cursor(client)
-    cur.execute(sql)
-    return cur.fetchall()
+    with _lock:
+        client = _get_client()
+        if not client:
+            return []
+        safe_order = order_by.replace("id", "`id`") if "id" in order_by and "`id`" not in order_by else order_by
+        sql = f"SELECT * FROM `{table}` ORDER BY {safe_order}"
+        cur = _cursor(client)
+        cur.execute(sql)
+        return cur.fetchall()
 
 
 def query_one(table: str, record_id: int) -> Optional[Dict[str, Any]]:
-    client = _get_client()
-    if not client:
-        return None
-    sql = f"SELECT * FROM `{table}` WHERE `id` = %s"
-    cur = _cursor(client)
-    cur.execute(sql, (record_id,))
-    return cur.fetchone()
+    with _lock:
+        client = _get_client()
+        if not client:
+            return None
+        sql = f"SELECT * FROM `{table}` WHERE `id` = %s"
+        cur = _cursor(client)
+        cur.execute(sql, (record_id,))
+        return cur.fetchone()
 
 
 def query(table: str, where: str = "", params: tuple = (),
           order_by: str = "id DESC") -> List[Dict[str, Any]]:
-    client = _get_client()
-    if not client:
-        return []
-    sql = f"SELECT * FROM `{table}`"
-    if where:
-        sql += f" WHERE {where.replace('?', '%s')}"
-    safe_order = order_by.replace("id", "`id`") if "id" in order_by else order_by
-    sql += f" ORDER BY {safe_order}"
-    cur = _cursor(client)
-    cur.execute(sql, params if params else ())
-    return cur.fetchall()
+    with _lock:
+        client = _get_client()
+        if not client:
+            return []
+        sql = f"SELECT * FROM `{table}`"
+        if where:
+            sql += f" WHERE {where.replace('?', '%s')}"
+        safe_order = order_by.replace("id", "`id`") if "id" in order_by else order_by
+        sql += f" ORDER BY {safe_order}"
+        cur = _cursor(client)
+        cur.execute(sql, params if params else ())
+        return cur.fetchall()
 
 
 def insert(table: str, data: Dict[str, Any]) -> int:
-    now = _now()
-    data["created_at"] = data.get("created_at", now)
-    data["updated_at"] = data.get("updated_at", now)
-    client = _get_client()
-    if not client:
-        raise RuntimeError("MySQL 不可用，无法写入数据")
-    columns = ", ".join(f"`{k}`" for k in data.keys())
-    placeholders = ", ".join("%s" for _ in data)
-    sql = f"INSERT INTO `{table}` ({columns}) VALUES ({placeholders})"
-    cur = _cursor(client)
-    cur.execute(sql, list(data.values()))
-    client.conn.commit()
-    return cur.lastrowid
+    with _lock:
+        now = _now()
+        data["created_at"] = data.get("created_at", now)
+        data["updated_at"] = data.get("updated_at", now)
+        client = _get_client()
+        if not client:
+            raise RuntimeError("MySQL 不可用，无法写入数据")
+        columns = ", ".join(f"`{k}`" for k in data.keys())
+        placeholders = ", ".join("%s" for _ in data)
+        sql = f"INSERT INTO `{table}` ({columns}) VALUES ({placeholders})"
+        cur = _cursor(client)
+        cur.execute(sql, list(data.values()))
+        client.conn.commit()
+        return cur.lastrowid
 
 
 def update(table: str, record_id: int, data: Dict[str, Any]) -> bool:
-    data["updated_at"] = _now()
-    client = _get_client()
-    if not client:
-        return False
-    sets = ", ".join(f"`{k}` = %s" for k in data)
-    sql = f"UPDATE `{table}` SET {sets} WHERE `id` = %s"
-    cur = _cursor(client)
-    cur.execute(sql, list(data.values()) + [record_id])
-    client.conn.commit()
-    return True
+    with _lock:
+        data["updated_at"] = _now()
+        client = _get_client()
+        if not client:
+            return False
+        sets = ", ".join(f"`{k}` = %s" for k in data)
+        sql = f"UPDATE `{table}` SET {sets} WHERE `id` = %s"
+        cur = _cursor(client)
+        cur.execute(sql, list(data.values()) + [record_id])
+        client.conn.commit()
+        return True
 
 
 def delete(table: str, record_id: int) -> bool:
-    client = _get_client()
-    if not client:
-        return False
-    sql = f"DELETE FROM `{table}` WHERE `id` = %s"
-    cur = _cursor(client)
-    cur.execute(sql, (record_id,))
-    client.conn.commit()
-    return True
+    with _lock:
+        client = _get_client()
+        if not client:
+            return False
+        sql = f"DELETE FROM `{table}` WHERE `id` = %s"
+        cur = _cursor(client)
+        cur.execute(sql, (record_id,))
+        client.conn.commit()
+        return True
 
 
 def execute_raw(sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
-    client = _get_client()
-    if not client:
-        return []
-    cur = _cursor(client)
-    cur.execute(sql, params)
-    return cur.fetchall()
+    with _lock:
+        client = _get_client()
+        if not client:
+            return []
+        cur = _cursor(client)
+        cur.execute(sql, params)
+        return cur.fetchall()
 
 
 def execute_many_raw(sql: str, params_list: List[tuple]) -> bool:
-    client = _get_client()
-    if not client:
-        return False
-    for params in params_list:
-        cur = _cursor(client)
-        cur.execute(sql, params)
-    client.conn.commit()
-    return True
+    with _lock:
+        client = _get_client()
+        if not client:
+            return False
+        for params in params_list:
+            cur = _cursor(client)
+            cur.execute(sql, params)
+        client.conn.commit()
+        return True
 
 
 # ── 自检 ───────────────────────────────────────────────────────────

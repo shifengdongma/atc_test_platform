@@ -119,11 +119,10 @@ def setup_logging(
     for noisy in ("kafka", "urllib3", "engineio", "socketio"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
-    # HTTP 请求日志：生产环境（Docker）用 WARNING 级别抑制每次请求的 INFO 日志
-    _http_log_level = os.environ.get("UTM_HTTP_LOG_LEVEL", "")
-    if _http_log_level:
-        logging.getLogger("werkzeug").setLevel(getattr(logging, _http_log_level.upper(), logging.WARNING))
-        logging.getLogger("_internal").setLevel(getattr(logging, _http_log_level.upper(), logging.WARNING))
+    # HTTP 请求日志：默认 WARNING 抑制刷屏，设 UTM_HTTP_LOG_LEVEL=INFO 可恢复
+    _http_log_level = os.environ.get("UTM_HTTP_LOG_LEVEL", "WARNING")
+    logging.getLogger("werkzeug").setLevel(getattr(logging, _http_log_level.upper(), logging.WARNING))
+    logging.getLogger("_internal").setLevel(getattr(logging, _http_log_level.upper(), logging.WARNING))
 
     return root
 

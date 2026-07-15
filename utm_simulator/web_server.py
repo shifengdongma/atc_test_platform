@@ -84,29 +84,32 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode=_socket_async_mode
 # ── 全局状态（线程安全通过 _lock 保护） ────────────────────────────
 _lock = threading.Lock()
 
-_current_config: Dict[str, Any] = {
-    "mode": "dynamic",  # dynamic / replay / replay_once / scene / plan
-    "target_drones": DEFAULT_TARGET_DRONES,
-    "nfz_enabled": True,
-    "nfz_count": 3,
-    "redis_ip": getattr(_env, "redis_ip", "127.0.0.1"),
-    "redis_port": getattr(_env, "redis_port", "6379"),
-    "kafka_url": getattr(_env, "kafka_url", "127.0.0.1:9092"),
-    "api_mode": False,          # 是否通过 ATC API 创建飞行任务
-    "api_base_url": "https://dkkgsit-test.testdolphin.com",
-    # scene 模式参数
-    "scene_files": [],
-    "scene_dir": None,
-    "scene_interval": 1000,
-    "timestamp_mode": "replace",  # replace / align / preserve
-    "scene_loop": False,
-    # plan 模式参数
-    "plan_selected_uids": None,  # 用户选择的航线 UID 列表，None=全部，[]=不执行任何，[...]=指定
-    "plan_route_file": "redis_route.json",  # plan 模式初始化用的航线文件（写入 Redis 后由 PlanRunner 插值）
-    # replay_once 模式参数
-    "data_file": "kafka_data.json",
-    "route_file": "redis_route.json",
-}
+def _get_default_config() -> Dict[str, Any]:
+    """惰性获取默认配置，使用 load_config() 的完整优先级体系
+    (env vars > config.json > env.py > 代码默认值)，避免 getattr 回退到 127.0.0.1。"""
+    cfg = load_config()
+    return {
+        "mode": "dynamic",
+        "target_drones": DEFAULT_TARGET_DRONES,
+        "nfz_enabled": True,
+        "nfz_count": 3,
+        "redis_ip": cfg.redis.host,
+        "redis_port": str(cfg.redis.port_int),
+        "kafka_url": cfg.kafka.bootstrap_servers,
+        "api_mode": False,
+        "api_base_url": "https://dkkgsit-test.testdolphin.com",
+        "scene_files": [],
+        "scene_dir": None,
+        "scene_interval": 1000,
+        "timestamp_mode": "replace",
+        "scene_loop": False,
+        "plan_selected_uids": None,
+        "plan_route_file": "redis_route.json",
+        "data_file": "kafka_data.json",
+        "route_file": "redis_route.json",
+    }
+
+_current_config: Dict[str, Any] = _get_default_config()
 
 _runtime_state: Dict[str, Any] = {
     "running": False,

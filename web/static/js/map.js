@@ -79,7 +79,8 @@ const TILE_PROVIDERS = {
 };
 
 let _currentTileLayer = null;
-let _tileProviderKey = 'gaode';  // 默认高德
+let _tileProviderKey = 'cartodb';  // 默认 CartoDB（通用 CDN，国内外均可访问）
+const TILE_FALLBACK_ORDER = ['cartodb', 'osm', 'gaode'];  // 失败时依次尝试
 
 // ── 初始化地图 ────────────────────────────────────────────────────
 function initMap() {
@@ -113,17 +114,19 @@ function initMap() {
   // 添加瓦片（高德为默认，国内秒加载）
   _addTileLayer(_tileProviderKey);
 
-  // 瓦片加载失败提示（连续失败 ≥5 次后显示警告）
+  // 瓦片加载失败：连续失败 ≥5 次后自动切换备用瓦片源
   _tileErrorCount = 0;
+  var _fallbackIdx = TILE_FALLBACK_ORDER.indexOf(_tileProviderKey);
   map.on('tileerror', function(e) {
     _tileErrorCount++;
     if (_tileErrorCount === 5) {
-      const loadingEl = document.getElementById('map-loading');
-      if (loadingEl) {
-        loadingEl.innerHTML = '⚠️ 地图瓦片加载失败，请检查网络连接<br><small>可尝试切换备用瓦片源</small>';
-        loadingEl.style.display = '';
-        loadingEl.style.color = '#f39c12';
-        loadingEl.style.fontSize = '13px';
+      // 自动切换到下一个备用瓦片源
+      _fallbackIdx = (_fallbackIdx + 1) % TILE_FALLBACK_ORDER.length;
+      var nextProvider = TILE_FALLBACK_ORDER[_fallbackIdx];
+      if (nextProvider !== _tileProviderKey) {
+        console.log('[map] 瓦片加载失败，自动切换: ' + _tileProviderKey + ' → ' + nextProvider);
+        _addTileLayer(nextProvider);
+        _tileErrorCount = 0;
       }
     }
   });

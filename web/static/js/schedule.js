@@ -158,6 +158,138 @@ document.getElementById('btn-task-save').addEventListener('click', async functio
   else { showToast(r.message||'保存失败','error'); }
 });
 
+// ── 批量模式切换 ──────────────────────────────────────────────────────
+var batchMode = false;
+var batchRowCounter = 0;
+
+document.getElementById('btn-mode-single').addEventListener('click', function() {
+  batchMode = false;
+  document.getElementById('btn-mode-single').style.background = 'var(--accent)';
+  document.getElementById('btn-mode-single').style.color = '#fff';
+  document.getElementById('btn-mode-batch').style.background = 'var(--bg-card)';
+  document.getElementById('btn-mode-batch').style.color = 'var(--text-dim)';
+  document.getElementById('task-inline-form').style.display = '';
+  document.getElementById('batch-form-area').style.display = 'none';
+  document.getElementById('task-form-title').textContent = editingTaskId ? document.getElementById('task-form-title').textContent : '➕ 新建定时任务';
+});
+
+document.getElementById('btn-mode-batch').addEventListener('click', function() {
+  batchMode = true;
+  document.getElementById('btn-mode-batch').style.background = 'var(--accent)';
+  document.getElementById('btn-mode-batch').style.color = '#fff';
+  document.getElementById('btn-mode-single').style.background = 'var(--bg-card)';
+  document.getElementById('btn-mode-single').style.color = 'var(--text-dim)';
+  document.getElementById('task-inline-form').style.display = 'none';
+  document.getElementById('batch-form-area').style.display = '';
+  document.getElementById('task-form-title').textContent = '📑 批量添加定时任务';
+  resetTaskForm();
+  if (document.getElementById('batch-tbody').children.length === 0) {
+    addBatchRow();
+  }
+});
+
+// ── 批量行操作 ────────────────────────────────────────────────────────
+function buildJsonFileOptions() {
+  var sel = document.getElementById('tk-json-file');
+  var opts = '<option value="">— 默认 —</option>';
+  if (sel) {
+    for (var i = 0; i < sel.options.length; i++) {
+      if (sel.options[i].value) {
+        opts += '<option value="'+sel.options[i].value+'">'+escHtml(sel.options[i].text)+'</option>';
+      }
+    }
+  }
+  return opts;
+}
+
+function buildModeOptions() {
+  return '<option value="replay">🔁 回放(循环)</option>' +
+    '<option value="replay_once">▶️ 回放(单次)</option>' +
+    '<option value="plan">📐 Redis插值</option>' +
+    '<option value="dynamic">🎮 动态仿真</option>' +
+    '<option value="scene">🎬 场景注入</option>';
+}
+
+window.addBatchRow = function() {
+  batchRowCounter++;
+  var tbody = document.getElementById('batch-tbody');
+  var tr = document.createElement('tr');
+  tr.id = 'batch-row-' + batchRowCounter;
+  var tomorrow = new Date(Date.now() + 86400000).toISOString().substring(0, 10);
+  tr.innerHTML =
+    '<td style="padding:2px;text-align:center;">' + batchRowCounter + '</td>' +
+    '<td style="padding:2px;"><input type="text" class="batch-name" placeholder="任务名" style="width:95%;font-size:11px;"></td>' +
+    '<td style="padding:2px;"><select class="batch-file" style="width:95%;font-size:11px;">' + buildJsonFileOptions() + '</select></td>' +
+    '<td style="padding:2px;"><select class="batch-mode" style="width:95%;font-size:11px;">' + buildModeOptions() + '</select></td>' +
+    '<td style="padding:2px;"><input type="date" class="batch-date" value="' + tomorrow + '" style="width:95%;font-size:11px;"></td>' +
+    '<td style="padding:2px;"><input type="time" class="batch-time" value="09:00" style="width:90%;font-size:11px;"></td>' +
+    '<td style="padding:2px;"><select class="batch-repeat" style="width:90%;font-size:11px;"><option value="once">仅一次</option><option value="daily">每天</option><option value="weekly">每周</option><option value="monthly">每月</option></select></td>' +
+    '<td style="padding:2px;text-align:center;"><button class="btn-tiny" onclick="removeBatchRow(\'batch-row-' + batchRowCounter + '\')" style="color:var(--danger);">✕</button></td>';
+  tbody.appendChild(tr);
+};
+
+window.removeBatchRow = function(rowId) {
+  var tr = document.getElementById(rowId);
+  if (tr) tr.remove();
+  // 重新编号
+  var rows = document.querySelectorAll('#batch-tbody tr');
+  rows.forEach(function(r, i) { r.cells[0].textContent = (i+1); });
+};
+
+document.getElementById('btn-batch-add-row').addEventListener('click', function() { addBatchRow(); });
+
+// ── 批量保存 ──────────────────────────────────────────────────────────
+document.getElementById('btn-batch-save').addEventListener('click', async function() {
+  var rows = document.querySelectorAll('#batch-tbody tr');
+  if (!rows.length) { showToast('请至少添加一行任务','error'); return; }
+  var items = [];
+  var valid = true;
+  rows.forEach(function(tr) {
+    var nameEl = tr.querySelector('.batch-name');
+    var fileEl = tr.querySelector('.batch-file');
+    var modeEl = tr.querySelector('.batch-mode');
+    var dateEl = tr.querySelector('.batch-date');
+    var timeEl = tr.querySelector('.batch-time');
+    var repeatEl = tr.querySelector('.batch-repeat');
+    var name = (nameEl.value||'').trim();
+    if (!name) { valid = false; showToast('请填写所有任务名称','error'); return; }
+    var dateVal = dateEl.value;
+    var timeVal = timeEl.value;
+    if (!dateVal || !timeVal) { valid = false; showToast('请选择执行日期和时间','error'); return; }
+    var repeat = repeatEl.value;
+    var dateParts = dateVal.split('-'); var timeParts = timeVal.split(':');
+    var cronExpr = timeParts[1] + ' ' + timeParts[0] + ' ' + dateParts[2] + ' ' + dateParts[1] + ' '
+      + (repeat==='daily'?'*':repeat==='weekly'?'*':repeat==='monthly'?dateParts[2]:'*');
+    var fileSel = fileEl.options[fileEl.selectedIndex];
+    items.push({
+      name: name,
+      cron_expr: cronExpr,
+      sim_mode: modeEl.value,
+      sim_params: JSON.stringify({
+        target_drones: 10,
+        duration_min: 5,
+        json_file_id: fileEl.value||'',
+        json_file_name: fileSel?fileSel.text:'',
+        repeat: repeat,
+      }),
+      enabled: 1,
+    });
+  });
+  if (!valid) return;
+  try {
+    var r = await apiPost('/api/schedule/tasks/batch', {items:items});
+    if (r.success) {
+      showToast('已批量创建 ' + r.count + ' 个任务','success');
+      // 清空表格
+      document.getElementById('batch-tbody').innerHTML = '';
+      batchRowCounter = 0;
+      loadTaskList();
+    } else {
+      showToast('批量创建失败','error');
+    }
+  } catch(e) { showToast('请求异常','error'); }
+});
+
 // ── 初始化 ──────────────────────────────────────────────────────────
 function initSchedule() {
   refreshTaskJsonFiles();

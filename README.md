@@ -195,23 +195,14 @@ atc_test_platfrom/
 │   ├── sim_manager.py           #   统一编排层：dynamic/replay/plan 三模式
 │   ├── redis_client.py          #   Redis 客户端封装（类型感知读写）
 │   ├── kafka_proc.py            #   Kafka 生产者/消费者封装（双集群镜像）
-│   ├── config.py                #   统一配置管理（dataclass，多层优先级）
-│   ├── schemas.py               #   数据契约：7 个 TypedDict 定义
-│   ├── validators.py            #   数据校验（Pydantic 边界检查）
-│   ├── exceptions.py            #   异常层次：9 个语义异常类
-│   ├── log_setup.py             #   结构化日志（控制台+JSON 双输出）
 │   ├── cli.py                   #   统一 CLI：7 个子命令
 │   ├── web_server.py            #   Flask Web 后端（REST API + WebSocket）
 │   ├── web_data_gen_bridge.py   #   API 桥接层（tools 脚本 ↔ Flask 路由）
 │   ├── sim_api_bridge.py        #   ATC API 桥接（JWT/任务CRUD/计划申报）
 │   ├── ai_integration.py        #   AI 集成点注册中心（6 个工具调用接口）
-│   ├── web/                     #   Web 前端（SPA：地图+图表+控制面板）
-│   │   ├── index.html           #     三面板布局主页面
-│   │   └── static/              #     CSS/JS/Leaflet 本地副本
-│   ├── flight_task_templates/   #   飞行任务模板（logistics/patrol/emergency）
-│   ├── schemas/                 #   JSON Schema 定义（4 个 draft-2020-12）
+│   ├── situation_monitor.py     #   态势监控采集器（SockJS+STOMP）
 │   ├── tests/                   #   pytest 单元测试（conftest + 3 test 文件）
-│   ├── tools/                   #   工具脚本集（~25 个）
+│   ├── tools/                   #   工具脚本集（~19 个）
 │   │   ├── run_kafka_alive.py   #     生产主力：预生成数据循环注入
 │   │   ├── run_plan.py          #     Redis 计划插值运行器（PlanRunner）
 │   │   ├── run_kafka_scene.py   #     场景文件注入器（SceneEmitter）
@@ -234,6 +225,38 @@ atc_test_platfrom/
 │   ├── deploy_repeat.sh         #   主部署脚本（run_kafka_alive 模式）
 │   ├── deploy.sh                #   备选部署脚本（main.py 模式）
 │   └── requirements.txt         #   Python 依赖清单
+│
+├── web/                          # 🌐 Web 前端（独立目录）
+│   ├── pages/                    #   10个功能页面（run/schedule/generate/data/env/logs等）
+│   └── static/                   #   CSS/JS/Leaflet 本地副本（11个JS模块）
+│
+├── common/                       # 📦 公共基础设施（独立目录）
+│   ├── config.py                 #   统一配置管理（环境变量>config.json>env.py>默认值）
+│   ├── config.json               #   运行时配置（Web前端可修改保存）
+│   ├── schemas.py                #   TypedDict 类型定义
+│   ├── validators.py             #   Pydantic 数据校验器
+│   ├── exceptions.py             #   语义异常层次（9个异常类）
+│   └── log_setup.py              #   结构化日志初始化
+│
+├── database/                     # 🗄️ 数据库持久化（独立目录，MySQL主库）
+│   ├── mysql_db_manager.py       #   MySQL 管理器（pymysql 1.x）
+│   ├── db_manager.py             #   SQLite 基础操作（遗留兼容）
+│   ├── json_data_manager.py      #   JSON 文件管理 + 达梦航线查询
+│   ├── env_manager.py            #   多环境配置 CRUD
+│   ├── scheduler.py              #   Cron 定时任务调度
+│   ├── log_streamer.py           #   实时日志流（内存缓冲+WS+MySQL持久化）
+│   ├── migrate_to_mysql.py       #   SQLite → MySQL 迁移工具
+│   └── migrate_schema_v2.py      #   表结构迁移 v2
+│
+├── services/                     # 🤖 独立服务
+│   └── ai/                       #   AI 数据生成
+│       └── ai_data_gen.py        #     LLM 生成器（OpenAI兼容API）
+│
+├── data/                         # 📋 统一数据目录
+│   ├── mock/                     #   模拟生成的JSON数据
+│   ├── templates/                #   飞行任务模板（3个JSON）
+│   ├── uploads/                  #   用户上传文件
+│   └── schemas/                  #   JSON Schema 定义（4个）
 │
 ├── atc_api_autotest/            # 🧪 API 自动化测试
 │   ├── api_tools/               #   核心工具库（20+ 模块）
@@ -306,10 +329,12 @@ atc_test_platfrom/
 | 组件 | 版本/说明 |
 |------|----------|
 | Python | 3.11.15（`utm` Conda 环境） |
-| Conda | `C:\wbData\anaconda3\Scripts\conda.exe` |
+| Conda | `C:\ProgramData\anaconda3\Scripts\conda.exe` |
 | Redis | 用于飞行计划（`BIZ_DATA:UAV_ROUTE`）和空域（`BIZ_DATA:AIRSPACE`）存储 |
 | Kafka | 用于遥测数据（`uav_runtime_data`）和轨迹预测（`uav_runtime_trace`） |
-| 达梦数据库 | 可选，用于数据库一致性校验（需 `dmPython`） |
+| MySQL | 测试平台主数据库（`utm_simulator` 库），存储配置/文件/任务/日志 |
+| 达梦数据库 | 可选，只读外部 ATC 系统，用于数据库一致性校验（需 `dmPython`） |
+| Docker | 可选，容器化部署（Python 3.11-slim 镜像 + docker-compose） |
 | Git | 版本管理 |
 
 ### 5.2 安装步骤
@@ -328,26 +353,50 @@ cd utm_simulator
 pip install -r requirements.txt
 
 # 4. 配置连接信息
-# 复制 env.py.example 为 env.py，填写实际 Redis/Kafka 地址与密码
-cp env.py.example env.py
-# 编辑 env.py 修改配置
+# 编辑 utm_simulator/env.py，填写实际 Redis/Kafka 地址与密码
+# 或通过 Web 控制台环境管理页直接配置（保存到 common/config.json）
 
-# 5. 验证安装
+# 5. 配置 MySQL（如使用 Docker 部署则通过环境变量注入）
+# 设置环境变量：UTM_MYSQL_HOST, UTM_MYSQL_PORT, UTM_MYSQL_USER, UTM_MYSQL_PASSWORD, UTM_MYSQL_DB
+
+# 6. 验证安装
 python cli.py check   # 检查 Redis/Kafka 连通性
 python cli.py status  # 查看 Redis 中飞行计划/空域数据量
 ```
 
-### 5.3 关键依赖
+### 5.3 Docker 部署（推荐生产环境）
+
+```bash
+cd /opt/atc_test_platfrom
+
+# 首次构建并启动
+docker compose -f docker/docker-compose.yml build --no-cache
+docker compose -f docker/docker-compose.yml up -d
+
+# 查看日志
+docker logs -f utm-simulator
+
+# 更新部署（代码变更后）
+docker compose -f docker/docker-compose.yml down
+docker compose -f docker/docker-compose.yml build --no-cache
+docker compose -f docker/docker-compose.yml up -d
+```
+
+> 详细 Docker 部署与 MySQL 排障命令参见 `docs/命令手册.md`
+
+### 5.4 关键依赖
 
 ```text
-kafka-python          # Kafka 生产者/消费者
-redis                 # Redis 客户端
-requests              # HTTP 接口调用
-Flask                 # Web 后端
-Flask-SocketIO        # WebSocket 推送
-pydantic              # 数据校验（可选，validators.py 需要）
-pytest / pytest-cov   # 单元测试
-dmPython              # 达梦数据库连接（可选，需单独安装）
+kafka-python>=2.0.2       # Kafka 生产者/消费者
+redis>=4.5.0,<5.0.0       # Redis 客户端
+requests                  # HTTP 接口调用
+Flask                     # Web 后端
+Flask-SocketIO            # WebSocket 推送
+pydantic                  # 数据校验（可选，validators.py 需要）
+pymysql==1.1.0            # MySQL 连接（严格锁定 1.x）
+cryptography              # TLS/SSL 支持（MySQL caching_sha2_password 认证所需）
+pytest / pytest-cov       # 单元测试
+dmPython                  # 达梦数据库连接（可选，需单独安装）
 ```
 
 ---
@@ -708,6 +757,6 @@ A: 达梦数据库驱动需单独安装，仅数据库相关工具需要，不�
 
 ---
 
-> 📅 最后更新：2026-07-08
+> 📅 最后更新：2026-07-15
 >
 > 👤 维护者：李洋

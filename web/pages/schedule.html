@@ -36,6 +36,12 @@
         <!-- ★ 左栏：新建定时任务表单 ★ -->
         <div class="panel-form">
           <h2 id="task-form-title">➕ 新建定时任务</h2>
+          <!-- 模式切换 -->
+          <div class="form-row" style="margin-bottom:10px;">
+            <button id="btn-mode-single" class="btn" style="background:var(--accent);color:#fff;">📋 单个添加</button>
+            <button id="btn-mode-batch" class="btn" style="background:var(--bg-card);color:var(--text-dim);">📑 批量添加</button>
+          </div>
+          <!-- 单个添加表单 -->
           <div class="task-inline-form" id="task-inline-form">
             <div class="form-row">
               <label>任务名称 *</label>
@@ -79,6 +85,30 @@
               <button id="btn-task-save" class="btn btn-start" style="padding:6px 20px;">保存</button>
             </div>
             <input type="hidden" id="tk-edit-id" value="">
+          </div>
+          <!-- 批量添加表格区域 -->
+          <div id="batch-form-area" style="display:none;">
+            <div style="max-height:380px;overflow-y:auto;margin-bottom:8px;">
+              <table id="batch-table" style="width:100%;font-size:11px;border-collapse:collapse;">
+                <thead>
+                  <tr style="background:var(--bg-card);">
+                    <th style="padding:4px;width:20px;">#</th>
+                    <th style="padding:4px;">任务名称</th>
+                    <th style="padding:4px;">JSON文件</th>
+                    <th style="padding:4px;">模式</th>
+                    <th style="padding:4px;">日期</th>
+                    <th style="padding:4px;">时间</th>
+                    <th style="padding:4px;">重复</th>
+                    <th style="padding:4px;width:30px;">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="batch-tbody"></tbody>
+              </table>
+            </div>
+            <div class="form-row" style="justify-content:space-between;">
+              <button id="btn-batch-add-row" class="btn btn-small">➕ 添加一行</button>
+              <button id="btn-batch-save" class="btn btn-start" style="padding:6px 20px;">💾 批量保存</button>
+            </div>
           </div>
         </div>
 

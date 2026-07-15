@@ -24,7 +24,7 @@ services:
       # Redis 连接（通过环境变量注入，覆盖 env.py 默认值）
       - UTM_REDIS_HOST=${UTM_REDIS_HOST}
       - UTM_REDIS_PORT=${UTM_REDIS_PORT:-21003}
-      - UTM_REDIS_PASSWORD="${UTM_REDIS_PASSWORD:-}"
+      - UTM_REDIS_PASSWORD=${UTM_REDIS_PASSWORD:-}
       # Kafka 连接
       - UTM_KAFKA_URL=${UTM_KAFKA_URL}
       - UTM_KAFKA_URL2=${UTM_KAFKA_URL2:-}
@@ -32,7 +32,7 @@ services:
       - UTM_DM_HOST=${UTM_DM_HOST:-10.165.32.32}
       - UTM_DM_PORT=${UTM_DM_PORT:-5237}
       - UTM_DM_USER=${UTM_DM_USER:-SYSDBA}
-      - UTM_DM_PASSWORD="${UTM_DM_PASSWORD:-}"
+      - UTM_DM_PASSWORD=${UTM_DM_PASSWORD:-}
       - UTM_DM_SCHEMA=${UTM_DM_SCHEMA:-ATC_DKWRJ_TEST}
       # MySQL 日志持久化
       # 容器内连接 1Panel 管理的 MySQL 服务（1Panel-mysql-Jdmq:3306）
@@ -40,7 +40,7 @@ services:
       - UTM_MYSQL_HOST=${UTM_MYSQL_HOST:-}
       - UTM_MYSQL_PORT=${UTM_MYSQL_PORT:-3306}
       - UTM_MYSQL_USER=${UTM_MYSQL_USER:-}
-      - UTM_MYSQL_PASSWORD="${UTM_MYSQL_PASSWORD:-}"
+      - UTM_MYSQL_PASSWORD=${UTM_MYSQL_PASSWORD:-}
       - UTM_MYSQL_DB=${UTM_MYSQL_DB:-}
       # ATC 端点
       - UTM_ATC_BASE_URL=${UTM_ATC_BASE_URL:-https://dkkgsit-test.testdolphin.com}

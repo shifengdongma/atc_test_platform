@@ -18,6 +18,16 @@ MySQL 数据库连接客户端（纯客户端类，不包含项目配置）
 
 import pymysql
 
+# pymysql 2.x 有多个已知问题（latin-1 密码编码、ssl 参数格式变更），
+# 本模块仅兼容 1.x。requirements.txt 已锁定 pymysql>=1.1,<2.0
+_pymysql_ver = tuple(int(x) for x in pymysql.__version__.split(".")[:2])
+if _pymysql_ver >= (2, 0):
+    import sys as _sys
+    _sys.stderr.write(
+        f"[MysqlDbClient] ⚠ pymysql {pymysql.__version__} 不兼容，"
+        f"请降级到 1.x: pip install 'pymysql<2.0'\n"
+    )
+
 
 class MysqlDbClient:
     """MySQL 数据库连接客户端

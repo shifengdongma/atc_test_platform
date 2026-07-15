@@ -2448,3 +2448,34 @@ Docker 容器中达梦数据库连接持续报 `[CODE:-70089]Encryption module f
 | 新增诊断项 | 5 |
 
 | 状态 | ✅ 已完成 |
+
+---
+
+## 2026-07-15 系统文档全面更新与用户手册编写
+
+### 修改/新建文件
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `docs/系统架构文档.md` | 修改 | 更新至 v5.4：技术栈新增 Docker/AI 集成/MySQL 主库；新增 services/ 目录；数据库层重写为 MySQL 主库架构（6 张表）；新增 Docker 容器化部署架构章节；更新关键技术决策 |
+| `README.md` | 修改 | 新增 common/database/services/data 独立目录结构；新增 Docker 部署章节；更新数据库描述为 MySQL 主库；更新依赖列表 |
+| `docs/用户使用手册.md` | **新建** | 14 章完整使用指南（~600 行）：系统概述/快速开始/Web控制台(7页面详解)/5种仿真模式/数据生成/CLI工具/API测试/HA测试(6类)/Docker部署/配置管理/定时任务/AI生成/排障/附录 |
+| `docs/工作总结.md` | 修改 | 追加本次工作总结记录 |
+| `database/data.db` | 修改 | SQLite 运行时数据同步 |
+| `docker/docker-compose.yml` | 修改 | Docker 服务编排配置更新 |
+| `docs/docker容器日志.md` | 修改 | Docker 容器日志记录更新 |
+| `docs/docker报错日志.md` | 修改 | Docker 错误日志记录更新 |
+| `docs/命令手册.md` | 修改 | Docker 部署+MySQL 排障命令手册更新 |
+| `docs/本地报错日志.md` | 修改 | 本地报错日志记录更新 |
+| `web/pages/schedule.html` | 修改 | 定时任务页面批量模式更新 |
+| `web/static/js/schedule.js` | 修改 | 定时任务 JS 批量模式逻辑更新 |
+
+### 汇总
+
+| 操作 | 数量 |
+|------|------|
+| 新建文件 | 1 |
+| 修改文件 | 11 |
+| 推送仓库 | 2（GitHub + GitLab） |
+
+| 状态 | ✅ 已完成 |

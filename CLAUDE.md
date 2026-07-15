@@ -66,14 +66,14 @@ cd atc_api_autotest/api_tools && python iomp_api_common.py
 - 推荐使用 `typing` 类型注解（`List[Dict[str, Any]]`、`Optional[str]` 等）
 - 在子目录运行的脚本需将项目根目录加入 `sys.path`，方便无包前缀导入
 - JSON 读写：`encoding='utf-8'`，写入 `ensure_ascii=False`
+- **修改原则**：聚焦修复实际 bug，不添加防御性预判代码。异常路径的兜底逻辑优先用已有的 fallback 机制（如 MySQL→SQLite 降级），不在每个函数中重复添加相同的 if 判断。保持代码精简，不为"可能发生但从未出现"的场景预先加代码
 
 ## 数据库架构（重要：两种数据库职责完全不同）
 
 | 数据库 | 类型 | 职责 | 访问方式 | 配置入口 |
 |--------|------|------|----------|----------|
 | **达梦 (Dameng)** | 只读 | 外部 ATC 系统数据库，查询飞行航线 (`air_route`) 和飞行计划等业务数据 | `dmPython` 驱动，通过 `dmdbclient.py` → `DmDbClient` 连接 | `atc_api_autotest/env.py` 的 `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_SCHEMA` |
-| **MySQL** | 读写 | 测试平台自身数据持久化：仿真配置、JSON 文件、定时任务、任务日志、告警类型 | `pymysql` 驱动，通过 `mysqldbclient.py` → `MysqlDbClient` 连接，不可用时自动降级 SQLite | `common/config.py` 的 `load_mysql_config()`，环境变量 `UTM_MYSQL_*` |
-| **SQLite** | 读写 | MySQL 的本地降级方案，数据库文件 `database/data.db` | `database/db_manager.py` | 自动创建，无需配置 |
+| **MySQL** | 读写 | 测试平台主数据库：仿真配置、JSON文件元数据、定时任务、任务日志、告警类型 | `pymysql` → `mysqldbclient.py` → `MysqlDbClient` | `common/config.py` 的 `load_mysql_config()`，环境变量 `UTM_MYSQL_*` |
 
 **关键规则**：
 - 达梦和 MySQL **完全独立**，不可混用。达梦是只读的外部数据源，MySQL/SQLite 是测试平台的本地存储。

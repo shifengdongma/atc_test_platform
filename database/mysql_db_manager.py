@@ -94,8 +94,9 @@ def _get_client():
                     _mysql_last_fail_time = time.time()
                     return None
                 if _mysql_client.connect():
-                    _mysql_client.cursor.execute("SELECT 1")
-                    _mysql_client.cursor.fetchone()
+                    _c = _mysql_client.conn.cursor()
+                    _c.execute("SELECT 1")
+                    _c.fetchone()
                     _mysql_available = True
                     _ensure_mysql_tables(client=_mysql_client)
                     print("[mysql_db_manager] MySQL 连接成功")
@@ -114,8 +115,9 @@ def _get_client():
         if _mysql_client is not None and _mysql_available is True:
             try:
                 _mysql_client.conn.ping(reconnect=True)
-                _mysql_client.cursor.execute("SELECT 1")
-                _mysql_client.cursor.fetchone()
+                _c = _mysql_client.conn.cursor()
+                _c.execute("SELECT 1")
+                _c.fetchone()
             except Exception as e:
                 print(f"[mysql_db_manager] MySQL 连接已断开 ({e})，尝试重连...")
                 try:
@@ -126,8 +128,9 @@ def _get_client():
                 try:
                     _mysql_client = _create_mysql_client()
                     if _mysql_client and _mysql_client.connect():
-                        _mysql_client.cursor.execute("SELECT 1")
-                        _mysql_client.cursor.fetchone()
+                        _c = _mysql_client.conn.cursor()
+                        _c.execute("SELECT 1")
+                        _c.fetchone()
                         _ensure_mysql_tables(client=_mysql_client)
                         print("[mysql_db_manager] MySQL 重连成功")
                     else:
@@ -227,10 +230,16 @@ def _ensure_mysql_tables(client=None):
     for name, ddl in _MYSQL_TABLE_DDL.items():
         try:
             client.execute(ddl)
-            client.cursor.execute(f"SELECT 1 FROM `{name}` LIMIT 0")
+            cur = _cursor(client)
+            cur.execute(f"SELECT 1 FROM `{name}` LIMIT 0")
             print(f"[mysql_db_manager] 表已就绪: {name}")
         except Exception as e:
             print(f"[mysql_db_manager] 建表失败 {name}: {e}")
+
+
+def _cursor(client):
+    """每次查询创建独立 cursor，避免多线程共享同一 cursor 导致 Protocol error。"""
+    return client.conn.cursor()
 
 
 # ── CRUD ───────────────────────────────────────────────────────────
@@ -251,8 +260,9 @@ def query_all(table: str, order_by: str = "id DESC") -> List[Dict[str, Any]]:
         return []
     safe_order = order_by.replace("id", "`id`") if "id" in order_by and "`id`" not in order_by else order_by
     sql = f"SELECT * FROM `{table}` ORDER BY {safe_order}"
-    client.cursor.execute(sql)
-    return client.cursor.fetchall()
+    cur = _cursor(client)
+    cur.execute(sql)
+    return cur.fetchall()
 
 
 def query_one(table: str, record_id: int) -> Optional[Dict[str, Any]]:
@@ -260,8 +270,9 @@ def query_one(table: str, record_id: int) -> Optional[Dict[str, Any]]:
     if not client:
         return None
     sql = f"SELECT * FROM `{table}` WHERE `id` = %s"
-    client.cursor.execute(sql, (record_id,))
-    return client.cursor.fetchone()
+    cur = _cursor(client)
+    cur.execute(sql, (record_id,))
+    return cur.fetchone()
 
 
 def query(table: str, where: str = "", params: tuple = (),
@@ -274,8 +285,9 @@ def query(table: str, where: str = "", params: tuple = (),
         sql += f" WHERE {where.replace('?', '%s')}"
     safe_order = order_by.replace("id", "`id`") if "id" in order_by else order_by
     sql += f" ORDER BY {safe_order}"
-    client.cursor.execute(sql, params if params else ())
-    return client.cursor.fetchall()
+    cur = _cursor(client)
+    cur.execute(sql, params if params else ())
+    return cur.fetchall()
 
 
 def insert(table: str, data: Dict[str, Any]) -> int:
@@ -288,9 +300,10 @@ def insert(table: str, data: Dict[str, Any]) -> int:
     columns = ", ".join(f"`{k}`" for k in data.keys())
     placeholders = ", ".join("%s" for _ in data)
     sql = f"INSERT INTO `{table}` ({columns}) VALUES ({placeholders})"
-    client.cursor.execute(sql, list(data.values()))
+    cur = _cursor(client)
+    cur.execute(sql, list(data.values()))
     client.conn.commit()
-    return client.cursor.lastrowid
+    return cur.lastrowid
 
 
 def update(table: str, record_id: int, data: Dict[str, Any]) -> bool:
@@ -300,7 +313,8 @@ def update(table: str, record_id: int, data: Dict[str, Any]) -> bool:
         return False
     sets = ", ".join(f"`{k}` = %s" for k in data)
     sql = f"UPDATE `{table}` SET {sets} WHERE `id` = %s"
-    client.cursor.execute(sql, list(data.values()) + [record_id])
+    cur = _cursor(client)
+    cur.execute(sql, list(data.values()) + [record_id])
     client.conn.commit()
     return True
 
@@ -310,7 +324,8 @@ def delete(table: str, record_id: int) -> bool:
     if not client:
         return False
     sql = f"DELETE FROM `{table}` WHERE `id` = %s"
-    client.cursor.execute(sql, (record_id,))
+    cur = _cursor(client)
+    cur.execute(sql, (record_id,))
     client.conn.commit()
     return True
 
@@ -319,8 +334,9 @@ def execute_raw(sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
     client = _get_client()
     if not client:
         return []
-    client.cursor.execute(sql, params)
-    return client.cursor.fetchall()
+    cur = _cursor(client)
+    cur.execute(sql, params)
+    return cur.fetchall()
 
 
 def execute_many_raw(sql: str, params_list: List[tuple]) -> bool:
@@ -328,7 +344,8 @@ def execute_many_raw(sql: str, params_list: List[tuple]) -> bool:
     if not client:
         return False
     for params in params_list:
-        client.cursor.execute(sql, params)
+        cur = _cursor(client)
+        cur.execute(sql, params)
     client.conn.commit()
     return True
 

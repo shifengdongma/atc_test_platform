@@ -56,7 +56,8 @@ WORKDIR /app
 
 # ── 安装 Python 依赖（一次性从 requirements.txt 安装全部依赖）──
 COPY utm_simulator/requirements.txt /app/utm_simulator/requirements.txt
-RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com -r /app/utm_simulator/requirements.txt
+RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com -r /app/utm_simulator/requirements.txt \
+    && python -c "import pymysql; v=pymysql.__version__; assert v<'2.0', f'pymysql版本 {v} 不兼容，需1.x！请检查requirements.txt'; print(f'pymysql {v} OK')"
 
 # ── 达梦数据库驱动（仅 Linux/Docker 需要，v2.5.22+ 自带 DPI 库免配置）──
 RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com dmPython>=2.5.22

@@ -42,6 +42,17 @@ cd atc_api_autotest && python run_testcase.py
 cd atc_ha_test && python ha_iomp_server_reboot.py
 ```
 
+## 数据库架构（重要：两种数据库职责完全不同）
+
+| 数据库 | 类型 | 职责 | 实现文件 |
+|--------|------|------|----------|
+| **达梦 (Dameng)** | 只读 | 外部 ATC 系统，查询飞行航线/计划 | `dmdbclient.py` → `DmDbClient` |
+| **MySQL** | 读写 | 测试平台本地持久化 | `mysqldbclient.py` → `MysqlDbClient` |
+| **SQLite** | 读写 | MySQL 不可用时的自动降级 | `db_manager.py` |
+
+- 达梦和 MySQL **完全独立**，不可混用。排查日志时先确认是哪个数据库报错。
+- `mysql_db_manager.py` 只管理 MySQL/SQLite；`json_data_manager.py` 中的 `_get_dm_client()` 只管理达梦。
+
 ## 注意事项
 
 - 所有 Python 脚本使用 `utm` Conda 环境（Python 3.11.15）

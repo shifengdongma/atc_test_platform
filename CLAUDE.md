@@ -67,6 +67,21 @@ cd atc_api_autotest/api_tools && python iomp_api_common.py
 - 在子目录运行的脚本需将项目根目录加入 `sys.path`，方便无包前缀导入
 - JSON 读写：`encoding='utf-8'`，写入 `ensure_ascii=False`
 
+## 数据库架构（重要：两种数据库职责完全不同）
+
+| 数据库 | 类型 | 职责 | 访问方式 | 配置入口 |
+|--------|------|------|----------|----------|
+| **达梦 (Dameng)** | 只读 | 外部 ATC 系统数据库，查询飞行航线 (`air_route`) 和飞行计划等业务数据 | `dmPython` 驱动，通过 `dmdbclient.py` → `DmDbClient` 连接 | `atc_api_autotest/env.py` 的 `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_SCHEMA` |
+| **MySQL** | 读写 | 测试平台自身数据持久化：仿真配置、JSON 文件、定时任务、任务日志、告警类型 | `pymysql` 驱动，通过 `mysqldbclient.py` → `MysqlDbClient` 连接，不可用时自动降级 SQLite | `common/config.py` 的 `load_mysql_config()`，环境变量 `UTM_MYSQL_*` |
+| **SQLite** | 读写 | MySQL 的本地降级方案，数据库文件 `database/data.db` | `database/db_manager.py` | 自动创建，无需配置 |
+
+**关键规则**：
+- 达梦和 MySQL **完全独立**，不可混用。达梦是只读的外部数据源，MySQL/SQLite 是测试平台的本地存储。
+- 达梦连接失败 ≠ MySQL 连接失败，排查时先确认是哪个数据库报错。
+- `mysql_db_manager.py` 只管理 MySQL/SQLite，不涉及达梦。
+- `json_data_manager.py` 中的 `_get_dm_client()` 只管理达梦，不涉及 MySQL。
+- 修改任一数据库配置时，确认不会影响另一个。
+
 ## Redis/Kafka 连接约定
 
 - **配置入口**: `atc_api_autotest/env.py` 和 `atc_ha_test/ha_env.py`

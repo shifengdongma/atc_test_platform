@@ -155,8 +155,17 @@ def _get_client():
                 _mysql_last_fail_time = time.time()
         # ── 连接保活检查（pymysql 连接可能被服务端/网络关闭） ──
         if _mysql_client is not None and _mysql_available is True:
+            if _mysql_client.conn is None:
+                # 连接对象为空（connect() 失败但客户端未正确清理），降级到 SQLite
+                _mysql_client = None
+                _mysql_available = False
+                _mysql_last_fail_time = time.time()
+                return None
+            # ping + SELECT 1 双重验证（ping 可能误报存活，SELECT 1 才是真验证）
             try:
                 _mysql_client.conn.ping(reconnect=True)
+                _mysql_client.cursor.execute("SELECT 1")
+                _mysql_client.cursor.fetchone()
             except Exception as e:
                 print(f"[mysql_db_manager] MySQL ping 失败 ({_mysql_conn_target}): {e}，尝试新建连接...")
                 # 关闭旧连接，创建全新客户端实例（避免 SSL 状态残留导致 BAD_LENGTH）
@@ -292,11 +301,40 @@ def _ensure_mysql_tables(client=None):
             print(f"[mysql_db_manager] 建表失败 {name}: {e}")
 
 
+def _mark_mysql_dead(reason: str = "") -> None:
+    """标记 MySQL 不可用，后续所有调用直接走 SQLite（避免反复重试死连接）。"""
+    global _mysql_client, _mysql_available, _mysql_last_fail_time
+    with _lock:
+        if _mysql_client is not None:
+            try:
+                _mysql_client.close()
+            except Exception:
+                pass
+            _mysql_client = None
+        _mysql_available = False
+        _mysql_last_fail_time = time.time()
+    if reason:
+        print(f"[mysql_db_manager] MySQL 已禁用 ({reason})，后续请求使用 SQLite")
+
+
 # ── 检测当前使用的后端 ─────────────────────────────────────────────
 
 def _use_mysql() -> bool:
     """当前是否使用 MySQL（连接可用则优先）。"""
     return _get_client() is not None
+
+
+def _is_dead_conn_error(err: Exception) -> bool:
+    """判断异常是否为 MySQL 连接已死（socket 关闭/无效），而非 SQL 语法等业务错误。"""
+    msg = str(err).lower()
+    dead_signals = [
+        "closed file", "winerror 10038", "非套接字",
+        "bad file descriptor", "connection reset", "broken pipe",
+        "mysql server has gone away", "lost connection",
+        "PyMemoryView_FromBuffer",  # pymysql C-level memory corruption
+        "info->buf must not be null",
+    ]
+    return any(s in msg for s in dead_signals)
 
 
 # ── 通用 CRUD（与 db_manager.py 接口一致） ─────────────────────────
@@ -326,6 +364,8 @@ def query_all(table: str, order_by: str = "id DESC") -> List[Dict[str, Any]]:
             return client.cursor.fetchall()
         except Exception as e:
             print(f"[mysql_db_manager] query_all 失败: {e}，降级到 SQLite")
+            if _is_dead_conn_error(e):
+                _mark_mysql_dead(str(e))
     return _sqlite.query_all(table, order_by)
 
 
@@ -339,6 +379,8 @@ def query_one(table: str, record_id: int) -> Optional[Dict[str, Any]]:
             return client.cursor.fetchone()
         except Exception as e:
             print(f"[mysql_db_manager] query_one 失败: {e}，降级到 SQLite")
+            if _is_dead_conn_error(e):
+                _mark_mysql_dead(str(e))
     return _sqlite.query_one(table, record_id)
 
 
@@ -360,6 +402,8 @@ def query(table: str, where: str = "", params: tuple = (),
             return client.cursor.fetchall()
         except Exception as e:
             print(f"[mysql_db_manager] query 失败: {e}，降级到 SQLite")
+            if _is_dead_conn_error(e):
+                _mark_mysql_dead(str(e))
     return _sqlite.query(table, where, params, order_by)
 
 
@@ -380,6 +424,8 @@ def insert(table: str, data: Dict[str, Any]) -> int:
             return client.cursor.lastrowid
         except Exception as e:
             print(f"[mysql_db_manager] insert 失败: {e}，降级到 SQLite")
+            if _is_dead_conn_error(e):
+                _mark_mysql_dead(str(e))
             try:
                 client.conn.rollback()
             except Exception:
@@ -401,6 +447,8 @@ def update(table: str, record_id: int, data: Dict[str, Any]) -> bool:
             return True
         except Exception as e:
             print(f"[mysql_db_manager] update 失败: {e}，降级到 SQLite")
+            if _is_dead_conn_error(e):
+                _mark_mysql_dead(str(e))
             try:
                 client.conn.rollback()
             except Exception:
@@ -419,6 +467,8 @@ def delete(table: str, record_id: int) -> bool:
             return True
         except Exception as e:
             print(f"[mysql_db_manager] delete 失败: {e}，降级到 SQLite")
+            if _is_dead_conn_error(e):
+                _mark_mysql_dead(str(e))
             try:
                 client.conn.rollback()
             except Exception:
@@ -435,6 +485,8 @@ def execute_raw(sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
             return client.cursor.fetchall()
         except Exception as e:
             print(f"[mysql_db_manager] execute_raw 失败: {e}，降级到 SQLite")
+            if _is_dead_conn_error(e):
+                _mark_mysql_dead(str(e))
     return _sqlite.execute_raw(sql, params)
 
 

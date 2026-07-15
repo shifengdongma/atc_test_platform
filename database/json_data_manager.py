@@ -714,10 +714,8 @@ def _get_dm_client():
         # atc_api_autotest/env.py（含 DB_HOST 等达梦配置）。
         _cached_env = _sys.modules.pop("env", None)
         try:
-            import importlib.util as _util
-            _spec = _util.spec_from_file_location("_dmdbclient_shared", _dm_file)
-            _mod = _util.module_from_spec(_spec)
-            _spec.loader.exec_module(_mod)
+            import importlib as _imlib
+            _mod = _imlib.import_module("dmdbclient")
         finally:
             if _cached_env is not None:
                 _sys.modules["env"] = _cached_env

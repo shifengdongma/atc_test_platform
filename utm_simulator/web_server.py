@@ -202,6 +202,21 @@ def _add_log(msg: str) -> None:
         print(f"[web_server] 推送日志到 streamer 失败: {e}")
 
 
+def _push_replay_once_trace(ds) -> None:
+    """从 replay_once 模式的 DataSource 消费 trace 数据推送到前端 Layer 2。"""
+    try:
+        if hasattr(ds, 'kafka_consumer') and ds.kafka_consumer:
+            trace_msgs = ds.kafka_consumer.poll(timeout_ms=100)
+            if trace_msgs:
+                socketio.emit("trace_data", {
+                    "count": len(trace_msgs),
+                    "data": list(trace_msgs.values()),
+                    "key": "replay_once"
+                })
+    except Exception:
+        pass  # trace 桥接失败不影响主循环
+
+
 def _get_streamer():
     """惰性导入 log_streamer 单例，绑定 WebSocket 推送。"""
     import log_streamer as _ls
@@ -209,6 +224,13 @@ def _get_streamer():
     if s._callback is None:
         def _ws_push(entry):
             socketio.emit("log_entry", entry)
+            # 同时桥接 ws_captured_data 到 run.html 的 Layer 4（ATC WebSocket 前端数据）
+            if entry.get("type") == "ws_captured_data":
+                socketio.emit("ws_captured", {
+                    "raw_type": entry.get("type_name", ""),
+                    "message": entry.get("message", ""),
+                    "detail": entry.get("detail"),
+                })
         s._callback = _ws_push
         s.push("sim_status", "日志采集服务已就绪")
     return s
@@ -297,6 +319,7 @@ class SimulationRunner:
         self.target_drones = config["target_drones"]
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self._tick_count = 0  # 用于遥测桥接健康检查
 
         # 构建 AppConfig 供 SimulationManager 使用
         # 从 load_config() 加载基础配置（env.py + config.json + UTM_* 环境变量），
@@ -447,6 +470,10 @@ class SimulationRunner:
                                 _runtime_state["logs"].append(log_entry)
                                 if len(_runtime_state["logs"]) > 50:
                                     _runtime_state["logs"] = _runtime_state["logs"][-50:]
+                    # 每 30 秒检查遥测桥接子进程健康
+                    self._tick_count += 1
+                    if self._tick_count % 30 == 0:
+                        self._check_telemetry_bridge()
                     self._push_status()
                 except Exception as e:
                     _add_log(f"状态查询错误: {e}")
@@ -458,7 +485,9 @@ class SimulationRunner:
 
         elif self.mode == "replay":
             # 使用 SimulationManager 统一编排，传入用户选择的文件参数
-            self._sim_mgr = SimulationManager(self._app_cfg, log_callback=_add_log)
+            self._sim_mgr = SimulationManager(self._app_cfg, log_callback=_add_log,
+                                              trace_callback=lambda d: socketio.emit("trace_data", d),
+                                              telemetry_callback=lambda d: socketio.emit("telemetry_data", d))
             self._sim_mgr.start(
                 mode=self.mode,
                 target_drones=self.target_drones,
@@ -529,6 +558,8 @@ class SimulationRunner:
                             _runtime_state["kafka_msg_per_sec"] = len(batch)
                             if self._start_time:
                                 _runtime_state["uptime_sec"] = int(time.time() - self._start_time)
+                    # 桥接触发数据到前端 Layer 2（运行日志-轨迹预测）
+                    _push_replay_once_trace(ds)
                     self._push_status()
                     time.sleep(1.0)
 
@@ -573,8 +604,20 @@ class SimulationRunner:
                     with _lock:
                         _runtime_state["active_drones"] = len(emitter.uav_data_list)
 
+                    _prev_scene_sent = 0
                     while self._running and emitter.running:
                         try:
+                            # 桥接场景遥测计数到前端 Layer 1（运行日志-遥测）
+                            current_sent = emitter.stats.get('sent', 0)
+                            if current_sent > _prev_scene_sent:
+                                count = current_sent - _prev_scene_sent
+                                _prev_scene_sent = current_sent
+                                _get_streamer().report_kafka_telemetry(count)
+                                socketio.emit("telemetry_data", {
+                                    "records": [], "count": count,
+                                    "mode": "scene",
+                                    "message": f"场景注入 {count} 条遥测记录"
+                                })
                             with _lock:
                                 if self._start_time:
                                     _runtime_state["uptime_sec"] = int(time.time() - self._start_time)
@@ -709,15 +752,35 @@ class SimulationRunner:
                 print(f"[web_server] 冲突告警消费者启动失败: {e}")
         else:
             print("[web_server] dynamic 模式，跳过 Kafka 冲突告警消费者（避免 ctypes 并发崩溃）")
+            _add_log("dynamic 模式：冲突告警消费者已跳过（ctypes 兼容性限制，不影响核心功能）")
 
         # dynamic 模式：启动遥测桥接子进程（Redis → Kafka）
         if self.mode == "dynamic":
             self._start_telemetry_bridge()
+            # 验证桥接进程是否成功启动
+            time.sleep(0.5)
+            bridge = getattr(self, "_telemetry_bridge", None)
+            if bridge is None or bridge.poll() is not None:
+                _add_log("⚠️ 遥测桥接子进程启动失败，dynamic 模式将无 Kafka 数据，请检查 telemetry_bridge.py")
 
         self._thread = threading.Thread(target=self._sim_loop, daemon=True)
         self._thread.start()
 
         socketio.emit("status_change", {"event": "started", "message": "仿真已启动"})
+
+    def _check_telemetry_bridge(self) -> None:
+        """检查遥测桥接子进程是否存活，异常退出时自动重启。"""
+        bridge = getattr(self, "_telemetry_bridge", None)
+        if bridge is None:
+            return
+        retcode = bridge.poll()
+        if retcode is not None:
+            _add_log(f"⚠️ 遥测桥接子进程已退出 (code={retcode})，正在重启...")
+            try:
+                self._start_telemetry_bridge()
+                _add_log("遥测桥接子进程已重启")
+            except Exception as e:
+                _add_log(f"遥测桥接重启失败: {e}")
 
     def _start_telemetry_bridge(self) -> None:
         """启动遥测桥接子进程：将 Redis BIZ_DATA:UAV_TELEMETRY 转发到 Kafka。

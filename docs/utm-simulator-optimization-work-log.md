@@ -2371,3 +2371,48 @@ Docker 容器中达梦数据库连接持续报 `[CODE:-70089]Encryption module f
 | 诊断发现 | DPI 库 dlopen 加载路径是根因，非符号冲突 |
 
 | 状态 | ✅ 已完成 |
+
+---
+
+### 2026-07-15: 地图瓦片优先级 + 运行日志实时捕获 + 仿真模式下游可见性修复
+
+> 来源对话：优化计划 `1-2-3-redis-https-dkkgsit-test-testdolp-flickering-bachman.md`
+
+#### Task 1: 地图瓦片源优先级调整
+
+**问题**：默认使用 CartoDB 瓦片源（国外 CDN），国内加载慢。  
+**修复**：默认改为高德地图，回退顺序为 高德→CartoDB→OSM。
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `web/static/js/map.js` | 修改 (2行) | 82行 `_tileProviderKey` 改为 `'gaode'`；83行 `TILE_FALLBACK_ORDER` 改为 `['gaode','cartodb','osm']` |
+
+#### Task 2: 运行日志实时捕获
+
+**问题**：仿真启动后运行日志面板的 5 个日志层均无实时数据。  
+**根因**：后端在多种模式下未向前端推送 WebSocket 日志事件。
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `utm_simulator/web_server.py` | 修改 (5处) | ① `_ws_push` 桥接 `ws_captured` 事件（Layer 4）；② replay 模式补全 `telemetry_callback`/`trace_callback`（Layer 1+2）；③ scene 模式遥测计数桥接（Layer 1）；④ dynamic 模式冲突告警跳过日志（Layer 3）；⑤ 新增 `_push_replay_once_trace()` 函数（Layer 2） |
+
+#### Task 3: 仿真模式下游可见性修复
+
+**问题**：仅 redis 计划插值模式在下游态势系统中显示监视目标数。  
+**根因**：① scene 模式 emit 线程先于 Redis 航线写入启动（时序错误）；② `operatingStatus` 未补齐；③ dynamic 模式遥测桥接子进程无健康监控；④ 单记录场景文件无法写入 Redis 航线。
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `utm_simulator/tools/run_kafka_scene.py` | 修改 (3处) | ① `start()`: Redis 写入移到 emit 线程启动之前；② `_emit_once()`: 缺失 `operatingStatus` 时设为 2；③ `_build_redis_route()`: 支持单记录场景文件构造悬停航线 |
+| `utm_simulator/web_server.py` | 修改 (3处) | ① dynamic 模式循环每 30s 调用 `_check_telemetry_bridge()`；② 新增 `_check_telemetry_bridge()` 方法（poll+自动重启）；③ 桥接进程启动后 0.5s 验证 |
+| `utm_simulator/sim_manager.py` | 修改 (2处) | ① `_init_replay_mode()`: 航线写入后 `hgetall` 验证 + Warning 日志；② 遥测加载后遍历补齐 `operatingStatus=2` |
+
+#### 汇总
+
+| 操作 | 数量 |
+|------|------|
+| 修改文件 | 4 |
+| 优化项 | 11 处 |
+| 问题根因 | 时序错误 + 回调缺失 + 字段缺失 + 进程无监控 |
+
+| 状态 | ✅ 已完成 |

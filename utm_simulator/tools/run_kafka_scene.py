@@ -254,22 +254,23 @@ class SceneEmitter:
         self.running = True
         self.stats['start_time'] = time.time()
 
+        # ① 先将航线写入 Redis（必须在发射线程之前，确保下游 UTM 先有飞行计划）
+        if self.redis_client:
+            print("\n[Redis] 正在写入 UAV 航线数据...")
+            self._write_redis_route_batch()
+            print(f"[Redis] 航线写入完成: {len(self.uav_data_list)} 架")
+
+        # ② 再启动遥测发射线程（此时 Redis 中已有飞行计划，下游可正常关联）
         self._thread = threading.Thread(target=self._emit_loop)
         self._thread.daemon = True
         self._thread.start()
 
-        # 启动 trace 消费线程
+        # ③ 最后启动 trace 消费线程
         if self.trace_consumer:
             self.trace_thread = threading.Thread(target=self._consume_trace_loop)
             self.trace_thread.daemon = True
             self.trace_thread.start()
             print("[Trace] 开始消费 uav_runtime_trace")
-
-        # 发射前将航线写入 Redis（触发下游 UTM 激活追踪）
-        if self.redis_client:
-            print("\n[Redis] 正在写入 UAV 航线数据...")
-            self._write_redis_route_batch()
-            print(f"[Redis] 航线写入完成: {len(self.uav_data_list)} 架")
 
         print(f"\n🚀 发射器启动")
         print(f"   UAV 数量: {len(self.uav_data_list)}")
@@ -354,6 +355,10 @@ class SceneEmitter:
 
             record = uav.next()
             record['timestamp'] = self._process_timestamp(record, now_ms)
+            record['active'] = 1  # 标记激活状态，与 PlanRunner 输出一致
+            # 确保 operatingStatus=2（飞行中），下游 UTM 依赖此字段识别活跃 UAV
+            if record.get('operatingStatus') is None:
+                record['operatingStatus'] = 2
             records.append(record)
 
         if records:
@@ -516,10 +521,42 @@ class SceneEmitter:
             time.sleep(0.05)
 
     def _build_redis_route(self, uav):
-        """根据 UAV 遥测数据生成航线字典，返回 None 表示数据不足"""
-        if not uav.records or len(uav.records) < 2:
+        """根据 UAV 遥测数据生成航线字典，返回 None 表示无数据。
+        起降时间平移到当前时刻（保持原始飞行时长），以触发下游 ATC 激活追踪。"""
+        if not uav.records:
             return None
         records = uav.records
+
+        # 单记录场景：构造一个悬停点航线，确保下游也能识别该 UAV
+        if len(records) == 1:
+            p = records[0]
+            now = time.time()
+            route_list = [{
+                "sequence": 0,
+                "type": 2,
+                "segmentStartLon": p.get("longitude", 0),
+                "segmentStartLat": p.get("latitude", 0),
+                "segmentEndLon": p.get("longitude", 0),
+                "segmentEndLat": p.get("latitude", 0),
+                "segmentStartHeight": p.get("geodeticAltitude", 0),
+                "segmentEndHeight": p.get("geodeticAltitude", 0),
+                "segmentProtectHeight": 0,
+                "segmentProtectHeightType": 0,
+                "segmentWidth": 0,
+            }]
+            return {
+                "uniqueProductIdentificationCode": uav.uid,
+                "flightPlanList": [{
+                    "flightPlanId": 1,
+                    "planTakeoffTime": now,
+                    "planLandTime": now + 60,
+                    "flightTaskId": 1,
+                    "flightTaskName": "test",
+                    "routeList": route_list,
+                }],
+            }
+
+        # 多记录场景：按原有逻辑构建完整的折线航线
         route_list = []
         for i in range(len(records) - 1):
             p0 = records[i]
@@ -537,19 +574,22 @@ class SceneEmitter:
                 "segmentProtectHeightType": 0,
                 "segmentWidth": 0,
             })
+        # 计算原始飞行时长，再将起降时间平移到当前时刻
         start_ts = records[0].get("timestamp", int(time.time()))
         end_ts = records[-1].get("timestamp", start_ts + 600)
         if start_ts > 1e10:
             start_ts = start_ts / 1000.0
         if end_ts > 1e10:
             end_ts = end_ts / 1000.0
+        duration = max(end_ts - start_ts, 60)  # 至少保底 60 秒
+        now = time.time()
         return {
             "uniqueProductIdentificationCode": uav.uid,
             "flightPlanList": [
                 {
                     "flightPlanId": 1,
-                    "planTakeoffTime": start_ts,
-                    "planLandTime": end_ts,
+                    "planTakeoffTime": now,
+                    "planLandTime": now + duration,
                     "flightTaskId": 1,
                     "flightTaskName": "test",
                     "routeList": route_list,

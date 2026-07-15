@@ -475,6 +475,13 @@ class SimulationManager:
                     val = copy.deepcopy(value)
                     self._shift_plan_times(val)
                     self.redis.hset(REDIS_FLIGHT_PLAN_KEY, key, json.dumps(val, ensure_ascii=False))
+            # 验证航线写入是否生效
+            if self.redis.client:
+                result = self.redis.hgetall(REDIS_FLIGHT_PLAN_KEY)
+                if result:
+                    self._add_log(f"Redis 航线验证通过: {len(result)} 条航线")
+                else:
+                    self._add_log("⚠️ Redis 航线验证失败：写入后读取为空，下游态势系统将无法跟踪 UAV")
             self._add_log(f"已从 {os.path.basename(route_path)} 写入 {len(route_list)} 条航线到 Redis")
         else:
             self._add_log(f"航线数据文件不存在: {route_path} — 请先生成或上传数据文件")
@@ -488,6 +495,11 @@ class SimulationManager:
             for msg in kafka_data:
                 uid = msg.get("uniqueProductIdentificationCode", "unknown")
                 self._replay_index.setdefault(uid, []).append(msg)
+            # 补齐 operatingStatus，确保下游 UTM 能识别活跃 UAV
+            for uid, msgs in self._replay_index.items():
+                for msg in msgs:
+                    if msg.get("operatingStatus") is None:
+                        msg["operatingStatus"] = 2
             self._replay_cursors = {uid: 0 for uid in self._replay_index}
             self._add_log(f"已从 {os.path.basename(data_path)} 加载 {len(kafka_data)} 条遥测 ({len(self._replay_index)} 架无人机)")
         else:

@@ -79,8 +79,8 @@ const TILE_PROVIDERS = {
 };
 
 let _currentTileLayer = null;
-let _tileProviderKey = 'cartodb';  // 默认 CartoDB（通用 CDN，国内外均可访问）
-const TILE_FALLBACK_ORDER = ['cartodb', 'osm', 'gaode'];  // 失败时依次尝试
+let _tileProviderKey = 'gaode';  // 默认高德地图（国内首选，秒加载）
+const TILE_FALLBACK_ORDER = ['gaode', 'cartodb', 'osm'];  // 失败时依次尝试：高德 → CartoDB → OSM
 
 // ── 初始化地图 ────────────────────────────────────────────────────
 function initMap() {

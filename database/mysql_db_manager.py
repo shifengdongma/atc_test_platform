@@ -31,9 +31,10 @@ if _atc_tools not in sys.path:
 try:
     from mysqldbclient import MysqlDbClient
     _HAS_MYSQL_IMPORT = True
-except (ImportError, Exception):
+except (ImportError, Exception) as _import_err:
     _HAS_MYSQL_IMPORT = False
     MysqlDbClient = None
+    _mysql_import_error = str(_import_err)
 
 # ── SQLite fallback ────────────────────────────────────────────────
 import db_manager as _sqlite
@@ -96,7 +97,8 @@ def _get_client():
     # ── 无锁快速路径：已知不可用或未安装 ──
     if not _HAS_MYSQL_IMPORT:
         _mysql_available = False
-        print("[mysql_db_manager] mysqldbclient 模块导入失败，MysqlDbClient 不可用，降级到 SQLite")
+        _err_detail = globals().get("_mysql_import_error", "未知错误")
+        print(f"[mysql_db_manager] mysqldbclient 模块导入失败 ({_err_detail})，MysqlDbClient 不可用，降级到 SQLite")
         return None
     if _mysql_available is False:
         # 检查冷却期是否已过，冷却期内直接返回 None

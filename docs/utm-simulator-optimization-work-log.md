@@ -2416,3 +2416,35 @@ Docker 容器中达梦数据库连接持续报 `[CODE:-70089]Encryption module f
 | 问题根因 | 时序错误 + 回调缺失 + 字段缺失 + 进程无监控 |
 
 | 状态 | ✅ 已完成 |
+
+---
+
+### 2026-07-15: mysqldbclient 模块导入失败修复 + Docker MySQL 诊断增强
+
+> 来源：用户反馈本地和 Docker 均出现 `[mysql_db_manager] mysqldbclient 模块导入失败，MysqlDbClient 不可用，降级到 SQLite`
+
+#### 根因分析
+
+| 环境 | 根因 | 说明 |
+|------|------|------|
+| 本地 conda `utm` | `pymysql` 未安装 | `mysqldbclient.py:19` 的 `import pymysql` 抛出 `ModuleNotFoundError` |
+| Docker 容器 | `pymysql` 已安装但 MySQL 认证失败 | `Access denied for user 'utm'@'172.18.0.1'` — MySQL 用户未授权容器 IP |
+
+#### 修复内容
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| conda `utm` 环境 | pip install | `pip install pymysql>=1.1` 安装到 conda utm 环境 |
+| `database/mysql_db_manager.py` | 修改 | 模块级导入异常保存到变量，错误日志显示具体原因 |
+| `docker/entrypoint.sh` | 修改 | 新增 `[pymysql/MySQL]` 诊断段：pymysql 导入验证 + MySQL 连接测试 |
+| `docs/命令语句.md` | 重写 | 补充 pymysql 验证、MySQL 连接测试、Access denied 排查、强制重建命令 |
+
+#### 汇总
+
+| 操作 | 数量 |
+|------|------|
+| 修改文件 | 3 |
+| 安装依赖 | pymysql >= 1.1 |
+| 新增诊断项 | 5 |
+
+| 状态 | ✅ 已完成 |

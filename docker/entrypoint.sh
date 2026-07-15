@@ -113,6 +113,43 @@ else
     echo "    ⚠ /app/database/json_data_manager.py 未找到"
 fi
 
+# pymysql/MySQL 导入验证
+echo "  [pymysql/MySQL]"
+PYMYSQL_CHECK=$(python -c "import pymysql; print(pymysql.__version__)" 2>&1) || true
+if echo "$PYMYSQL_CHECK" | grep -qE '^[0-9]+\.[0-9]+'; then
+    echo "    ✓ pymysql ${PYMYSQL_CHECK} 已安装，mysqldbclient 可导入"
+else
+    echo "    ✗✗✗ CRITICAL: pymysql 未安装或导入失败！"
+    echo "    错误详情: ${PYMYSQL_CHECK}"
+    echo "    修复: docker compose build --no-cache (确保 pip install pymysql 成功)"
+fi
+
+# MySQL 连接测试（仅在配置了 UTM_MYSQL_HOST 时）
+if [ -n "${UTM_MYSQL_HOST}" ]; then
+    MYSQL_TEST=$(python -c "
+import pymysql
+try:
+    conn = pymysql.connect(host='${UTM_MYSQL_HOST}', port=${UTM_MYSQL_PORT:-3306},
+                           user='${UTM_MYSQL_USER}', password='${UTM_MYSQL_PASSWORD}',
+                           database='${UTM_MYSQL_DB:-utm_simulator}',
+                           ssl={}, connect_timeout=5)
+    conn.close()
+    print('OK')
+except Exception as e:
+    print(f'FAIL: {e}')
+" 2>&1) || true
+    if echo "$MYSQL_TEST" | grep -q '^OK$'; then
+        echo "    ✓ MySQL 连接成功 (${UTM_MYSQL_HOST}:${UTM_MYSQL_PORT:-3306}/${UTM_MYSQL_DB:-utm_simulator})"
+    else
+        echo "    ✗ MySQL 连接失败: ${MYSQL_TEST}"
+        echo "    检查: 1) UTM_MYSQL_HOST/PORT/USER/PASSWORD 是否正确"
+        echo "         2) MySQL 用户 '${UTM_MYSQL_USER}' 是否允许从容器 IP 连接"
+        echo "         3) MySQL 服务是否正常运行"
+    fi
+else
+    echo "    ⚠ UTM_MYSQL_HOST 未设置，跳过 MySQL 连接测试"
+fi
+
 echo "========================="
 echo ""
 

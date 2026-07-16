@@ -420,7 +420,11 @@ class SimulationRunner:
         else:
             _add_log(f"plan 模式: 航线文件不存在 {route_path}，尝试从 Redis 读取已有数据")
 
-        self._plan_runner = _PlanRunner(log_callback=_add_log)
+        self._plan_runner = _PlanRunner(
+            log_callback=_add_log,
+            trace_callback=lambda d: socketio.emit("trace_data", d),
+            telemetry_callback=lambda d: socketio.emit("telemetry_data", d),
+        )
         # 读取用户选择的航线 UID 列表
         # None = 未做选择（全部航线），[] = 明确取消全选（不执行任何航线），[...] = 指定航线
         uids = self.config.get("plan_selected_uids", None)
@@ -449,6 +453,11 @@ class SimulationRunner:
                                               trace_callback=lambda d: socketio.emit("trace_data", d),
                                               telemetry_callback=lambda d: socketio.emit("telemetry_data", d))
             self._sim_mgr.start(mode=self.mode, target_drones=self.target_drones)
+
+            # dynamic 模式下 trace/conflict 消费者因 ctypes 兼容性限制被跳过，明确告知用户
+            _add_log("ℹ️ 动态仿真模式：轨迹预测(trace)和冲突告警(collision)不可用，"
+                     "因 kafka-python 与 ctypes 引擎线程安全限制。"
+                     "如需查看完整日志，请使用 replay 或 plan 模式。")
 
             with _lock:
                 _runtime_state["redis_connected"] = self._sim_mgr.redis.client is not None
@@ -535,7 +544,7 @@ class SimulationRunner:
                 mock_dir = os.path.join(_root, "..", "data", "mock")
                 _rk.KAFKA_DATA_JSON_PATH = os.path.join(mock_dir, data_file)
                 _rk.REDIS_ROUTE_JSON_PATH = os.path.join(mock_dir, route_file)
-                ds = _rk.DataSource()
+                ds = _rk.DataSource(kafka_url=self.config.get("kafka_url"))
                 self._ds = ds  # 保存引用供 _cleanup() 使用
                 with _lock:
                     _runtime_state["redis_connected"] = ds.redis_client.client is not None
@@ -598,6 +607,7 @@ class SimulationRunner:
                         interval_ms=scene_interval,
                         timestamp_mode=scene_timestamp_mode,
                         loop=scene_loop,
+                        consume_trace=True,
                     )
                     self._emitter = emitter  # 保存引用供 _cleanup() 使用
                     emitter.start()
@@ -605,6 +615,7 @@ class SimulationRunner:
                         _runtime_state["active_drones"] = len(emitter.uav_data_list)
 
                     _prev_scene_sent = 0
+                    _prev_scene_trace = 0
                     while self._running and emitter.running:
                         try:
                             # 桥接场景遥测计数到前端 Layer 1（运行日志-遥测）
@@ -618,6 +629,16 @@ class SimulationRunner:
                                     "mode": "scene",
                                     "message": f"场景注入 {count} 条遥测记录"
                                 })
+                            # 桥接场景 trace 数据到前端 Layer 2（运行日志-轨迹预测）
+                            if emitter.consume_trace and emitter.trace_stats:
+                                current_trace = emitter.trace_stats.get('received', 0)
+                                if current_trace > _prev_scene_trace:
+                                    _prev_scene_trace = current_trace
+                                    socketio.emit("trace_data", {
+                                        "count": current_trace,
+                                        "data": list(emitter.trace_records[-50:]),
+                                        "key": "scene",
+                                    })
                             with _lock:
                                 if self._start_time:
                                     _runtime_state["uptime_sec"] = int(time.time() - self._start_time)
@@ -762,6 +783,23 @@ class SimulationRunner:
             bridge = getattr(self, "_telemetry_bridge", None)
             if bridge is None or bridge.poll() is not None:
                 _add_log("⚠️ 遥测桥接子进程启动失败，dynamic 模式将无 Kafka 数据，请检查 telemetry_bridge.py")
+            else:
+                # 5 秒后验证桥接是否在正常转发数据
+                def _verify_bridge_forwarding():
+                    time.sleep(5)
+                    b = getattr(self, "_telemetry_bridge", None)
+                    if b is None or b.poll() is not None:
+                        _add_log("⚠️ 遥测桥接已退出，dynamic 模式 Kafka 数据中断")
+                    else:
+                        try:
+                            from redis_client import RedisClient as _RC
+                            from env import redis_ip as _rip, redis_port as _rpt, redis_password as _rpw
+                            test_redis = _RC(_rip, _rpt, _rpw)
+                            if test_redis.client and not test_redis.client.exists("BIZ_DATA:UAV_TELEMETRY"):
+                                _add_log("遥测桥接运行中但 Redis 遥测 key 为空，检查 dynamic 模式是否正在产生遥测数据")
+                        except Exception:
+                            pass
+                threading.Thread(target=_verify_bridge_forwarding, daemon=True).start()
 
         self._thread = threading.Thread(target=self._sim_loop, daemon=True)
         self._thread.start()

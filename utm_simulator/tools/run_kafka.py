@@ -5,7 +5,7 @@ import threading
 import os
 import copy
 import subprocess
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 # 将项目根目录加入 path，便于从 tools 下直接运行
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -32,15 +32,16 @@ redis_flight_plan_key = "BIZ_DATA:UAV_ROUTE"
 class DataSource:
     """数据获取模块：从 redis_route.json 写入 Redis，从 kafka_data.json 按秒发送到 Kafka，结束时生成 redis_trace.json"""
 
-    def __init__(self):
+    def __init__(self, kafka_url: Optional[str] = None):
+        _kafka = kafka_url or getattr(_env, 'kafka_url', 'localhost:9092')
         self.redis_client = RedisClient(redis_ip, redis_port, redis_password)
         self.kafka_producer = KafkaProducerClient(
-            kafka_url, bootstrap_servers_mirror=getattr(_env, "kafka_url2", None)
+            _kafka, bootstrap_servers_mirror=getattr(_env, "kafka_url2", None)
         )
         # 每个进程使用独立的 group_id，多实例同时运行时各自都能收到全部消息（否则同组会瓜分分区，后启动的收不到）
         # consume_from_latest_on_start=True：启动时跳过历史积压，只消费连接之后产生的新消息
         self.kafka_consumer = KafkaConsumerClient(
-            bootstrap_servers=kafka_url,
+            bootstrap_servers=_kafka,
             group_id=f"utm_demo_group_{os.getpid()}",
             consume_from_latest_on_start=True,
         )

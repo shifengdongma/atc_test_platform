@@ -495,11 +495,10 @@ class SimulationManager:
             for msg in kafka_data:
                 uid = msg.get("uniqueProductIdentificationCode", "unknown")
                 self._replay_index.setdefault(uid, []).append(msg)
-            # 补齐 operatingStatus，确保下游 UTM 能识别活跃 UAV
+            # 强制 operatingStatus=2（飞行中），确保下游 ATC 能识别活跃监视目标
             for uid, msgs in self._replay_index.items():
                 for msg in msgs:
-                    if msg.get("operatingStatus") is None:
-                        msg["operatingStatus"] = 2
+                    msg["operatingStatus"] = 2
             self._replay_cursors = {uid: 0 for uid in self._replay_index}
             self._add_log(f"已从 {os.path.basename(data_path)} 加载 {len(kafka_data)} 条遥测 ({len(self._replay_index)} 架无人机)")
         else:
@@ -596,6 +595,10 @@ class SimulationManager:
                 uid = plan.aircraft.uid.decode("utf-8").rstrip("\x00")
                 self._dynamic_uids.add(uid)
                 route_json = self._plan_to_route_json(plan)
+                # 时间平移到当前时刻，确保下游 ATC 能激活追踪
+                obj = json.loads(route_json)
+                self._shift_plan_times(obj)
+                route_json = json.dumps(obj, ensure_ascii=False)
                 self.redis.hset(REDIS_FLIGHT_PLAN_KEY, uid, route_json)
                 self._add_log(f"新无人机 {uid} 加入仿真")
 

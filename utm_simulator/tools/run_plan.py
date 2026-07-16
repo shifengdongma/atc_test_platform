@@ -192,7 +192,7 @@ def _telemetry_dict(uid: str, registered_code: str, samp: Dict[str, Any], now_ms
 class PlanRunner:
     """维护 planList，定时拉 Redis，每秒发送遥测，并消费 uav_runtime_trace。"""
 
-    def __init__(self, log_callback=None) -> None:
+    def __init__(self, log_callback=None, trace_callback=None, telemetry_callback=None) -> None:
         self.redis_client = RedisClient(redis_ip, redis_port, redis_password)
         self.kafka_producer = KafkaProducerClient(
             kafka_url, bootstrap_servers_mirror=getattr(_env, "kafka_url2", None)
@@ -207,6 +207,8 @@ class PlanRunner:
         self._lock = threading.Lock()
         self.running = True
         self._log_callback = log_callback
+        self._trace_callback = trace_callback
+        self._telemetry_callback = telemetry_callback
         self._threads: List[threading.Thread] = []
         self._selected_uids: Optional[Set[str]] = None  # 航线白名单过滤
 
@@ -348,6 +350,12 @@ class PlanRunner:
 
         if batch:
             self.kafka_producer.send_bulk(batch, KAFKA_UAV_DATA_TOPIC)
+            # 桥接遥测数据到前端运行日志 Layer 1
+            if self._telemetry_callback:
+                try:
+                    self._telemetry_callback({"records": batch, "count": len(batch)})
+                except Exception:
+                    pass
 
     def _watch_redis_loop(self) -> None:
         """监听 BIZ_DATA:UAV_ROUTE keyspace 变动，有写入立即合并计划；
@@ -445,6 +453,16 @@ class PlanRunner:
                         get_streamer().report_kafka_trace(len(filtered))
                     except Exception:
                         pass
+                    # 桥接轨迹预测数据到前端运行日志 Layer 2
+                    if self._trace_callback:
+                        try:
+                            self._trace_callback({
+                                "count": len(filtered),
+                                "data": filtered,
+                                "key": redis_key,
+                            })
+                        except Exception:
+                            pass
             except Exception as e:
                 print(f"消费 uav_runtime_trace 异常: {e}")
             time.sleep(0.05)

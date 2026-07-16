@@ -91,7 +91,7 @@ class LogStreamer:
         self._running = False
         self._buffer: List[Dict[str, Any]] = []
         self._lock = threading.Lock()
-        self._max_buffer = 1000
+        self._max_buffer = 3000
         self._redis_thread: Optional[threading.Thread] = None
         self._counts: Dict[str, int] = {k: 0 for k in LOG_TYPES}
         # MySQL 持久化（延迟初始化）

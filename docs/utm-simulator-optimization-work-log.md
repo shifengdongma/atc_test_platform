@@ -2509,3 +2509,37 @@ Docker 容器中达梦数据库连接持续报 `[CODE:-70089]Encryption module f
 | 修改调用点 | 10 |
 
 | 状态 | ✅ 已完成 |
+
+---
+
+### 2026-07-16: 仿真执行模式数据可见性修复 + 系统日志桥接完善
+
+> 来源分析: `docs/通信网关设计.md` 通信链路分析 + 5 种仿真模式数据注入路径对比
+
+**问题 1**: 仅 "Redis 计划插值 (plan)" 模式启动后下游态势监控系统能显示"监视目标数"，其余 4 种模式 (dynamic/replay/replay_once/scene) 无法显示实时数据。
+
+**问题 2**: 仿真执行"运行日志"模块和"系统日志"页面中，轨迹预测、冲突告警等日志类型在部分模式下读取不到。
+
+**根因**: (1) `_tick_dynamic()` 补充无人机未时间平移; (2) scene/replay 模式 `operatingStatus` 仅 None 时才补 2; (3) scene 模式不周期性刷新 Redis 航线; (4) replay_once 硬编码 kafka_url; (5) PlanRunner 缺少 trace/telemetry 回调桥接; (6) scene 模式未启用 trace 消费; (7) dynamic 模式未告知限制原因。
+
+#### 修改文件
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `utm_simulator/sim_manager.py` | 修改 | Fix 1.1: `_tick_dynamic()` 补充无人机航线写入 Redis 前添加 `_shift_plan_times()` 时间平移 |
+| `utm_simulator/sim_manager.py` | 修改 | Fix 1.2: `_init_replay_mode()` 强制 `operatingStatus=2`（去掉 None 判断） |
+| `utm_simulator/tools/run_kafka_scene.py` | 修改 | Fix 1.2: `_emit_once()` 强制 `operatingStatus=2`; Fix 1.3: `_emit_loop()` 添加 30 秒周期性 Redis 航线刷新 |
+| `utm_simulator/tools/run_kafka.py` | 修改 | Fix 1.4: `DataSource.__init__()` 新增可选 `kafka_url` 参数，回退到 env 值 |
+| `utm_simulator/web_server.py` | 修改 | Fix 1.4: replay_once 传递 kafka_url; Fix 1.5: 遥测桥接 5 秒延迟验证; Fix 2.1/2.4: PlanRunner 回调桥接; Fix 2.2: scene trace 启用+桥接; Fix 2.3: dynamic 限制说明 |
+| `utm_simulator/tools/run_plan.py` | 修改 | Fix 2.1/2.4: PlanRunner 新增 `trace_callback` 和 `telemetry_callback` 参数及调用 |
+| `database/log_streamer.py` | 修改 | Fix 2.5: 缓冲区 `_max_buffer` 从 1000 扩大到 3000 |
+
+#### 汇总
+
+| 操作 | 数量 |
+|------|------|
+| 修改文件 | 7 |
+| 新增参数 | 3 (`kafka_url`, `trace_callback`, `telemetry_callback`) |
+| 新增诊断逻辑 | 2 (遥测桥接延迟验证, dynamic 模式限制说明) |
+
+| 状态 | ✅ 已完成，语法验证通过 |

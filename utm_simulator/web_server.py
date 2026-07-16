@@ -1824,7 +1824,7 @@ def api_db_list_files():
     )
     # 为每个文件附加格式检测信息（从磁盘读取首 64KB）
     for f in result.get("files", []):
-        fpath = f.get("file_path", "")
+        fpath = mgr._resolve_path(f)
         sample = ""
         if fpath and os.path.exists(fpath):
             try:
@@ -1956,7 +1956,7 @@ def api_db_download_file(file_id):
     record = mgr.get_file(file_id)
     if not record:
         return jsonify({"error": "文件不存在"}), 404
-    fpath = record.get("file_path", "")
+    fpath = mgr._resolve_path(record)
     if not fpath or not os.path.exists(fpath):
         return jsonify({"error": "文件内容不可用"}), 404
     return send_file(
@@ -2145,7 +2145,7 @@ def _get_scheduler():
                         # 从磁盘复制到 mock/ 目录供仿真使用
                         mock_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "mock")
                         os.makedirs(mock_dir, exist_ok=True)
-                        src_path = record.get("file_path", "")
+                        src_path = jdm._resolve_path(record)
                         dest_path = os.path.join(mock_dir, record.get("name", ""))
                         if src_path and os.path.exists(src_path):
                             if os.path.abspath(src_path) != os.path.abspath(dest_path):

@@ -2479,3 +2479,33 @@ Docker 容器中达梦数据库连接持续报 `[CODE:-70089]Encryption module f
 | 推送仓库 | 2（GitHub + GitLab） |
 
 | 状态 | ✅ 已完成 |
+
+---
+
+### 2026-07-16: 修复 Docker 跨平台 file_path 不兼容导致 "文件在磁盘中不存在"
+
+> 来源分析: Docker 部署配置 + 数据管理代码审查
+
+**问题**: Docker 容器中点击"数据管理"页面查看部分 JSON 文件时提示"文件在磁盘中不存在"，而本地 Windows 正常。根因是 `sim_json_files` 表的 `file_path` 字段存储了文件保存时的绝对路径（Windows: `D:\...\data\mock\xxx.json` / Linux: `/app/data/mock/xxx.json`），当 MySQL 在 Windows 和 Docker 间共享时路径互不兼容。
+
+**修复方案**: DB 中仅存文件名，运行时通过 `_resolve_path()` 动态拼接当前环境的 `MOCK_DIR`，同时兼容旧数据的绝对路径格式。
+
+| 时间 | 完成内容 | 状态 |
+|------|----------|------|
+| 2026-07-16 | `database/json_data_manager.py` — 新增 `_resolve_path()` 路径解析函数（5 级回退策略兼容新旧格式） | ✅ 已完成 |
+| 2026-07-16 | `database/json_data_manager.py` — 新增 `_migrate_file_paths_once()` 一次性迁移函数（模块加载时将旧绝对路径转为文件名） | ✅ 已完成 |
+| 2026-07-16 | `database/json_data_manager.py` — `save_file()` 改为仅存文件名入 DB | ✅ 已完成 |
+| 2026-07-16 | `database/json_data_manager.py` — `import_from_mock()` 改为仅存文件名入 DB | ✅ 已完成 |
+| 2026-07-16 | `database/json_data_manager.py` — `delete_file()` / `preview_file()` / `read_file_content_partial()` / `download_file()` / `export_to_mock()` 改用 `_resolve_path()` | ✅ 已完成 |
+| 2026-07-16 | `utm_simulator/web_server.py` — `api_db_list_files()` / `api_db_download_file()` / 定时任务文件复制 改用 `_resolve_path()` | ✅ 已完成 |
+| 2026-07-16 | 功能测试 — `_resolve_path()` 四种场景验证通过（Win绝对路径/Linux绝对路径/纯文件名/纯name） | ✅ 已验证 |
+
+### 汇总
+
+| 操作 | 数量 |
+|------|------|
+| 修改文件 | 2 |
+| 新增函数 | 2 (`_resolve_path`, `_migrate_file_paths_once`) |
+| 修改调用点 | 10 |
+
+| 状态 | ✅ 已完成 |

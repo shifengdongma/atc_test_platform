@@ -33,6 +33,43 @@ TABLE = "sim_json_files"
 from mysql_db_manager import init_tables as _init_tables
 _init_tables()
 
+# ── 一次性迁移：将旧绝对路径 file_path 标准化为仅文件名 ────────
+# 解决 Windows/Docker 跨环境路径不兼容导致 "文件不存在于磁盘" 的问题
+_MIGRATION_DONE = False
+
+
+def _migrate_file_paths_once():
+    """将 sim_json_files 表中旧的绝对路径 file_path 转换为纯文件名。
+
+    仅首次调用时执行，后续调用为 no-op。
+    将 Windows 路径 (D:\\...) 和 Linux 路径 (/app/...) 统一转为文件名。
+    """
+    global _MIGRATION_DONE
+    if _MIGRATION_DONE:
+        return
+    _MIGRATION_DONE = True
+
+    try:
+        rows = query_all(TABLE)
+        updated = 0
+        for row in rows:
+            fp = (row.get("file_path") or "").strip()
+            if not fp or os.path.sep not in fp.replace("\\", "/").lstrip("/"):
+                # 已经是纯文件名或为空，无需迁移
+                continue
+            basename = os.path.basename(fp)
+            if basename and basename != fp:
+                update(TABLE, row["id"], {"file_path": basename})
+                updated += 1
+        if updated > 0:
+            print(f"[json_data_manager] 已迁移 {updated} 条旧 file_path 为纯文件名（跨平台兼容）")
+    except Exception as e:
+        print(f"[json_data_manager] file_path 迁移跳过: {e}")
+
+
+# 模块加载后立即执行迁移
+_migrate_file_paths_once()
+
 
 # ── 路径工具 ──────────────────────────────────────────────────────────
 
@@ -45,6 +82,47 @@ def _ensure_mock_dir() -> str:
 def _get_storage_dir() -> str:
     """获取 JSON 文件存储目录（统一为 data/mock/）。"""
     return _ensure_mock_dir()
+
+
+def _resolve_path(record: Dict[str, Any]) -> str:
+    """兼容新旧 file_path 格式，返回实际可用的文件绝对路径。
+
+    旧格式：file_path 为绝对路径（如 D:\\...\\data\\mock\\xxx.json 或 /app/data/mock/xxx.json）
+    新格式：file_path 仅存文件名（如 xxx.json）
+
+    解析策略（按优先级）：
+    1. file_path 是绝对路径且文件存在 → 直接返回（兼容旧数据）
+    2. file_path 是文件名 → 拼接到 MOCK_DIR 下查找
+    3. file_path 是绝对路径但文件不存在 → 提取文件名，在 MOCK_DIR 下查找
+    4. 回退到 record["name"] 在 MOCK_DIR 下查找
+    5. 都找不到 → 返回 MOCK_DIR + name 的预期路径
+    """
+    file_path = record.get("file_path", "")
+    name = record.get("name", "")
+
+    if not file_path:
+        # 无路径，用 name 在 MOCK_DIR 下查找
+        candidate = os.path.join(MOCK_DIR, name) if name else ""
+        return candidate
+
+    # 情况 1：绝对路径存在 → 旧格式兼容
+    if os.path.isabs(file_path) and os.path.exists(file_path):
+        return file_path
+
+    # 情况 2+3：file_path 是纯文件名，或在 MOCK_DIR 下拼接后存在
+    basename = os.path.basename(file_path) if os.path.isabs(file_path) else file_path
+    candidate = os.path.join(MOCK_DIR, basename)
+    if os.path.exists(candidate):
+        return candidate
+
+    # 情况 4：用 name 尝试
+    if name:
+        candidate_by_name = os.path.join(MOCK_DIR, name)
+        if os.path.exists(candidate_by_name):
+            return candidate_by_name
+
+    # 情况 5：都找不到，返回 MOCK_DIR 下的预期路径（调用方自行检查 os.path.exists）
+    return os.path.join(MOCK_DIR, basename or name)
 
 
 # ── 元数据检测 ───────────────────────────────────────────────────────
@@ -326,7 +404,9 @@ def save_file(data: Dict[str, Any]) -> int:
         fpath = os.path.join(storage_dir, name)
         with open(fpath, "w", encoding="utf-8") as f:
             f.write(content)
-        data["file_path"] = fpath
+        # 数据库中仅存文件名，运行时通过 _resolve_path() 拼接 MOCK_DIR
+        # 避免跨平台（Windows/Linux Docker）绝对路径不兼容
+        data["file_path"] = name
         data["size_bytes"] = len(content.encode("utf-8"))
 
         # 自动检测元数据（仅在未显式提供时）
@@ -368,7 +448,7 @@ def delete_file(file_id: int) -> bool:
     """删除文件记录（同时删除磁盘文件）。"""
     record = query_one(TABLE, file_id)
     if record:
-        fpath = record.get("file_path", "")
+        fpath = _resolve_path(record)
         if fpath and os.path.exists(fpath):
             try:
                 os.remove(fpath)
@@ -427,7 +507,7 @@ def import_from_mock() -> Dict[str, Any]:
                     "name": fname,
                     "category": category,
                     "alarm_type": alarm_type,
-                    "file_path": fpath,
+                    "file_path": fname,  # 仅存文件名，跨平台兼容
                     "simulator_id": simulator_id,
                     "linked_route": linked_route,
                     "size_bytes": size,
@@ -448,7 +528,7 @@ def export_to_mock(file_id: int) -> Dict[str, Any]:
     if not record:
         return {"success": False, "message": f"文件 {file_id} 不存在"}
 
-    fpath = record.get("file_path", "")
+    fpath = _resolve_path(record)
     name = record.get("name", f"export_{file_id}.json")
 
     if fpath and os.path.exists(fpath):
@@ -476,7 +556,7 @@ def download_file(file_id: int) -> Optional[Dict[str, Any]]:
     record = query_one(TABLE, file_id)
     if not record:
         return None
-    fpath = record.get("file_path", "")
+    fpath = _resolve_path(record)
     content = ""
     if fpath and os.path.exists(fpath):
         with open(fpath, "r", encoding="utf-8") as f:
@@ -502,7 +582,7 @@ def preview_file(file_id: int, offset: int = 0, limit: int = 500) -> Dict[str, A
     if not record:
         return {"error": "文件不存在"}
 
-    fpath = record.get("file_path", "")
+    fpath = _resolve_path(record)
     if not fpath or not os.path.exists(fpath):
         return {"error": "文件不存在于磁盘"}
 
@@ -566,7 +646,7 @@ def read_file_content_partial(file_id: int, max_chars: int = 102400) -> Dict[str
     if not record:
         return {"error": "文件不存在"}
 
-    fpath = record.get("file_path", "")
+    fpath = _resolve_path(record)
     if not fpath or not os.path.exists(fpath):
         return {"error": "文件不存在于磁盘"}
 

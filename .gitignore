@@ -29,3 +29,6 @@ common/config.json
 *.db
 *.sqlite3
 !database/data.db
+
+# 本地文档
+docs/

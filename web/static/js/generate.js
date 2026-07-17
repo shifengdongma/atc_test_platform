@@ -307,8 +307,23 @@ if (btnDaRefresh) {
   btnDaRefresh.addEventListener('click', loadRouteSelects);
 }
 
+// ── 航线选择惰性加载：首次聚焦时加载，避免页面加载时阻塞等待达梦 ──
+var _routesLoaded = false;
+function lazyLoadRoutes() {
+  if (_routesLoaded) return;
+  _routesLoaded = true;
+  loadRouteSelects();
+}
+['#da-route-name', '#col-route-a', '#col-route-b'].forEach(function(selId) {
+  var sel = document.querySelector(selId);
+  if (sel) {
+    sel.addEventListener('focus', lazyLoadRoutes);
+    sel.addEventListener('click', lazyLoadRoutes);
+  }
+});
+
 // ── 初始化 ─────────────────────────────────────────────────────────
 initGenTabs();
 loadAITemplates();
-loadRouteSelects();
+// loadRouteSelects() 改为惰性加载，用户点击航线下拉框时才触发
 })();

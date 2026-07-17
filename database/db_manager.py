@@ -3,7 +3,7 @@
 SQLite 数据库管理器 — 本地持久化存储
 
 使用 Python 标准库 sqlite3，数据库文件: utm_simulator/data.db
-管理 5 张表：sim_env_config / sim_json_files / sim_scheduled_tasks / sim_task_logs / sim_alarm_types
+管理 8 张表：sim_env_config / sim_json_files / sim_scenes / sim_scene_tasks / sim_scene_task_files / sim_task_logs / sim_alarm_types / sim_system_logs
 """
 
 from __future__ import annotations
@@ -53,29 +53,59 @@ _TABLE_DDL = {
             updated_at   TEXT DEFAULT ''
         )
     """,
-    "sim_scheduled_tasks": """
-        CREATE TABLE IF NOT EXISTS sim_scheduled_tasks (
+    "sim_scenes": """
+        CREATE TABLE IF NOT EXISTS sim_scenes (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             name        TEXT NOT NULL,
+            env_id      INTEGER DEFAULT 0,
+            scene_type  TEXT DEFAULT 'single',
             cron_expr   TEXT DEFAULT '',
-            sim_mode    TEXT DEFAULT 'replay',
-            json_file_ids TEXT DEFAULT '',
-            sim_params  TEXT DEFAULT '{}',
+            sim_mode    TEXT DEFAULT 'scene',
             enabled     INTEGER DEFAULT 1,
             last_run_at TEXT DEFAULT '',
             next_run_at TEXT DEFAULT '',
-            created_at  TEXT DEFAULT ''
+            created_at  TEXT DEFAULT '',
+            updated_at  TEXT DEFAULT ''
+        )
+    """,
+    "sim_scene_tasks": """
+        CREATE TABLE IF NOT EXISTS sim_scene_tasks (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            scene_id              INTEGER NOT NULL,
+            name                  TEXT NOT NULL,
+            task_type             TEXT DEFAULT 'sequential',
+            cycle_interval_sec    INTEGER DEFAULT 0,
+            repeat_count          INTEGER DEFAULT 1,
+            execution_timeout_sec INTEGER DEFAULT 300,
+            sort_order            INTEGER DEFAULT 0,
+            created_at            TEXT DEFAULT '',
+            updated_at            TEXT DEFAULT ''
+        )
+    """,
+    "sim_scene_task_files": """
+        CREATE TABLE IF NOT EXISTS sim_scene_task_files (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id      INTEGER NOT NULL,
+            file_id      INTEGER NOT NULL,
+            interval_sec INTEGER DEFAULT 0,
+            sort_order   INTEGER DEFAULT 0,
+            created_at   TEXT DEFAULT '',
+            updated_at   TEXT DEFAULT ''
         )
     """,
     "sim_task_logs": """
         CREATE TABLE IF NOT EXISTS sim_task_logs (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            task_id     INTEGER,
-            task_type   TEXT DEFAULT '',
-            status      TEXT DEFAULT 'running',
-            message     TEXT DEFAULT '',
-            started_at  TEXT DEFAULT '',
-            finished_at TEXT DEFAULT ''
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id         INTEGER DEFAULT 0,
+            scene_id        INTEGER DEFAULT 0,
+            scene_task_name TEXT DEFAULT '',
+            task_type       TEXT DEFAULT '',
+            status          TEXT DEFAULT 'running',
+            message         TEXT DEFAULT '',
+            started_at      TEXT DEFAULT '',
+            finished_at     TEXT DEFAULT '',
+            created_at      TEXT DEFAULT '',
+            updated_at      TEXT DEFAULT ''
         )
     """,
     "sim_alarm_types": """
@@ -88,6 +118,19 @@ _TABLE_DDL = {
             sort_order  INTEGER DEFAULT 0,
             created_at  TEXT DEFAULT '',
             updated_at  TEXT DEFAULT ''
+        )
+    """,
+    "sim_system_logs": """
+        CREATE TABLE IF NOT EXISTS sim_system_logs (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            time       TEXT NOT NULL,
+            type       TEXT NOT NULL,
+            type_name  TEXT DEFAULT '',
+            message    TEXT DEFAULT '',
+            detail     TEXT DEFAULT '',
+            task_id    TEXT DEFAULT '',
+            created_at TEXT DEFAULT '',
+            updated_at TEXT DEFAULT ''
         )
     """,
 }
@@ -161,8 +204,9 @@ def query_one(table: str, record_id: int) -> Optional[Dict[str, Any]]:
             conn.close()
 
 
-def query(table: str, where: str = "", params: tuple = (), order_by: str = "id DESC") -> List[Dict[str, Any]]:
-    """条件查询。"""
+def query(table: str, where: str = "", params: tuple = (), order_by: str = "id DESC",
+          limit: int = 0, offset: int = 0) -> List[Dict[str, Any]]:
+    """条件查询（支持分页）。"""
     with _lock:
         conn = _get_conn()
         try:
@@ -170,8 +214,38 @@ def query(table: str, where: str = "", params: tuple = (), order_by: str = "id D
             if where:
                 sql += f" WHERE {where}"
             sql += f" ORDER BY {order_by}"
+            if limit > 0:
+                sql += f" LIMIT {int(limit)}"
+            if offset > 0:
+                sql += f" OFFSET {int(offset)}"
             cur = conn.execute(sql, params)
             return [dict(row) for row in cur.fetchall()]
+        finally:
+            conn.close()
+
+
+def query_count(table: str, where: str = "", params: tuple = ()) -> int:
+    """查询符合条件的记录总数。"""
+    with _lock:
+        conn = _get_conn()
+        try:
+            sql = f"SELECT COUNT(*) as cnt FROM {table}"
+            if where:
+                sql += f" WHERE {where}"
+            cur = conn.execute(sql, params)
+            row = cur.fetchone()
+            return dict(row).get("cnt", 0) if row else 0
+        finally:
+            conn.close()
+
+
+def query_distinct(table: str, column: str) -> List[str]:
+    """查询某列的 DISTINCT 值。"""
+    with _lock:
+        conn = _get_conn()
+        try:
+            cur = conn.execute(f"SELECT DISTINCT {column} FROM {table} WHERE {column} != ''")
+            return [row[column] for row in cur.fetchall()]
         finally:
             conn.close()
 

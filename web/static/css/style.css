@@ -30,6 +30,34 @@ body {
   overflow: hidden;
 }
 
+/* ── 全局表单控件暗色主题 ──────────────────────────────────────── */
+input[type="text"],
+input[type="number"],
+input[type="date"],
+input[type="time"],
+input[type="password"],
+input[type="search"],
+select,
+textarea {
+  background: #0d1b2a;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  transition: border-color 0.2s;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+input::placeholder { color: var(--text-dim); opacity: 0.6; }
+
 /* ── 顶部导航栏 ─────────────────────────────────────────────────── */
 .topbar {
   display: flex;

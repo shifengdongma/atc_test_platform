@@ -21,7 +21,7 @@ if _script_dir not in sys.path:
     sys.path.insert(0, _script_dir)
 
 import db_manager as _sqlite
-from mysql_db_manager import _get_client, _ensure_mysql_tables
+from mysql_db_manager import _get_client, _ensure_mysql_tables, _mysql_conn_target
 
 
 def migrate_env_config():
@@ -41,8 +41,9 @@ def migrate_env_config():
 
     # 获取 MySQL 中已有的 name 列表（用于幂等）
     try:
-        client.cursor.execute("SELECT `name` FROM `sim_env_config`")
-        existing_names = {r["name"] for r in client.cursor.fetchall()}
+        cur = client.cursor()
+        cur.execute("SELECT `name` FROM `sim_env_config`")
+        existing_names = {r["name"] for r in cur.fetchall()}
     except Exception:
         existing_names = set()
 
@@ -67,12 +68,13 @@ def migrate_env_config():
             columns = ", ".join(f"`{k}`" for k in data)
             placeholders = ", ".join("%s" for _ in data)
             sql = f"INSERT INTO `sim_env_config` ({columns}) VALUES ({placeholders})"
-            client.cursor.execute(sql, list(data.values()))
-            client.conn.commit()
+            cur = client.cursor()
+            cur.execute(sql, list(data.values()))
+            client.commit()
             migrated += 1
         except Exception as e:
             print(f"    ⚠️ 写入失败 [{name}]: {e}")
-            client.conn.rollback()
+            client.rollback()
 
     print(f"  sim_env_config: 迁移 {migrated} 条, 跳过 {skipped} 条 (已存在)")
     return True
@@ -93,8 +95,9 @@ def migrate_json_files():
     print(f"  sim_json_files: SQLite 有 {len(rows)} 条记录，开始迁移...")
 
     try:
-        client.cursor.execute("SELECT `name` FROM `sim_json_files`")
-        existing_names = {r["name"] for r in client.cursor.fetchall()}
+        cur = client.cursor()
+        cur.execute("SELECT `name` FROM `sim_json_files`")
+        existing_names = {r["name"] for r in cur.fetchall()}
     except Exception:
         existing_names = set()
 
@@ -119,12 +122,13 @@ def migrate_json_files():
             columns = ", ".join(f"`{k}`" for k in data)
             placeholders = ", ".join("%s" for _ in data)
             sql = f"INSERT INTO `sim_json_files` ({columns}) VALUES ({placeholders})"
-            client.cursor.execute(sql, list(data.values()))
-            client.conn.commit()
+            cur = client.cursor()
+            cur.execute(sql, list(data.values()))
+            client.commit()
             migrated += 1
         except Exception as e:
             print(f"    ⚠️ 写入失败 [{name}]: {e}")
-            client.conn.rollback()
+            client.rollback()
 
     print(f"  sim_json_files: 迁移 {migrated} 条, 跳过 {skipped} 条 (已存在)")
     return True
@@ -143,7 +147,7 @@ def main():
         print("   SQLite 数据未受影响，可稍后重试")
         return
 
-    print(f"✅ MySQL 已连接: {client.host}:{client.port}/{client.database}\n")
+    print(f"✅ MySQL 已连接: {_mysql_conn_target}\n")
     print("SQLite 路径:", _sqlite.DB_PATH, "\n")
 
     # 执行迁移

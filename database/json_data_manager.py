@@ -29,9 +29,55 @@ from mysql_db_manager import query, query_one, insert, update, delete, query_all
 
 TABLE = "sim_json_files"
 
-# 确保数据库表已创建（MySQL 优先，SQLite 降级）
+# ── 惰性初始化：延迟到首次实际使用数据库时执行 ───────────────────
+# 避免 import 时触发 MySQL 连接 + SHOW TABLES + 全表扫描，导致首页加载卡顿
+_json_mgr_initialized = False
+
 from mysql_db_manager import init_tables as _init_tables
-_init_tables()
+
+
+def _lazy_init():
+    """惰性初始化：首次调用时建表 + 迁移文件路径，后续调用为 no-op。"""
+    global _json_mgr_initialized
+    if _json_mgr_initialized:
+        return
+    _json_mgr_initialized = True
+    _init_tables()
+    _migrate_file_paths_once()
+
+
+# ── 一次性迁移：将旧绝对路径 file_path 标准化为仅文件名 ────────
+# 解决 Windows/Docker 跨环境路径不兼容导致 "文件不存在于磁盘" 的问题
+_MIGRATION_DONE = False
+
+
+def _migrate_file_paths_once():
+    """将 sim_json_files 表中旧的绝对路径 file_path 转换为纯文件名。
+
+    仅首次调用时执行，后续调用为 no-op。
+    将 Windows 路径 (D:\\...) 和 Linux 路径 (/app/...) 统一转为文件名。
+    """
+    global _MIGRATION_DONE
+    if _MIGRATION_DONE:
+        return
+    _MIGRATION_DONE = True
+
+    try:
+        rows = query_all(TABLE)
+        updated = 0
+        for row in rows:
+            fp = (row.get("file_path") or "").strip()
+            if not fp or os.path.sep not in fp.replace("\\", "/").lstrip("/"):
+                # 已经是纯文件名或为空，无需迁移
+                continue
+            basename = os.path.basename(fp)
+            if basename and basename != fp:
+                update(TABLE, row["id"], {"file_path": basename})
+                updated += 1
+        if updated > 0:
+            print(f"[json_data_manager] 已迁移 {updated} 条旧 file_path 为纯文件名（跨平台兼容）")
+    except Exception as e:
+        print(f"[json_data_manager] file_path 迁移跳过: {e}")
 
 
 # ── 路径工具 ──────────────────────────────────────────────────────────
@@ -45,6 +91,47 @@ def _ensure_mock_dir() -> str:
 def _get_storage_dir() -> str:
     """获取 JSON 文件存储目录（统一为 data/mock/）。"""
     return _ensure_mock_dir()
+
+
+def _resolve_path(record: Dict[str, Any]) -> str:
+    """兼容新旧 file_path 格式，返回实际可用的文件绝对路径。
+
+    旧格式：file_path 为绝对路径（如 D:\\...\\data\\mock\\xxx.json 或 /app/data/mock/xxx.json）
+    新格式：file_path 仅存文件名（如 xxx.json）
+
+    解析策略（按优先级）：
+    1. file_path 是绝对路径且文件存在 → 直接返回（兼容旧数据）
+    2. file_path 是文件名 → 拼接到 MOCK_DIR 下查找
+    3. file_path 是绝对路径但文件不存在 → 提取文件名，在 MOCK_DIR 下查找
+    4. 回退到 record["name"] 在 MOCK_DIR 下查找
+    5. 都找不到 → 返回 MOCK_DIR + name 的预期路径
+    """
+    file_path = record.get("file_path", "")
+    name = record.get("name", "")
+
+    if not file_path:
+        # 无路径，用 name 在 MOCK_DIR 下查找
+        candidate = os.path.join(MOCK_DIR, name) if name else ""
+        return candidate
+
+    # 情况 1：绝对路径存在 → 旧格式兼容
+    if os.path.isabs(file_path) and os.path.exists(file_path):
+        return file_path
+
+    # 情况 2+3：file_path 是纯文件名，或在 MOCK_DIR 下拼接后存在
+    basename = os.path.basename(file_path) if os.path.isabs(file_path) else file_path
+    candidate = os.path.join(MOCK_DIR, basename)
+    if os.path.exists(candidate):
+        return candidate
+
+    # 情况 4：用 name 尝试
+    if name:
+        candidate_by_name = os.path.join(MOCK_DIR, name)
+        if os.path.exists(candidate_by_name):
+            return candidate_by_name
+
+    # 情况 5：都找不到，返回 MOCK_DIR 下的预期路径（调用方自行检查 os.path.exists）
+    return os.path.join(MOCK_DIR, basename or name)
 
 
 # ── 元数据检测 ───────────────────────────────────────────────────────
@@ -279,6 +366,7 @@ def list_files(
     page_size: int = 20,
 ) -> Dict[str, Any]:
     """分页查询文件列表，支持按分类、告警类型、关键字过滤。"""
+    _lazy_init()
     where_parts = []
     params: List[Any] = []
 
@@ -294,18 +382,21 @@ def list_files(
         params.extend([kw, kw, kw])
 
     where = " AND ".join(where_parts) if where_parts else "1=1"
+    params_tuple = tuple(params) if params else ()
 
-    rows = query(TABLE, where=where, params=tuple(params))
-    total = len(rows)
+    # 使用 SQL COUNT + LIMIT/OFFSET 替代全量获取后 Python 内存分页
+    from mysql_db_manager import query_count
+    total = query_count(TABLE, where=where, params=params_tuple)
 
     offset = (page - 1) * page_size
-    rows = rows[offset:offset + page_size]
+    rows = query(TABLE, where=where, params=params_tuple, limit=page_size, offset=offset)
 
     return {"files": rows, "total": total, "page": page, "page_size": page_size}
 
 
 def get_file(file_id: int) -> Optional[Dict[str, Any]]:
     """获取单个文件详情（含元数据，不含完整内容）。"""
+    _lazy_init()
     return query_one(TABLE, file_id)
 
 
@@ -316,6 +407,7 @@ def save_file(data: Dict[str, Any]) -> int:
     数据库仅存储 file_path 和元数据。
     自动检测 alarm_type / simulator_id / linked_route（未提供时）。
     """
+    _lazy_init()
     content = data.pop("content", None)
     file_id = data.pop("id", None)
 
@@ -326,7 +418,9 @@ def save_file(data: Dict[str, Any]) -> int:
         fpath = os.path.join(storage_dir, name)
         with open(fpath, "w", encoding="utf-8") as f:
             f.write(content)
-        data["file_path"] = fpath
+        # 数据库中仅存文件名，运行时通过 _resolve_path() 拼接 MOCK_DIR
+        # 避免跨平台（Windows/Linux Docker）绝对路径不兼容
+        data["file_path"] = name
         data["size_bytes"] = len(content.encode("utf-8"))
 
         # 自动检测元数据（仅在未显式提供时）
@@ -368,7 +462,7 @@ def delete_file(file_id: int) -> bool:
     """删除文件记录（同时删除磁盘文件）。"""
     record = query_one(TABLE, file_id)
     if record:
-        fpath = record.get("file_path", "")
+        fpath = _resolve_path(record)
         if fpath and os.path.exists(fpath):
             try:
                 os.remove(fpath)
@@ -393,6 +487,7 @@ def import_from_mock() -> Dict[str, Any]:
 
     数据库只存 file_path，不复制文件内容。
     """
+    _lazy_init()
     _ensure_mock_dir()
     imported, skipped, updated, errors = 0, 0, 0, 0
     try:
@@ -427,7 +522,7 @@ def import_from_mock() -> Dict[str, Any]:
                     "name": fname,
                     "category": category,
                     "alarm_type": alarm_type,
-                    "file_path": fpath,
+                    "file_path": fname,  # 仅存文件名，跨平台兼容
                     "simulator_id": simulator_id,
                     "linked_route": linked_route,
                     "size_bytes": size,
@@ -448,7 +543,7 @@ def export_to_mock(file_id: int) -> Dict[str, Any]:
     if not record:
         return {"success": False, "message": f"文件 {file_id} 不存在"}
 
-    fpath = record.get("file_path", "")
+    fpath = _resolve_path(record)
     name = record.get("name", f"export_{file_id}.json")
 
     if fpath and os.path.exists(fpath):
@@ -476,7 +571,7 @@ def download_file(file_id: int) -> Optional[Dict[str, Any]]:
     record = query_one(TABLE, file_id)
     if not record:
         return None
-    fpath = record.get("file_path", "")
+    fpath = _resolve_path(record)
     content = ""
     if fpath and os.path.exists(fpath):
         with open(fpath, "r", encoding="utf-8") as f:
@@ -502,7 +597,7 @@ def preview_file(file_id: int, offset: int = 0, limit: int = 500) -> Dict[str, A
     if not record:
         return {"error": "文件不存在"}
 
-    fpath = record.get("file_path", "")
+    fpath = _resolve_path(record)
     if not fpath or not os.path.exists(fpath):
         return {"error": "文件不存在于磁盘"}
 
@@ -566,7 +661,7 @@ def read_file_content_partial(file_id: int, max_chars: int = 102400) -> Dict[str
     if not record:
         return {"error": "文件不存在"}
 
-    fpath = record.get("file_path", "")
+    fpath = _resolve_path(record)
     if not fpath or not os.path.exists(fpath):
         return {"error": "文件不存在于磁盘"}
 
@@ -598,7 +693,7 @@ _ssl11_available = None  # None=未检测, True=可用, False=不可用
 _ssl11_detail = ""       # 检测详情
 
 def _check_ssl11():
-    """检测 libssl.so.1.1 和 libcrypto.so.1.1 是否可加载。
+    """检测 libssl.so.1.1 和 libcrypto.so.1.1 是否可加载（仅 Linux）。
 
     使用绝对路径直接加载（避免 LD_LIBRARY_PATH 等搜索路径问题），
     并以 RTLD_GLOBAL 将符号导出到全局符号表，使 dmPython 加密模块
@@ -606,6 +701,11 @@ def _check_ssl11():
     """
     global _ssl11_available, _ssl11_detail
     if _ssl11_available is not None:
+        return _ssl11_available
+    # Windows 不需要此检测，直接标记为不可用（不需要 .so 库）
+    if os.name != "posix":
+        _ssl11_available = False
+        _ssl11_detail = "非 Linux 系统，跳过 OpenSSL 1.1 检测"
         return _ssl11_available
     import ctypes as _ct
     # 按绝对路径加载 — 比 soname 搜索更可靠
@@ -827,17 +927,18 @@ def validate_route_correlation(linked_route: str) -> Dict[str, Any]:
 # ── 分类管理 ────────────────────────────────────────────────────────
 
 def get_categories() -> List[str]:
-    """获取所有分类列表（从数据库 DISTINCT 读取）。"""
-    rows = query_all(TABLE)
-    cats = sorted(set(r.get("category", "") for r in rows if r.get("category", "").strip()))
+    """获取所有分类列表（使用 SELECT DISTINCT 避免全表扫描）。"""
+    _lazy_init()
+    from mysql_db_manager import query_distinct
+    cats = sorted(query_distinct(TABLE, "category"))
     return cats
 
 
 def get_alarm_types() -> List[str]:
-    """获取所有告警类型列表（从 sim_json_files 文件使用中提取 + sim_alarm_types 自定义表合并）。"""
-    # 从文件中提取实际使用的告警类型
-    rows = query_all(TABLE)
-    file_types = set(r.get("alarm_type", "") for r in rows if r.get("alarm_type", "").strip())
+    """获取所有告警类型列表（使用 SELECT DISTINCT 避免全表扫描）。"""
+    _lazy_init()
+    from mysql_db_manager import query_distinct
+    file_types = set(query_distinct(TABLE, "alarm_type"))
     # 合并自定义告警类型表
     custom_types = _get_custom_alarm_type_names()
     return sorted(file_types | custom_types)
@@ -996,6 +1097,7 @@ def save_generated(name: str, content: str, category: str = "telemetry",
                    created_by: str = "manual", description: str = "",
                    alarm_type: str = "", linked_route: str = "") -> int:
     """保存前端/AI 生成的 JSON 数据：写入磁盘 + 记录元数据到数据库。"""
+    _lazy_init()
     data = {
         "name": name,
         "category": category,

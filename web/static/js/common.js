@@ -23,19 +23,67 @@ window.formatTime = function(ts) {
   return d.toLocaleTimeString('zh-CN', { hour12: false });
 };
 
-// ── API 封装 ──────────────────────────────────────────────────────
+// ── API 封装（带超时 + 缓存）──────────────────────────────────────
+const FETCH_TIMEOUT_MS = 60000;  // 60秒超时（数据管理/生成页面查询较慢）
+
+function _fetchWithTimeout(url, options) {
+  var controller = new AbortController();
+  var timer = setTimeout(function() { controller.abort(); }, FETCH_TIMEOUT_MS);
+  var fetchOpts = Object.assign({}, options || {}, { signal: controller.signal });
+  return fetch(url, fetchOpts).finally(function() { clearTimeout(timer); });
+}
+
 window.apiGet = async function(path) {
-  const resp = await fetch(API_BASE + path);
+  var resp;
+  try {
+    resp = await _fetchWithTimeout(API_BASE + path);
+  } catch(e) {
+    if (e.name === 'AbortError') throw new Error('请求超时，请检查数据库连接后刷新页面');
+    throw e;
+  }
+  if (!resp.ok) {
+    try { var err = await resp.json(); throw new Error(err.message || '请求失败 (' + resp.status + ')'); }
+    catch(e) { if (e.message && !e.message.startsWith('请求失败')) throw e; throw new Error('请求失败 (' + resp.status + ')'); }
+  }
   return resp.json();
 };
 
 window.apiPost = async function(path, body) {
-  const resp = await fetch(API_BASE + path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body || {}),
-  });
+  var resp;
+  try {
+    resp = await _fetchWithTimeout(API_BASE + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
+  } catch(e) {
+    if (e.name === 'AbortError') throw new Error('请求超时，请检查数据库连接后刷新页面');
+    throw e;
+  }
+  if (!resp.ok) {
+    try { var err = await resp.json(); throw new Error(err.message || '请求失败 (' + resp.status + ')'); }
+    catch(e) { if (e.message && !e.message.startsWith('请求失败')) throw e; throw new Error('请求失败 (' + resp.status + ')'); }
+  }
   return resp.json();
+};
+
+// ── sessionStorage 缓存：页面切换时保留数据，避免每次重新加载 ──
+window.cacheGet = async function(key, fetchFn, ttlSec) {
+  ttlSec = ttlSec || 60;
+  try {
+    var cached = sessionStorage.getItem('cache_' + key);
+    if (cached) {
+      var entry = JSON.parse(cached);
+      if (Date.now() - entry.ts < ttlSec * 1000) return entry.data;
+    }
+  } catch(e) {}
+  var data = await fetchFn();
+  try { sessionStorage.setItem('cache_' + key, JSON.stringify({ ts: Date.now(), data: data })); } catch(e) {}
+  return data;
+};
+
+window.cacheClear = function(key) {
+  sessionStorage.removeItem('cache_' + key);
 };
 
 // ── WebSocket（单例，所有页面共享）─────────────────────────────────
@@ -47,6 +95,10 @@ var _wsCallbacks = {
 
 window.getSocket = function() {
   if (_socket) return _socket;
+  if (typeof io === 'undefined') {
+    console.warn('[common] socket.io 未加载，跳过 WebSocket 连接');
+    return null;
+  }
   _socket = io({ transports: ['websocket', 'polling'] });
   _socket.on('connect', function() {
     var dot = document.getElementById('connection-dot');
@@ -102,7 +154,7 @@ window.offWsEvent = function(event, callback) {
 // ── 导航栏渲染 ────────────────────────────────────────────────────
 var NAV_PAGES = [
   { href: '/run',        icon: '▶️', label: '仿真执行' },
-  { href: '/schedule',   icon: '⏰', label: '定时任务' },
+  { href: '/scene',      icon: '🎬', label: '场景编排' },
   { href: '/generate',   icon: '📊', label: '数据生成' },
   { href: '/data',       icon: '📁', label: '数据管理' },
   { href: '/basicdata',  icon: '🗄️', label: '基础数据' },

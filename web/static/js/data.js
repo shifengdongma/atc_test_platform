@@ -797,3 +797,4 @@ function formatSize(bytes) {
 loadCategoryFilter();
 loadFiles(1);
 })();
+initCommon('/data');

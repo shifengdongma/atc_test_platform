@@ -81,6 +81,29 @@ _socket_async_mode = "eventlet" if os.name == "posix" else "threading"
 print(f"[web_server] async_mode={_socket_async_mode} (os={os.name})", flush=True)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode=_socket_async_mode)
 
+
+# ── 全局异常处理：捕获所有未处理异常并返回 JSON ──────────────────────
+#   避免 Werkzeug "write() before start_response" 错误
+@app.errorhandler(Exception)
+def _handle_all_errors(e):
+    """全局异常处理器：确保所有错误都返回 JSON 格式，不暴露 HTML 500 页面。"""
+    import traceback
+    tb = traceback.format_exc()
+    # 只打印前 200 字符避免日志刷屏
+    print(f"[web_server] 未处理异常: {e}\n{tb[:500]}", flush=True)
+    return jsonify({"success": False, "message": f"服务器内部错误: {e}"}), 500
+
+
+@app.errorhandler(404)
+def _handle_404(e):
+    return jsonify({"success": False, "message": "路由不存在"}), 404
+
+
+@app.errorhandler(405)
+def _handle_405(e):
+    return jsonify({"success": False, "message": "方法不允许"}), 405
+
+
 # ── 全局状态（线程安全通过 _lock 保护） ────────────────────────────
 _lock = threading.Lock()
 
@@ -147,22 +170,47 @@ def _kill_telemetry_bridge() -> None:
         pass
 
 
-def _on_exit_signal(signum, frame):
-    """SIGINT/SIGTERM 处理：停止仿真 → 清理桥接 → 强制退出。
-
-    Windows 上信号处理器运行在独立线程中，sys.exit() 只退出该线程，
-    必须用 os._exit() 强制终止整个进程。
-    """
-    print(f"\n[web_server] 收到信号 {signum}，清理资源...", flush=True)
-    # 1. 先停止仿真运行器（停止所有线程 + 清理 Redis/Kafka + 终止 bridge）
+def _graceful_shutdown():
+    """优雅关闭：停止所有后台服务后退出。"""
+    global _orchestrator
+    print("[web_server] 优雅关闭中...", flush=True)
+    # 1. 停止场景编排调度器
+    if _orchestrator is not None:
+        try:
+            _orchestrator.stop()
+        except Exception as e:
+            print(f"[web_server] 停止编排器异常: {e}", flush=True)
+    # 2. 停止仿真运行器
     if _sim_runner is not None:
         try:
             _sim_runner.stop()
         except Exception as e:
             print(f"[web_server] 停止仿真异常: {e}", flush=True)
-    # 2. 兜底清理 bridge（_sim_runner 可能为 None 或 stop 未覆盖）
+    # 3. 清理桥接进程
     _kill_telemetry_bridge()
-    # 3. 强制退出进程（Windows 上 sys.exit() 无效，必须 os._exit()）
+    # 4. 关闭 MySQL 连接
+    try:
+        from mysql_db_manager import _mysql_client, _lock as _mdb_lock
+        with _mdb_lock:
+            if _mysql_client is not None:
+                try:
+                    _mysql_client.close()
+                    print("[web_server] MySQL 连接已归还连接池", flush=True)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    print("[web_server] 退出", flush=True)
+
+
+def _on_exit_signal(signum, frame):
+    """SIGINT/SIGTERM 处理：优雅关闭后强制退出。
+
+    Windows 上信号处理器运行在独立线程中，sys.exit() 只退出该线程，
+    必须用 os._exit() 强制终止整个进程。
+    """
+    print(f"\n[web_server] 收到信号 {signum}，清理资源...", flush=True)
+    _graceful_shutdown()
     os._exit(0)
 
 
@@ -420,7 +468,11 @@ class SimulationRunner:
         else:
             _add_log(f"plan 模式: 航线文件不存在 {route_path}，尝试从 Redis 读取已有数据")
 
-        self._plan_runner = _PlanRunner(log_callback=_add_log)
+        self._plan_runner = _PlanRunner(
+            log_callback=_add_log,
+            trace_callback=lambda d: socketio.emit("trace_data", d),
+            telemetry_callback=lambda d: socketio.emit("telemetry_data", d),
+        )
         # 读取用户选择的航线 UID 列表
         # None = 未做选择（全部航线），[] = 明确取消全选（不执行任何航线），[...] = 指定航线
         uids = self.config.get("plan_selected_uids", None)
@@ -449,6 +501,11 @@ class SimulationRunner:
                                               trace_callback=lambda d: socketio.emit("trace_data", d),
                                               telemetry_callback=lambda d: socketio.emit("telemetry_data", d))
             self._sim_mgr.start(mode=self.mode, target_drones=self.target_drones)
+
+            # dynamic 模式下 trace/conflict 消费者因 ctypes 兼容性限制被跳过，明确告知用户
+            _add_log("ℹ️ 动态仿真模式：轨迹预测(trace)和冲突告警(collision)不可用，"
+                     "因 kafka-python 与 ctypes 引擎线程安全限制。"
+                     "如需查看完整日志，请使用 replay 或 plan 模式。")
 
             with _lock:
                 _runtime_state["redis_connected"] = self._sim_mgr.redis.client is not None
@@ -535,7 +592,7 @@ class SimulationRunner:
                 mock_dir = os.path.join(_root, "..", "data", "mock")
                 _rk.KAFKA_DATA_JSON_PATH = os.path.join(mock_dir, data_file)
                 _rk.REDIS_ROUTE_JSON_PATH = os.path.join(mock_dir, route_file)
-                ds = _rk.DataSource()
+                ds = _rk.DataSource(kafka_url=self.config.get("kafka_url"))
                 self._ds = ds  # 保存引用供 _cleanup() 使用
                 with _lock:
                     _runtime_state["redis_connected"] = ds.redis_client.client is not None
@@ -598,6 +655,7 @@ class SimulationRunner:
                         interval_ms=scene_interval,
                         timestamp_mode=scene_timestamp_mode,
                         loop=scene_loop,
+                        consume_trace=True,
                     )
                     self._emitter = emitter  # 保存引用供 _cleanup() 使用
                     emitter.start()
@@ -605,6 +663,7 @@ class SimulationRunner:
                         _runtime_state["active_drones"] = len(emitter.uav_data_list)
 
                     _prev_scene_sent = 0
+                    _prev_scene_trace = 0
                     while self._running and emitter.running:
                         try:
                             # 桥接场景遥测计数到前端 Layer 1（运行日志-遥测）
@@ -618,6 +677,16 @@ class SimulationRunner:
                                     "mode": "scene",
                                     "message": f"场景注入 {count} 条遥测记录"
                                 })
+                            # 桥接场景 trace 数据到前端 Layer 2（运行日志-轨迹预测）
+                            if emitter.consume_trace and emitter.trace_stats:
+                                current_trace = emitter.trace_stats.get('received', 0)
+                                if current_trace > _prev_scene_trace:
+                                    _prev_scene_trace = current_trace
+                                    socketio.emit("trace_data", {
+                                        "count": current_trace,
+                                        "data": list(emitter.trace_records[-50:]),
+                                        "key": "scene",
+                                    })
                             with _lock:
                                 if self._start_time:
                                     _runtime_state["uptime_sec"] = int(time.time() - self._start_time)
@@ -762,6 +831,23 @@ class SimulationRunner:
             bridge = getattr(self, "_telemetry_bridge", None)
             if bridge is None or bridge.poll() is not None:
                 _add_log("⚠️ 遥测桥接子进程启动失败，dynamic 模式将无 Kafka 数据，请检查 telemetry_bridge.py")
+            else:
+                # 5 秒后验证桥接是否在正常转发数据
+                def _verify_bridge_forwarding():
+                    time.sleep(5)
+                    b = getattr(self, "_telemetry_bridge", None)
+                    if b is None or b.poll() is not None:
+                        _add_log("⚠️ 遥测桥接已退出，dynamic 模式 Kafka 数据中断")
+                    else:
+                        try:
+                            from redis_client import RedisClient as _RC
+                            from env import redis_ip as _rip, redis_port as _rpt, redis_password as _rpw
+                            test_redis = _RC(_rip, _rpt, _rpw)
+                            if test_redis.client and not test_redis.client.exists("BIZ_DATA:UAV_TELEMETRY"):
+                                _add_log("遥测桥接运行中但 Redis 遥测 key 为空，检查 dynamic 模式是否正在产生遥测数据")
+                        except Exception:
+                            pass
+                threading.Thread(target=_verify_bridge_forwarding, daemon=True).start()
 
         self._thread = threading.Thread(target=self._sim_loop, daemon=True)
         self._thread.start()
@@ -844,10 +930,17 @@ def page_run():
     return send_from_directory("../web/pages", "run.html")
 
 
+@app.route("/scene")
+def page_scene():
+    """场景编排管理页。"""
+    return send_from_directory("../web/pages", "scene.html")
+
+
 @app.route("/schedule")
 def page_schedule():
-    """定时任务管理页。"""
-    return send_from_directory("../web/pages", "schedule.html")
+    """定时任务管理页（重定向到场景编排）。"""
+    from flask import redirect
+    return redirect("/scene")
 
 
 @app.route("/generate")
@@ -971,6 +1064,7 @@ def api_stop_sim():
     env["UTM_RESTART"] = "1"
     _sp.Popen([_sys.executable] + _sys.argv, env=env, close_fds=True)
     print("[web_server] 正在重启进程以清理堆状态...", flush=True)
+    _graceful_shutdown()
     os._exit(0)
 
 
@@ -1824,7 +1918,7 @@ def api_db_list_files():
     )
     # 为每个文件附加格式检测信息（从磁盘读取首 64KB）
     for f in result.get("files", []):
-        fpath = f.get("file_path", "")
+        fpath = mgr._resolve_path(f)
         sample = ""
         if fpath and os.path.exists(fpath):
             try:
@@ -1956,7 +2050,7 @@ def api_db_download_file(file_id):
     record = mgr.get_file(file_id)
     if not record:
         return jsonify({"error": "文件不存在"}), 404
-    fpath = record.get("file_path", "")
+    fpath = mgr._resolve_path(record)
     if not fpath or not os.path.exists(fpath):
         return jsonify({"error": "文件内容不可用"}), 404
     return send_file(
@@ -2110,139 +2204,308 @@ def api_ai_generate():
     return jsonify(result)
 
 
-# ==================== 定时任务调度 API ===============================
+# ==================== 场景编排 API ===================================
 
-_scheduler = None
+_orchestrator = None
 
-def _get_scheduler():
-    global _scheduler
-    if _scheduler is None:
-        from scheduler import get_scheduler
 
-        def _run_task(task):
-            """调度器回调：执行仿真任务。"""
-            mode = task.get("sim_mode", "replay")
-            params = {}
+def _get_orchestrator():
+    """获取场景编排调度器单例（延迟初始化）。"""
+    global _orchestrator
+    if _orchestrator is None:
+        from orchestrator import get_orchestrator
+
+        def _run_scene(scene):
+            """编排回调：执行场景中的所有任务。"""
+            from orchestrator import get_orchestrator as _get_och
+            och = _get_och()
+            scene_id = scene["id"]
+            scene_name = scene.get("name", f"scene-{scene_id}")
+            tasks = och.list_tasks(scene_id)
+
+            _add_log(f"[场景编排] {scene_name} 开始执行 ({len(tasks)} 个任务)")
+
+            for task in tasks:
+                task_id = task["id"]
+                task_name = task.get("name", f"task-{task_id}")
+                task_type = task.get("task_type", "sequential")
+                cycle_interval = task.get("cycle_interval_sec", 0)
+                repeat_count = task.get("repeat_count", 1)
+                timeout_sec = task.get("execution_timeout_sec", 300)
+                files = och.list_task_files(task_id)
+
+                if not files:
+                    _add_log(f"[场景编排] 任务 '{task_name}' 无关联文件，跳过")
+                    continue
+
+                _add_log(f"[场景编排] 任务 '{task_name}' ({task_type}, {len(files)} 个文件, 重复{repeat_count}次)")
+
+                for rep in range(repeat_count):
+                    if task_type == "sequential":
+                        # 顺序执行：按文件列表顺序逐个执行
+                        for fi, tf in enumerate(files):
+                            _execute_scene_file(tf, scene, task, rep + 1)
+                            interval = tf.get("interval_sec", 0)
+                            if interval > 0 and fi < len(files) - 1:
+                                _add_log(f"[场景编排] 文件间隔等待 {interval}s")
+                                time.sleep(interval)
+                    elif task_type == "parallel":
+                        # 并行执行：多线程同时执行所有文件
+                        from concurrent.futures import ThreadPoolExecutor
+                        max_workers = min(len(files), 5)  # 最多5个并发
+                        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                            futures = [
+                                executor.submit(_execute_scene_file, tf, scene, task, rep + 1)
+                                for tf in files
+                            ]
+                            for f in futures:
+                                try:
+                                    f.result(timeout=timeout_sec)
+                                except Exception as exc:
+                                    _add_log(f"[场景编排] 并行执行异常: {exc}")
+
+                    # 循环间隔等待
+                    if cycle_interval > 0 and rep < repeat_count - 1:
+                        _add_log(f"[场景编排] 循环间隔等待 {cycle_interval}s")
+                        time.sleep(cycle_interval)
+
+            _add_log(f"[场景编排] {scene_name} 执行完成")
+            return f"场景完成: {scene_name}"
+
+        def _execute_scene_file(tf, scene, task, rep_num):
+            """执行单个场景文件。"""
             try:
-                sim_params = task.get("sim_params", "{}")
-                if isinstance(sim_params, str):
-                    params = json.loads(sim_params)
-                else:
-                    params = sim_params or {}
-            except (json.JSONDecodeError, TypeError):
-                pass
+                import json_data_manager as jdm
+                file_id = tf.get("file_id", 0)
+                record = jdm.get_file(int(file_id))
+                if not record:
+                    _add_log(f"[场景编排] 文件 ID={file_id} 不存在")
+                    return
 
-            params["mode"] = mode
-            params["target_drones"] = params.get("target_drones", 10)
+                # 复制文件到 mock/ 目录
+                mock_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "mock")
+                os.makedirs(mock_dir, exist_ok=True)
+                src_path = jdm._resolve_path(record)
+                dest_path = os.path.join(mock_dir, record.get("name", ""))
+                if src_path and os.path.exists(src_path):
+                    if os.path.abspath(src_path) != os.path.abspath(dest_path):
+                        import shutil
+                        shutil.copy2(src_path, dest_path)
 
-            # 如果有指定的 JSON 文件 ID，从数据库加载并导出到 mock/ 目录
-            json_file_id = params.get("json_file_id", "")
-            if json_file_id:
-                try:
-                    import json_data_manager as jdm
-                    record = jdm.get_file(int(json_file_id))
-                    if record:
-                        # 从磁盘复制到 mock/ 目录供仿真使用
-                        mock_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "mock")
-                        os.makedirs(mock_dir, exist_ok=True)
-                        src_path = record.get("file_path", "")
-                        dest_path = os.path.join(mock_dir, record.get("name", ""))
-                        if src_path and os.path.exists(src_path):
-                            if os.path.abspath(src_path) != os.path.abspath(dest_path):
-                                import shutil
-                                shutil.copy2(src_path, dest_path)
-                        # 设置 data_file 参数
-                        if mode in ("replay", "replay_once"):
-                            params["data_file"] = record.get("name", "")
-                        elif mode == "scene":
-                            params["scene_files"] = [record.get("name", "")]
-                        _add_log(f"[定时任务] 已从数据库加载文件: {record.get('name', '')}")
-                except Exception as e:
-                    _add_log(f"[定时任务] 加载 JSON 文件失败: {e}")
+                mode = scene.get("sim_mode", "scene")
+                params = {
+                    "mode": mode,
+                    "target_drones": 10,
+                    "duration_min": 5,
+                }
+                if mode in ("replay", "replay_once"):
+                    params["data_file"] = record.get("name", "")
+                elif mode == "scene":
+                    params["scene_files"] = [record.get("name", "")]
 
-            _add_log(f"[定时任务] {task.get('name','')} 开始执行 (模式={mode})")
-            try:
+                task_name = task.get("name", "")
+                _add_log(f"[场景编排] 执行: {task_name} #{rep_num} → {record.get('name', '')}")
+
                 runner = SimulationRunner(params)
                 runner.start()
-                # 等待仿真运行
-                wait = params.get("duration_min", 10) * 60
+                wait = params.get("duration_min", 5) * 60
                 deadline = time.time() + min(wait, 3600)
                 while runner._running and time.time() < deadline:
                     time.sleep(1)
                 runner.stop()
-                return f"任务完成: {task.get('name','')} (模式={mode}, 运行{params.get('duration_min',10)}分钟)"
+
             except Exception as e:
-                return f"任务异常: {e}"
+                _add_log(f"[场景编排] 文件执行异常: {e}")
 
-        _scheduler = get_scheduler(execute_callback=_run_task)
-    return _scheduler
-
-
-@app.route("/api/schedule/tasks", methods=["GET"])
-def api_schedule_list():
-    """列出所有定时任务。"""
-    sch = _get_scheduler()
-    tasks = sch.list_tasks()
-    return jsonify({"tasks": tasks})
+        _orchestrator = get_orchestrator(execute_callback=_run_scene)
+    return _orchestrator
 
 
-@app.route("/api/schedule/tasks", methods=["POST"])
-def api_schedule_create():
-    """创建定时任务。"""
+# ── 辅助装饰器 ──────────────────────────────────────────────────────
+
+def _safe_json(fn):
+    """装饰器：为 API 添加 JSON 格式异常处理。"""
+    from functools import wraps as _wraps
+    @_wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            # 用 print 而非 traceback.print_exc，避免在 response 写入阶段触发
+            # Werkzeug "write() before start_response" 断言错误
+            print(f"[web_server] API 异常 ({fn.__name__}): {e}", flush=True)
+            return jsonify({"success": False, "message": f"操作失败: {e}"}), 500
+    return wrapper
+
+
+# ── 场景 CRUD ───────────────────────────────────────────────────────
+
+@app.route("/api/scenes", methods=["GET"])
+@_safe_json
+def api_scene_list():
+    """列出所有场景。"""
+    och = _get_orchestrator()
+    scenes = och.list_scenes()
+    return jsonify({"scenes": scenes})
+
+
+@app.route("/api/scenes", methods=["POST"])
+@_safe_json
+def api_scene_create():
+    """创建场景。"""
     data = request.get_json(silent=True) or {}
     if not data.get("name"):
-        return jsonify({"success": False, "message": "任务名称不能为空"}), 400
-    sch = _get_scheduler()
-    tid = sch.add_task(data)
-    _add_log(f"定时任务已创建: {data.get('name','')}")
-    return jsonify({"success": True, "id": tid, "message": "已创建"})
+        return jsonify({"success": False, "message": "场景名称不能为空"}), 400
+    och = _get_orchestrator()
+    scene_id = och.create_scene(data)
+    _add_log(f"场景已创建: {data.get('name', '')}")
+    return jsonify({"success": True, "id": scene_id, "message": "已创建"})
 
 
-@app.route("/api/schedule/tasks/<int:task_id>", methods=["PUT"])
-def api_schedule_update(task_id):
-    """更新定时任务。"""
+@app.route("/api/scenes/<int:scene_id>", methods=["PUT"])
+@_safe_json
+def api_scene_update(scene_id):
+    """更新场景。"""
     data = request.get_json(silent=True) or {}
-    sch = _get_scheduler()
-    sch.update_task(task_id, data)
+    och = _get_orchestrator()
+    och.update_scene(scene_id, data)
     return jsonify({"success": True, "message": "已更新"})
 
 
-@app.route("/api/schedule/tasks/<int:task_id>", methods=["DELETE"])
-def api_schedule_delete(task_id):
-    """删除定时任务。"""
-    sch = _get_scheduler()
-    sch.delete_task(task_id)
+@app.route("/api/scenes/<int:scene_id>", methods=["DELETE"])
+@_safe_json
+def api_scene_delete(scene_id):
+    """删除场景。"""
+    och = _get_orchestrator()
+    och.delete_scene(scene_id)
     return jsonify({"success": True, "message": "已删除"})
 
 
-@app.route("/api/schedule/tasks/<int:task_id>/pause", methods=["POST"])
-def api_schedule_pause(task_id):
-    sch = _get_scheduler()
-    sch.pause_task(task_id)
-    return jsonify({"success": True, "message": "已暂停"})
+@app.route("/api/scenes/<int:scene_id>/toggle", methods=["POST"])
+@_safe_json
+def api_scene_toggle(scene_id):
+    """启用/禁用场景。"""
+    och = _get_orchestrator()
+    updated = och.toggle_scene(scene_id)
+    if updated is None:
+        return jsonify({"success": False, "message": "场景不存在"}), 404
+    return jsonify({"success": True, "enabled": updated.get("enabled"), "message": "已切换"})
 
 
-@app.route("/api/schedule/tasks/<int:task_id>/resume", methods=["POST"])
-def api_schedule_resume(task_id):
-    sch = _get_scheduler()
-    sch.resume_task(task_id)
-    return jsonify({"success": True, "message": "已恢复"})
-
-
-@app.route("/api/schedule/tasks/<int:task_id>/run-now", methods=["POST"])
-def api_schedule_run_now(task_id):
-    """立即执行一次。"""
-    sch = _get_scheduler()
-    result = sch.run_now(task_id)
+@app.route("/api/scenes/<int:scene_id>/run-now", methods=["POST"])
+@_safe_json
+def api_scene_run_now(scene_id):
+    """立即执行场景。"""
+    och = _get_orchestrator()
+    result = och.run_scene_now(scene_id)
     return jsonify(result)
 
 
-@app.route("/api/schedule/tasks/<int:task_id>/history", methods=["GET"])
-def api_schedule_history(task_id):
-    """获取任务执行历史。"""
-    sch = _get_scheduler()
-    history = sch.get_history(task_id)
+@app.route("/api/scenes/<int:scene_id>/history", methods=["GET"])
+@_safe_json
+def api_scene_history(scene_id):
+    """获取场景执行历史。"""
+    och = _get_orchestrator()
+    history = och.get_scene_history(scene_id)
     return jsonify({"history": history})
+
+
+# ── 任务 CRUD（场景内）──────────────────────────────────────────────
+
+@app.route("/api/scenes/<int:scene_id>/tasks", methods=["GET"])
+@_safe_json
+def api_scene_tasks_list(scene_id):
+    """列出场景下的所有任务。"""
+    och = _get_orchestrator()
+    tasks = och.list_tasks(scene_id)
+    return jsonify({"tasks": tasks})
+
+
+@app.route("/api/scenes/<int:scene_id>/tasks", methods=["POST"])
+@_safe_json
+def api_scene_task_create(scene_id):
+    """创建任务。"""
+    data = request.get_json(silent=True) or {}
+    if not data.get("name"):
+        return jsonify({"success": False, "message": "任务名称不能为空"}), 400
+    data["scene_id"] = scene_id
+    och = _get_orchestrator()
+    task_id = och.create_task(data)
+    return jsonify({"success": True, "id": task_id, "message": "已创建"})
+
+
+@app.route("/api/scenes/<int:scene_id>/tasks/<int:task_id>", methods=["PUT"])
+@_safe_json
+def api_scene_task_update(scene_id, task_id):
+    """更新任务（含名称修改）。"""
+    data = request.get_json(silent=True) or {}
+    och = _get_orchestrator()
+    och.update_task(task_id, data)
+    return jsonify({"success": True, "message": "已更新"})
+
+
+@app.route("/api/scenes/<int:scene_id>/tasks/<int:task_id>", methods=["DELETE"])
+@_safe_json
+def api_scene_task_delete(scene_id, task_id):
+    """删除任务。"""
+    och = _get_orchestrator()
+    och.delete_task(task_id)
+    return jsonify({"success": True, "message": "已删除"})
+
+
+@app.route("/api/scenes/<int:scene_id>/tasks/reorder", methods=["POST"])
+@_safe_json
+def api_scene_tasks_reorder(scene_id):
+    """重新排序任务。"""
+    data = request.get_json(silent=True) or {}
+    task_ids = data.get("task_ids", [])
+    och = _get_orchestrator()
+    och.reorder_tasks(scene_id, task_ids)
+    return jsonify({"success": True, "message": "已排序"})
+
+
+# ── 任务文件 CRUD ───────────────────────────────────────────────────
+
+@app.route("/api/scenes/<int:scene_id>/tasks/<int:task_id>/files", methods=["GET"])
+@_safe_json
+def api_task_files_list(scene_id, task_id):
+    """列出任务下的所有文件关联。"""
+    och = _get_orchestrator()
+    files = och.list_task_files(task_id)
+    return jsonify({"files": files})
+
+
+@app.route("/api/scenes/<int:scene_id>/tasks/<int:task_id>/files", methods=["POST"])
+@_safe_json
+def api_task_file_add(scene_id, task_id):
+    """为任务添加文件。"""
+    data = request.get_json(silent=True) or {}
+    if not data.get("file_id"):
+        return jsonify({"success": False, "message": "file_id 不能为空"}), 400
+    data["task_id"] = task_id
+    och = _get_orchestrator()
+    rel_id = och.add_task_file(data)
+    return jsonify({"success": True, "id": rel_id, "message": "已添加"})
+
+
+@app.route("/api/scenes/<int:scene_id>/tasks/<int:task_id>/files/<int:file_rel_id>", methods=["PUT"])
+@_safe_json
+def api_task_file_update(scene_id, task_id, file_rel_id):
+    """更新文件关联（修改间隔等）。"""
+    data = request.get_json(silent=True) or {}
+    och = _get_orchestrator()
+    och.update_task_file(file_rel_id, data)
+    return jsonify({"success": True, "message": "已更新"})
+
+
+@app.route("/api/scenes/<int:scene_id>/tasks/<int:task_id>/files/<int:file_rel_id>", methods=["DELETE"])
+@_safe_json
+def api_task_file_remove(scene_id, task_id, file_rel_id):
+    """移除文件关联。"""
+    och = _get_orchestrator()
+    och.remove_task_file(file_rel_id)
+    return jsonify({"success": True, "message": "已移除"})
+
 
 
 # ==================== 日志流 API =====================================
@@ -2385,4 +2648,25 @@ if __name__ == "__main__":
         import time as _t
         print("[web_server] 等待端口释放...", flush=True)
         _t.sleep(2.0)
-    socketio.run(app, host=host, port=port, allow_unsafe_werkzeug=True)
+    # ── 启动预热：提前建表 + 预连接 MySQL，避免首次 API 请求承受全部延迟 ──
+    # 注意：database/ 已加入 sys.path，直接用 import mysql_db_manager（不带 database. 前缀）
+    try:
+        import mysql_db_manager as _warmup_mdb
+        print("[web_server] 预热数据库...", flush=True)
+        _warmup_mdb.init_tables()
+        _client = _warmup_mdb._get_client()
+        if _client:
+            print("[web_server] 数据库预热完成", flush=True)
+        else:
+            print("[web_server] MySQL 未配置或不可用，跳过预热", flush=True)
+    except Exception as e:
+        print(f"[web_server] 数据库预热跳过: {e}", flush=True)
+    # 达梦连接在首次 generate 页面使用航线选择时惰性加载，无需预热
+    try:
+        print(f"[web_server] 正在启动 HTTP 服务 {host}:{port} ...", flush=True)
+        socketio.run(app, host=host, port=port, allow_unsafe_werkzeug=True)
+    except Exception as e:
+        import traceback
+        print(f"[web_server] 启动失败: {e}", flush=True)
+        traceback.print_exc()
+        raise

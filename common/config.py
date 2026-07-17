@@ -64,6 +64,7 @@ class MysqlConfig:
     password: str = ""
     database: str = "utm_simulator"
     charset: str = "utf8mb4"
+    use_ssl: bool = True  # 是否使用 SSL/TLS 连接（Docker 本地部署可设 UTM_MYSQL_SSL=false 关闭）
     configured: bool = False  # 是否通过环境变量或 env.py 显式配置（Docker 内未配时跳过连接）
 
 
@@ -224,6 +225,12 @@ def _load_mysql_config() -> MysqlConfig:
     if os.environ.get("UTM_MYSQL_CHARSET"):
         charset = os.environ["UTM_MYSQL_CHARSET"]
         env_overrides.append(f"charset={charset}")
+
+    # SSL 配置：可通过 UTM_MYSQL_SSL=false/0/no 关闭 TLS（Docker 本地部署加速连接）
+    use_ssl = True
+    if os.environ.get("UTM_MYSQL_SSL") is not None:
+        use_ssl = os.environ["UTM_MYSQL_SSL"].lower() in ("1", "true", "yes")
+        env_overrides.append(f"use_ssl={use_ssl}")
     if env_overrides:
         print(f"[config] _load_mysql_config: 环境变量覆盖 — {', '.join(env_overrides)}")
 
@@ -235,6 +242,7 @@ def _load_mysql_config() -> MysqlConfig:
     return MysqlConfig(
         host=host, port=port, user=user,
         password=password, database=database, charset=charset,
+        use_ssl=use_ssl,
         configured=configured,
     )
 

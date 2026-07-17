@@ -261,26 +261,50 @@ class MysqlDbClient:
             sql (str): SQL 语句
 
         Returns:
-            list[dict] / None: 查询结果字典列表，非查询语句返回 None
+            list[dict] / None: 查询结果字典列表，DDL 语句返回 True
+
+        Raises:
+            pymysql.err.OperationalError: 连接级别错误（超时、断连等）
+            Exception: 其他 SQL 执行错误
         """
+        import sys as _sys
         if not self.cursor:
-            print("[MysqlDbClient] 数据库未连接，请先调用 connect()")
-            return None
+            print("[MysqlDbClient] 数据库未连接，请先调用 connect()", file=_sys.stderr, flush=True)
+            raise RuntimeError("数据库未连接")
 
         try:
             self.cursor.execute(sql)
             desc = self.cursor.description
             if desc:
                 rows = self.cursor.fetchall()
-                print(f"[MysqlDbClient] 执行 SQL 成功，返回 {len(rows)} 条记录")
+                print(f"[MysqlDbClient] 执行 SQL 成功，返回 {len(rows)} 条记录", file=_sys.stderr, flush=True)
                 return rows
             else:
                 self.conn.commit()
-                print("[MysqlDbClient] 执行 SQL 成功")
-                return None
+                print("[MysqlDbClient] 执行 SQL 成功", file=_sys.stderr, flush=True)
+                return True  # DDL 成功返回 True 而非 None
         except Exception as e:
-            print(f"[MysqlDbClient] SQL 执行失败: {e}")
-            return None
+            err_msg = str(e)
+            print(f"[MysqlDbClient] SQL 执行失败: {e}", file=_sys.stderr, flush=True)
+            # 连接级别错误：主动关闭损坏的连接
+            if isinstance(e, pymysql.err.OperationalError) or \
+               isinstance(e, pymysql.err.InterfaceError) or \
+               "Lost connection" in err_msg or \
+               "Packet sequence" in err_msg or \
+               "timed out" in err_msg:
+                try:
+                    if self.cursor:
+                        self.cursor.close()
+                except Exception:
+                    pass
+                self.cursor = None
+                try:
+                    if self.conn:
+                        self.conn.close()
+                except Exception:
+                    pass
+                self.conn = None
+            raise  # 重新抛出，让调用方感知失败
 
     def insert(self, table_name, data):
         """插入单条记录

@@ -124,6 +124,17 @@ else
     echo "    修复: docker compose build --no-cache (确保 pip install pymysql 成功)"
 fi
 
+# DBUtils/PooledDB 导入验证
+echo "  [DBUtils/PooledDB]"
+DBUTILS_CHECK=$(python -c "from dbutils.pooled_db import PooledDB; print('OK')" 2>&1) || true
+if [ "$DBUTILS_CHECK" = "OK" ]; then
+    echo "    ✓ DBUtils/PooledDB 已安装，连接池可用"
+else
+    echo "    ✗✗✗ CRITICAL: DBUtils 未安装或导入失败！"
+    echo "    错误详情: ${DBUTILS_CHECK}"
+    echo "    修复: docker compose build --no-cache (确保 pip install DBUtils>=3.0 成功)"
+fi
+
 # MySQL 连接测试（仅在配置了 UTM_MYSQL_HOST 时）
 if [ -n "${UTM_MYSQL_HOST}" ]; then
     MYSQL_TEST=$(python -c "

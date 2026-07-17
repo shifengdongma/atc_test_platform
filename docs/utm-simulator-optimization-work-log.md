@@ -2479,3 +2479,82 @@ Docker 容器中达梦数据库连接持续报 `[CODE:-70089]Encryption module f
 | 推送仓库 | 2（GitHub + GitLab） |
 
 | 状态 | ✅ 已完成 |
+
+---
+
+### 2026-07-16: 修复 Docker 跨平台 file_path 不兼容导致 "文件在磁盘中不存在"
+
+> 来源分析: Docker 部署配置 + 数据管理代码审查
+
+**问题**: Docker 容器中点击"数据管理"页面查看部分 JSON 文件时提示"文件在磁盘中不存在"，而本地 Windows 正常。根因是 `sim_json_files` 表的 `file_path` 字段存储了文件保存时的绝对路径（Windows: `D:\...\data\mock\xxx.json` / Linux: `/app/data/mock/xxx.json`），当 MySQL 在 Windows 和 Docker 间共享时路径互不兼容。
+
+**修复方案**: DB 中仅存文件名，运行时通过 `_resolve_path()` 动态拼接当前环境的 `MOCK_DIR`，同时兼容旧数据的绝对路径格式。
+
+| 时间 | 完成内容 | 状态 |
+|------|----------|------|
+| 2026-07-16 | `database/json_data_manager.py` — 新增 `_resolve_path()` 路径解析函数（5 级回退策略兼容新旧格式） | ✅ 已完成 |
+| 2026-07-16 | `database/json_data_manager.py` — 新增 `_migrate_file_paths_once()` 一次性迁移函数（模块加载时将旧绝对路径转为文件名） | ✅ 已完成 |
+| 2026-07-16 | `database/json_data_manager.py` — `save_file()` 改为仅存文件名入 DB | ✅ 已完成 |
+| 2026-07-16 | `database/json_data_manager.py` — `import_from_mock()` 改为仅存文件名入 DB | ✅ 已完成 |
+| 2026-07-16 | `database/json_data_manager.py` — `delete_file()` / `preview_file()` / `read_file_content_partial()` / `download_file()` / `export_to_mock()` 改用 `_resolve_path()` | ✅ 已完成 |
+| 2026-07-16 | `utm_simulator/web_server.py` — `api_db_list_files()` / `api_db_download_file()` / 定时任务文件复制 改用 `_resolve_path()` | ✅ 已完成 |
+| 2026-07-16 | 功能测试 — `_resolve_path()` 四种场景验证通过（Win绝对路径/Linux绝对路径/纯文件名/纯name） | ✅ 已验证 |
+
+### 汇总
+
+| 操作 | 数量 |
+|------|------|
+| 修改文件 | 2 |
+| 新增函数 | 2 (`_resolve_path`, `_migrate_file_paths_once`) |
+| 修改调用点 | 10 |
+
+---
+
+### 2026-07-17: 定时任务模块重构为"场景编排"
+
+> 来源: 用户需求 — 定时任务功能存在死锁/缺失路由/启动慢等问题，需重构为场景编排
+
+**问题**:
+1. MySQL 死锁 (1213) — `POST /api/schedule/tasks` 高并发写入时无重试机制
+2. 缺失 `POST /api/schedule/tasks/batch` 批量创建路由 — 前端调用 404
+3. API 路由无 try/except 保护 — 返回 HTML 500 而非 JSON
+4. 前端 `apiGet`/`apiPost` 不检查 `resp.ok` — JSON 解析崩溃
+5. `init_tables()` 从多个入口点重复调用 — 启动缓慢 + 日志刷屏
+
+**重构要点**:
+- "定时任务" → "场景编排"：全栈重命名（DB表、后端路由、前端页面、导航栏）
+- 默认仿真模式 → `scene`（场景文件注入）
+- 单文件场景：增设秒级循环间隔（如 30s 后重复发射）
+- 多文件场景：支持多任务，每任务支持列表顺序执行/多文件并行执行
+- 循环间隔、重复次数、执行超时等参数上移至任务级别
+- 支持任务名称编辑、环境选择
+
+| 时间 | 完成内容 | 状态 |
+|------|----------|------|
+| 2026-07-17 | **阶段一**：`database/mysql_db_manager.py` — insert/update/delete 增加死锁重试（1213，3次指数退避） | ✅ 已完成 |
+| 2026-07-17 | **阶段一**：`database/mysql_db_manager.py` — `init_tables()` 增加 `_tables_initialized` 去重标志 | ✅ 已完成 |
+| 2026-07-17 | **阶段一**：`utm_simulator/web_server.py` — 新增 `POST /api/schedule/tasks/batch` 批量创建路由 | ✅ 已完成 |
+| 2026-07-17 | **阶段一**：`utm_simulator/web_server.py` — 8个schedule路由全部加 `_safe_json` 装饰器异常保护 | ✅ 已完成 |
+| 2026-07-17 | **阶段一**：`web/static/js/common.js` — `apiGet`/`apiPost` 增加 `resp.ok` 检查 | ✅ 已完成 |
+| 2026-07-17 | **阶段二**：`database/mysql_db_manager.py` — 删除 `sim_scheduled_tasks` DDL，新增 `sim_scenes`/`sim_scene_tasks`/`sim_scene_task_files` 三表，`sim_task_logs` 增加 `scene_id`/`scene_task_name` 列 | ✅ 已完成 |
+| 2026-07-17 | **阶段二**：`database/db_manager.py` — 同步 SQLite DDL（5表→7表） | ✅ 已完成 |
+| 2026-07-17 | **阶段三**：`database/orchestrator.py` — **新建**：场景编排调度器 `SceneOrchestrator`，支持场景/任务/文件三级CRUD + cron调度 + 串行/并行执行逻辑 | ✅ 已完成 |
+| 2026-07-17 | **阶段三**：`utm_simulator/web_server.py` — 替换旧 `/api/schedule/*` 为 15 个新 `/api/scenes/*` 路由（场景/任务/文件三级API），`_get_scheduler()` → `_get_orchestrator()` | ✅ 已完成 |
+| 2026-07-17 | **阶段四**：`web/pages/scene.html` — **新建**：场景编排页面（单文件/多文件切换、任务标签页、文件列表编辑、环境选择、cron生成器） | ✅ 已完成 |
+| 2026-07-17 | **阶段四**：`web/static/js/scene.js` — **新建**：场景编排前端逻辑（场景/任务/文件CRUD、任务标签页、文件增删改、cron构建） | ✅ 已完成 |
+| 2026-07-17 | **阶段四**：`web/static/js/common.js` — 导航栏"定时任务" → "场景编排"（`/schedule` → `/scene`） | ✅ 已完成 |
+| 2026-07-17 | **清理**：删除 `database/scheduler.py`、`web/pages/schedule.html`、`web/static/js/schedule.js` | ✅ 已完成 |
+
+### 汇总
+
+| 操作 | 数量 |
+|------|------|
+| 新建文件 | 3 (`orchestrator.py`, `scene.html`, `scene.js`) |
+| 修改文件 | 4 (`mysql_db_manager.py`, `db_manager.py`, `web_server.py`, `common.js`) |
+| 删除文件 | 3 (`scheduler.py`, `schedule.html`, `schedule.js`) |
+| 新增 DB 表 | 3 (`sim_scenes`, `sim_scene_tasks`, `sim_scene_task_files`) |
+| 删除 DB 表 | 1 (`sim_scheduled_tasks`) |
+| 新增 API | 15 个（场景编排 CRUD） |
+| 删除/替换 API | 9 个（旧 schedule 路由） |
+
+| 状态 | ✅ 已完成 |

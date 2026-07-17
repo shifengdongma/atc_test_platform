@@ -327,8 +327,19 @@ class SceneEmitter:
 
     def _emit_loop(self):
         """发射循环"""
+        last_redis_refresh = 0.0
+        redis_refresh_interval = 30.0  # 每 30 秒刷新 Redis 航线时间戳，保持下游 ATC 活跃追踪
         while self.running:
             t0 = time.perf_counter()
+
+            # 周期性刷新 Redis 航线时间戳，确保下游 ATC 不因时间过期而取消追踪
+            now = time.time()
+            if self.redis_client and now - last_redis_refresh >= redis_refresh_interval:
+                try:
+                    self._write_redis_route_batch()
+                    last_redis_refresh = now
+                except Exception as e:
+                    print(f"[Redis] 周期性航线刷新失败: {e}")
 
             if self._is_all_completed():
                 if self.loop:
@@ -356,9 +367,8 @@ class SceneEmitter:
             record = uav.next()
             record['timestamp'] = self._process_timestamp(record, now_ms)
             record['active'] = 1  # 标记激活状态，与 PlanRunner 输出一致
-            # 确保 operatingStatus=2（飞行中），下游 UTM 依赖此字段识别活跃 UAV
-            if record.get('operatingStatus') is None:
-                record['operatingStatus'] = 2
+            # 强制 operatingStatus=2（飞行中），下游 ATC 依赖此字段识别活跃监视目标
+            record['operatingStatus'] = 2
             records.append(record)
 
         if records:

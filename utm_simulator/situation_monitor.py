@@ -99,6 +99,7 @@ class SituationMonitor:
 
         # 告警详情去重 — 通过内容哈希避免相同告警重复推送
         self._last_warnings_hash = ""
+        self._last_ws_captured_snapshot = (0, 0)  # (uav_count, warning_count) ws_captured_data 去重
         # 告警 API 重试追踪
         self._alert_retry_count = 0
         self._max_alert_retries = 3
@@ -586,12 +587,16 @@ class SituationMonitor:
 
         # ── ATC WebSocket 前端数据采集 ──
         # 对已处理的飞行/告警数据推送一份 ws_captured_data 摘要
-        # 节流：仅在有 UAV 或告警相关数据时推送
+        # 去重：仅在 UAV 数或告警数变化时推送，避免刷屏
         if uav_count > 0 or warnings:
-            self._push_log("ws_captured_data",
-                           f"ATC {data.get('type', 'flightTrack')}: {uav_count} UAV, {len(warnings or [])} 告警",
-                           detail={"raw_type": data.get("type", ""), "uav_count": uav_count,
-                                   "warning_count": len(warnings) if warnings else 0})
+            warning_count = len(warnings) if warnings else 0
+            new_snapshot = (uav_count, warning_count)
+            if new_snapshot != self._last_ws_captured_snapshot:
+                self._last_ws_captured_snapshot = new_snapshot
+                self._push_log("ws_captured_data",
+                               f"ATC {data.get('type', 'flightTrack')}: {uav_count} UAV, {warning_count} 告警",
+                               detail={"raw_type": data.get("type", ""), "uav_count": uav_count,
+                                       "warning_count": warning_count})
 
     def _extract_uav_count(self, data: Dict[str, Any]) -> int:
         """从消息中提取 UAV 数量。"""

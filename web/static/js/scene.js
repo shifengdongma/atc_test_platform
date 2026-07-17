@@ -57,7 +57,45 @@ function buildCron(dateEl, timeEl, repeatEl) {
   var d = $(dateEl).value, t = $(timeEl).value, r = $(repeatEl).value;
   if (!d || !t || r === 'once') return '';
   var dp = d.split('-'), tp = t.split(':');
-  return tp[1] + ' ' + tp[0] + ' ' + dp[2] + ' ' + dp[1] + ' ' + (r==='daily'?'*':r==='weekly'?'*':dp[2]);
+  var minute = tp[1], hour = tp[0];
+  if (r === 'daily') {
+    // 每天指定时间执行
+    return minute + ' ' + hour + ' * * *';
+  } else if (r === 'weekly') {
+    // 每周指定星期几执行
+    var dt = new Date(d + 'T' + t);
+    var dow = dt.getDay(); // 0=Sunday
+    return minute + ' ' + hour + ' * * ' + dow;
+  } else if (r === 'monthly') {
+    // 每月指定日期执行
+    return minute + ' ' + hour + ' ' + dp[2] + ' * *';
+  }
+  return '';
+}
+
+function parseCron(cronExpr, dateEl, timeEl, repeatEl) {
+  if (!cronExpr) return;
+  var fields = cronExpr.trim().split(/\s+/);
+  if (fields.length !== 5) return;
+  var minute = fields[0], hour = fields[1], dom = fields[2], month = fields[3], dow = fields[4];
+  // 恢复时间
+  $(timeEl).value = (hour.length===1?'0':'') + hour + ':' + (minute.length===1?'0':'') + minute;
+  // 判断重复方式
+  if (dom === '*' && month === '*' && dow === '*') {
+    $(repeatEl).value = 'daily';
+  } else if (dow !== '*' && dom === '*') {
+    $(repeatEl).value = 'weekly';
+  } else if (dom !== '*' && month === '*') {
+    $(repeatEl).value = 'monthly';
+  } else {
+    $(repeatEl).value = 'once';
+  }
+  // 恢复日期为今天
+  var now = new Date();
+  var yyyy = now.getFullYear();
+  var mm = String(now.getMonth()+1).padStart(2,'0');
+  var dd = String(now.getDate()).padStart(2,'0');
+  $(dateEl).value = yyyy + '-' + mm + '-' + dd;
 }
 
 // ── 公共：显示历史 ─────────────────────────────────────────────────
@@ -282,25 +320,42 @@ async function loadTaskList() {
       var s = data.scenes[si];
       var st = s.enabled ? '<span class="current-badge">启用</span>' : '<span style="color:var(--danger);font-size:10px;">暂停</span>';
       var typeLabel = s.scene_type==='multi'?'多文件':'单文件';
+      var cronDisplay = s.cron_expr ? escHtml(s.cron_expr) : '手动触发';
+      var lastRun = s.last_run_at ? escHtml(s.last_run_at.substring(0,16)) : '--';
+      var nextRun = s.next_run_at ? escHtml(s.next_run_at.substring(0,16)) : (s.cron_expr?'计算中...':'--');
       html += '<div class="scene-card">'+
         '<h4>'+escHtml(s.name||'')+' '+st+' <span style="font-size:10px;color:var(--text-dim);">['+typeLabel+' | '+escHtml(s.sim_mode||'scene')+']</span></h4>'+
-        '<div class="meta">调度: '+escHtml(s.cron_expr||'手动触发')+' | 环境: '+(s.env_id||'默认')+' | 上次: '+escHtml((s.last_run_at||'--').substring(0,16))+'</div>';
-      // 如果是多文件，显示任务列表
-      if (s.scene_type==='multi') {
-        try {
-          var tr = await apiGet('/api/scenes/'+s.id+'/tasks');
-          if (tr.tasks && tr.tasks.length) {
-            html += '<div style="margin:4px 0 0 8px;">';
-            for (var ti=0; ti<tr.tasks.length; ti++) {
-              var t = tr.tasks[ti];
-              html += '<div class="task-info">📌 '+escHtml(t.name||'任务'+(ti+1))+
-                ' <span style="color:var(--text-dim);">['+(t.task_type==='parallel'?'⚡并行':'📋顺序')+
-                ' | 循环'+t.cycle_interval_sec+'s | ×'+t.repeat_count+' | 超时'+t.execution_timeout_sec+'s]</span></div>';
+        '<div class="meta">调度: '+cronDisplay+' | 环境: '+(s.env_id||'默认')+' | 上次: '+lastRun+' | 下次: '+nextRun+'</div>';
+      // 加载任务和文件信息
+      try {
+        var tr = await apiGet('/api/scenes/'+s.id+'/tasks');
+        if (tr.tasks && tr.tasks.length) {
+          html += '<div style="margin:4px 0 0 8px;">';
+          for (var ti=0; ti<tr.tasks.length; ti++) {
+            var t = tr.tasks[ti];
+            // 获取关联文件
+            var fr = await apiGet('/api/scenes/'+s.id+'/tasks/'+t.id+'/files');
+            var fileNames = [];
+            if (fr.files && fr.files.length) {
+              for (var fi=0; fi<fr.files.length; fi++) {
+                var f = fr.files[fi];
+                var fname = '';
+                // 从缓存中查找文件名
+                var cached = jsonFileCache.find(function(x){return x.id===f.file_id;});
+                if (cached) fname = cached.name;
+                else fname = '文件#'+f.file_id;
+                fileNames.push(fname + (f.interval_sec>0?' (间隔'+f.interval_sec+'s)':''));
+              }
             }
-            html += '</div>';
+            var fileInfo = fileNames.length > 0 ? ' 📎'+fileNames.join(', ') : ' ⚠无文件';
+            html += '<div class="task-info">📌 '+escHtml(t.name||'任务'+(ti+1))+
+              ' <span style="color:var(--text-dim);">['+(t.task_type==='parallel'?'⚡并行':'📋顺序')+
+              ' | 循环'+t.cycle_interval_sec+'s | ×'+t.repeat_count+' | 超时'+t.execution_timeout_sec+'s]</span>'+
+              '<span style="font-size:10px;color:var(--accent);">'+fileInfo+'</span></div>';
           }
-        } catch(e) {}
-      }
+          html += '</div>';
+        }
+      } catch(e) {}
       html += '<div class="actions">'+
         '<button class="btn-tiny" onclick="window._toggleScene('+s.id+')">'+(s.enabled?'⏸暂停':'▶启用')+'</button>'+
         '<button class="btn-tiny" onclick="window._runScene('+s.id+')">⚡立即执行</button>'+
@@ -333,6 +388,8 @@ window._editScene = async function(id, stype) {
       $('#s-edit-id').value = s.id;
       $('#s-enabled').checked = s.enabled===1;
       $('#btn-s-cancel').style.display = '';
+      // 恢复 cron 日期/时间/重复
+      parseCron(s.cron_expr, '#s-date', '#s-time', '#s-repeat');
       // 加载任务信息
       try {
         var tr = await apiGet('/api/scenes/'+id+'/tasks');
@@ -353,6 +410,8 @@ window._editScene = async function(id, stype) {
       $('#m-edit-id').value = s.id;
       $('#m-enabled').checked = s.enabled===1;
       $('#btn-m-cancel').style.display = '';
+      // 恢复 cron 日期/时间/重复
+      parseCron(s.cron_expr, '#m-date', '#m-time', '#m-repeat');
       loadMultiSceneTasks(id);
       showHistory(id, 'multi-history');
     }

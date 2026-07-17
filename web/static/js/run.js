@@ -650,7 +650,7 @@ function renderTraceLayer() {
     return '<div class="log-line log-trace">'
       + '<span class="log-ts">[' + r.time + ']</span> '
       + '<span class="log-uav">' + escHtml(r.uavCode) + '</span> '
-      + '<span class="log-points">轨迹点: ' + r.points + '</span>'
+      + '<span class="log-points">' + (r.points > 0 ? '轨迹点: ' + r.points : '暂无轨迹数据') + '</span>'
       + '</div>';
   }).join('');
   el.scrollTop = el.scrollHeight;

@@ -270,13 +270,69 @@ class SceneOrchestrator:
         return scene_id
 
     def update_scene(self, scene_id: int, data: Dict[str, Any]) -> bool:
-        """更新场景基本信息。不修改关联的任务/文件。"""
-        # 清理非表字段（与 create_scene 对齐）
-        data.pop("tasks", None)
-        data.pop("file_id", None)
-        data.pop("cycle_interval_sec", None)
+        """更新场景基本信息及其关联的任务/文件。
+
+        单文件场景: 通过 data['file_id'] / data['cycle_interval_sec'] 更新关联。
+        多文件场景: 通过 data['tasks'] 重建任务和文件结构。
+        """
+        tasks_data = data.pop("tasks", None)
+        file_id = data.pop("file_id", None)
+        cycle_interval = data.pop("cycle_interval_sec", None)
+
         data["updated_at"] = _now()
-        return update(SCENE_TABLE, scene_id, data)
+        result = update(SCENE_TABLE, scene_id, data)
+
+        scene = query_one(SCENE_TABLE, scene_id)
+        if not scene:
+            return result
+
+        # ── 单文件场景：更新关联的任务和文件 ──
+        if scene.get("scene_type") == "single" and (file_id is not None or cycle_interval is not None):
+            existing_tasks = self.list_tasks(scene_id)
+            if existing_tasks:
+                task = existing_tasks[0]
+                # 更新任务参数
+                task_update = {}
+                if cycle_interval is not None:
+                    task_update["cycle_interval_sec"] = int(cycle_interval)
+                if task_update:
+                    update(TASK_TABLE, task["id"], task_update)
+
+                # 更新文件关联
+                if file_id is not None:
+                    existing_files = self.list_task_files(task["id"])
+                    for ef in existing_files:
+                        delete(TASK_FILE_TABLE, ef["id"])
+                    if int(file_id) > 0:
+                        insert(TASK_FILE_TABLE, {
+                            "task_id": task["id"],
+                            "file_id": int(file_id),
+                            "interval_sec": 0,
+                            "sort_order": 0,
+                            "created_at": _now(),
+                        })
+
+        # ── 多文件场景：重建任务和文件结构 ──
+        if scene.get("scene_type") == "multi" and tasks_data is not None:
+            existing_tasks = self.list_tasks(scene_id)
+            for et in existing_tasks:
+                self.delete_task(et["id"])
+            for ti, task_item in enumerate(tasks_data):
+                task_files = task_item.pop("files", [])
+                task_item["scene_id"] = scene_id
+                task_item.setdefault("sort_order", ti)
+                task_item.setdefault("created_at", _now())
+                task_id = insert(TASK_TABLE, task_item)
+                for fi, file_item in enumerate(task_files):
+                    insert(TASK_FILE_TABLE, {
+                        "task_id": task_id,
+                        "file_id": int(file_item.get("file_id", 0)),
+                        "interval_sec": file_item.get("interval_sec", 0),
+                        "sort_order": fi,
+                        "created_at": _now(),
+                    })
+
+        return result
 
     def delete_scene(self, scene_id: int) -> bool:
         """删除场景及其所有关联的任务和文件。"""

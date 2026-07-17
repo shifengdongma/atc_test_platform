@@ -35,6 +35,7 @@ LOG_TYPES = {
     "situation_alarm": "态势-实时告警",
     "kafka_collision_alarm": "Kafka 冲突告警",
     "ws_captured_data": "WebSocket 前端数据",
+    "tcp_gateway": "TCP 网关通信",
 }
 
 
@@ -53,6 +54,7 @@ class LogStreamer:
         self._mysql_enabled = True  # 默认尝试，首次写入失败后禁用
         self._cleanup_counter = 0
         self._mysql_fail_count = 0
+        self._last_msg: tuple = ("", "")  # (log_type, message) 用于连续去重
         self._mysql_last_fail_time = 0.0
         self._MYSQL_COOLDOWN_SEC = 60.0
 
@@ -242,6 +244,12 @@ class LogStreamer:
         """
         if log_type not in LOG_TYPES:
             log_type = "sim_status"
+
+        # 连续去重：相同类型+相同消息跳过
+        msg_key = (log_type, message)
+        if msg_key == self._last_msg:
+            return
+        self._last_msg = msg_key
 
         entry = {
             "time": datetime.now().strftime("%H:%M:%S"),

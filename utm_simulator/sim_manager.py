@@ -492,8 +492,12 @@ class SimulationManager:
         if os.path.exists(data_path):
             with open(data_path, "r", encoding="utf-8") as f:
                 kafka_data = json.load(f)
+            # 统计 unknown UID 数量，一次性报告而非逐条推送
+            unknown_count = 0
             for msg in kafka_data:
                 uid = msg.get("uniqueProductIdentificationCode", "unknown")
+                if uid == "unknown":
+                    unknown_count += 1
                 self._replay_index.setdefault(uid, []).append(msg)
             # 补齐 operatingStatus，确保下游 UTM 能识别活跃 UAV
             for uid, msgs in self._replay_index.items():
@@ -501,7 +505,10 @@ class SimulationManager:
                     if msg.get("operatingStatus") is None:
                         msg["operatingStatus"] = 2
             self._replay_cursors = {uid: 0 for uid in self._replay_index}
-            self._add_log(f"已从 {os.path.basename(data_path)} 加载 {len(kafka_data)} 条遥测 ({len(self._replay_index)} 架无人机)")
+            log_msg = f"已从 {os.path.basename(data_path)} 加载 {len(kafka_data)} 条遥测 ({len(self._replay_index)} 架无人机)"
+            if unknown_count > 0:
+                log_msg += f" (含 {unknown_count} 条未知 UID 记录)"
+            self._add_log(log_msg)
         else:
             self._add_log(f"遥测数据文件不存在: {data_path} — 请先生成或上传数据文件")
 

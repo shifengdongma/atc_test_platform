@@ -234,6 +234,18 @@ def _get_situation_monitor():
     return _situation_monitor
 
 
+_gateway_log_poller = None
+
+
+def _get_gateway_log_poller():
+    """惰性导入 TCP 网关日志轮询器，启动仿真后同步拉取通信日志。"""
+    global _gateway_log_poller
+    if _gateway_log_poller is None:
+        from gateway_log_poller import GatewayLogPoller
+        _gateway_log_poller = GatewayLogPoller(streamer=_get_streamer())
+    return _gateway_log_poller
+
+
 # ── 日志辅助 ──────────────────────────────────────────────────────
 def _add_log(msg: str) -> None:
     """添加日志到运行时状态，保留最近 50 条。"""
@@ -680,7 +692,7 @@ class SimulationRunner:
                             # 桥接场景 trace 数据到前端 Layer 2（运行日志-轨迹预测）
                             if emitter.consume_trace and emitter.trace_stats:
                                 current_trace = emitter.trace_stats.get('received', 0)
-                                if current_trace > _prev_scene_trace:
+                                if current_trace > _prev_scene_trace and current_trace > 0:
                                     _prev_scene_trace = current_trace
                                     socketio.emit("trace_data", {
                                         "count": current_trace,
@@ -740,6 +752,12 @@ class SimulationRunner:
     def _cleanup(self) -> None:
         """清理资源。"""
         _add_log("仿真运行结束，清理资源...")
+        # 停止 TCP 网关日志轮询
+        try:
+            if _gateway_log_poller:
+                _gateway_log_poller.stop()
+        except Exception:
+            pass
         if self.mode == "plan" and getattr(self, "_plan_runner", None):
             try:
                 self._plan_runner.stop()
@@ -808,6 +826,12 @@ class SimulationRunner:
             _get_situation_monitor().start()
         except Exception as e:
             print(f"[web_server] 态势监控启动失败: {e}")
+
+        # 启动 TCP 网关日志轮询（拉取代理通信实时日志）
+        try:
+            _get_gateway_log_poller().start()
+        except Exception as e:
+            print(f"[web_server] 网关日志轮询启动失败: {e}")
 
         # 启动 Kafka 冲突告警消费者
         # dynamic 模式下跳过：kafka-python 后台 I/O 线程与 Simulator ctypes

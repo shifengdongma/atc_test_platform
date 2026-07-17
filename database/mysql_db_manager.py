@@ -398,7 +398,8 @@ def query_all(table: str, order_by: str = "id DESC") -> List[Dict[str, Any]]:
     with _lock:
         client = _get_client()
         if not client:
-            raise RuntimeError(f"MySQL 不可用，无法查询 {table}")
+            print(f"[mysql_db_manager] MySQL 不可用，query_all({table}) 返回空", flush=True)
+            return []
         try:
             safe_order = order_by.replace("id", "`id`") if "id" in order_by and "`id`" not in order_by else order_by
             sql = f"SELECT * FROM `{table}` ORDER BY {safe_order}"
@@ -407,14 +408,15 @@ def query_all(table: str, order_by: str = "id DESC") -> List[Dict[str, Any]]:
             return cur.fetchall()
         except Exception as e:
             print(f"[mysql_db_manager] query_all 失败 ({table}): {e}")
-            raise
+            return []
 
 
 def query_one(table: str, record_id: int) -> Optional[Dict[str, Any]]:
     with _lock:
         client = _get_client()
         if not client:
-            raise RuntimeError(f"MySQL 不可用，无法查询 {table}")
+            print(f"[mysql_db_manager] MySQL 不可用，query_one({table}) 返回 None", flush=True)
+            return None
         try:
             sql = f"SELECT * FROM `{table}` WHERE `id` = %s"
             cur = client.cursor()
@@ -422,7 +424,7 @@ def query_one(table: str, record_id: int) -> Optional[Dict[str, Any]]:
             return cur.fetchone()
         except Exception as e:
             print(f"[mysql_db_manager] query_one 失败 ({table}#{record_id}): {e}")
-            raise
+            return None
 
 
 def query(table: str, where: str = "", params: tuple = (),
@@ -431,7 +433,8 @@ def query(table: str, where: str = "", params: tuple = (),
     with _lock:
         client = _get_client()
         if not client:
-            raise RuntimeError(f"MySQL 不可用，无法查询 {table}")
+            print(f"[mysql_db_manager] MySQL 不可用，query({table}) 返回空", flush=True)
+            return []
         try:
             sql = f"SELECT * FROM `{table}`"
             if where:
@@ -447,7 +450,7 @@ def query(table: str, where: str = "", params: tuple = (),
             return cur.fetchall()
         except Exception as e:
             print(f"[mysql_db_manager] query 失败 ({table}): {e}")
-            raise
+            return []
 
 
 def query_count(table: str, where: str = "", params: tuple = ()) -> int:
@@ -455,7 +458,8 @@ def query_count(table: str, where: str = "", params: tuple = ()) -> int:
     with _lock:
         client = _get_client()
         if not client:
-            raise RuntimeError(f"MySQL 不可用，无法查询 {table}")
+            print(f"[mysql_db_manager] MySQL 不可用，query_count({table}) 返回 0", flush=True)
+            return 0
         try:
             sql = f"SELECT COUNT(*) as cnt FROM `{table}`"
             if where:
@@ -466,7 +470,7 @@ def query_count(table: str, where: str = "", params: tuple = ()) -> int:
             return row["cnt"] if row else 0
         except Exception as e:
             print(f"[mysql_db_manager] query_count 失败 ({table}): {e}")
-            raise
+            return 0
 
 
 def insert(table: str, data: Dict[str, Any]) -> int:
@@ -568,28 +572,30 @@ def query_distinct(table: str, column: str) -> List[str]:
     with _lock:
         client = _get_client()
         if not client:
-            raise RuntimeError(f"MySQL 不可用，无法查询 {table}")
+            print(f"[mysql_db_manager] MySQL 不可用，query_distinct({table}) 返回空", flush=True)
+            return []
         try:
             cur = client.cursor()
             cur.execute(f"SELECT DISTINCT `{column}` FROM `{table}` WHERE `{column}` != ''")
             return [row[column] for row in cur.fetchall()]
         except Exception as e:
             print(f"[mysql_db_manager] query_distinct 失败 ({table}.{column}): {e}")
-            raise
+            return []
 
 
 def execute_raw(sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
     with _lock:
         client = _get_client()
         if not client:
-            raise RuntimeError("MySQL 不可用，无法执行查询")
+            print(f"[mysql_db_manager] MySQL 不可用，execute_raw 返回空", flush=True)
+            return []
         try:
             cur = client.cursor()
             cur.execute(sql, params)
             return cur.fetchall()
         except Exception as e:
             print(f"[mysql_db_manager] execute_raw 失败: {e}")
-            raise
+            return []
 
 
 def execute_many_raw(sql: str, params_list: List[tuple]) -> bool:

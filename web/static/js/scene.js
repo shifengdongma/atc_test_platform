@@ -100,7 +100,7 @@ function parseCron(cronExpr, dateEl, timeEl, repeatEl) {
 
 // ── 公共：显示历史 ─────────────────────────────────────────────────
 async function showHistory(sceneId, elId) {
-  var el = $(elId);
+  var el = document.getElementById(elId);
   if (!el) return;
   try {
     var data = await apiGet('/api/scenes/' + sceneId + '/history');
@@ -373,7 +373,21 @@ window._toggleScene = async function(id) { await apiPost('/api/scenes/'+id+'/tog
 window._runScene = async function(id) { var r = await apiPost('/api/scenes/'+id+'/run-now'); showToast(r.message||'已触发',r.success?'success':'error'); };
 window._stopScene = async function(id) { var r = await apiPost('/api/scenes/'+id+'/stop'); showToast(r.message||'已发送停止信号',r.success?'success':'error'); if(r.success) loadTaskList(); };
 window._delScene = async function(id) { if(!confirm('确定删除此场景？'))return; await fetch('/api/scenes/'+id,{method:'DELETE'}); showToast('已删除','success'); loadTaskList(); };
-window._viewHistory = async function(id) { showHistory(id, 'single-history'); };
+window._viewHistory = async function(id) {
+  // 查找场景类型，切换到对应标签页显示记录
+  try {
+    var data = await apiGet('/api/scenes');
+    var s = (data.scenes||[]).find(function(x){return x.id===id;});
+    var stype = s ? s.scene_type : 'single';
+    if (stype === 'multi') {
+      document.querySelector('.tab-btn[data-tab="tab-multi"]').click();
+      showHistory(id, 'multi-history');
+    } else {
+      document.querySelector('.tab-btn[data-tab="tab-single"]').click();
+      showHistory(id, 'single-history');
+    }
+  } catch(e) { showHistory(id, 'single-history'); }
+};
 
 window._editScene = async function(id, stype) {
   try {

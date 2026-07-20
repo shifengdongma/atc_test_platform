@@ -2593,3 +2593,62 @@ Docker 容器中达梦数据库连接持续报 `[CODE:-70089]Encryption module f
 | 新增诊断逻辑 | 2 (遥测桥接延迟验证, dynamic 模式限制说明) |
 
 | 状态 | ✅ 已完成，语法验证通过 |
+
+---
+
+### 2026-07-20: 修复"仿真参数配置"脚本列表数据条数显示-1
+
+> 问题: 部分大文件（>64KB）在选择加载脚本时数据条数显示"-1"
+
+| 时间 | 完成内容 | 状态 |
+|------|----------|------|
+| 2026-07-20 10:00 | 根因分析：`/api/data/files` API 中 `f.read(65536)` 截断大 JSON 导致 `json.loads()` 失败 | ✅ 已完成 |
+| 2026-07-20 10:15 | 修复：截断解析失败时回退读取完整文件获取记录数 | ✅ 已完成 |
+| 2026-07-20 10:20 | 验证：26.7MB 大文件从 -1 修复为正确显示 36000 条 | ✅ 已完成 |
+
+#### 修改文件
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `utm_simulator/web_server.py` | 修改 | `api_list_data_files()`: 64KB 截断解析失败时 `f.seek(0)` + `f.read()` 回退读取完整文件以正确计数 |
+
+#### 汇总
+
+| 操作 | 数量 |
+|------|------|
+| 修改文件 | 1 |
+| 修复 Bug | 1 |
+
+| 状态 | ✅ 已完成，验证通过 |
+
+---
+
+### 2026-07-20: 修复场景编排模块定时不执行 + 无法停止两大 Bug
+
+> 问题1: 场景定时 cron 到时间不自动触发；问题2: 立即执行后无法停止仿真
+
+| 时间 | 完成内容 | 状态 |
+|------|----------|------|
+| 2026-07-20 14:00 | 根因分析：编排器延迟初始化导致进程重启后 cron 调度丢失 + 场景 runner 局部变量不可达 | ✅ 已完成 |
+| 2026-07-20 14:30 | orchestrator.py: 添加 set_callback()、异步 _trigger_scene()、活跃执行注册表、stop_scene/stop_all_scenes、cron 调试日志、get_orchestrator 回调补设 | ✅ 已完成 |
+| 2026-07-20 15:00 | web_server.py: 编排器模块级立即初始化、_run_scene 支持 stop_event 取消、_execute_scene_file 取消检查、/api/sim/stop 同时停止场景 runner、新增 /api/scenes/<id>/stop 端点、_graceful_shutdown 先停场景 | ✅ 已完成 |
+| 2026-07-20 15:15 | scene.js: 场景卡片添加"⏹停止"按钮 + _stopScene 处理函数 | ✅ 已完成 |
+
+#### 修改文件
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `database/orchestrator.py` | 修改 | ① `__init__` 添加 `_active_executions` + `_exec_lock`；② 新增 `set_callback()` 方法；③ `_check_and_execute()` 改用 `_trigger_scene()` 异步触发 + cron 匹配日志；④ 拆分 `_execute_scene` → `_trigger_scene`(非阻塞) + `_execute_scene_impl`(独立线程，接受 stop_event) ；⑤ `run_scene_now` 改用 `_trigger_scene`；⑥ 新增 `stop_scene()`/`stop_all_scenes()`/`get_stop_event()`/`list_active_executions()`；⑦ `get_orchestrator()` 回调补设逻辑 |
+| `utm_simulator/web_server.py` | 修改 | ① 新增 `_wait_with_stop()` 辅助函数；② `_get_orchestrator()` 中 `_run_scene` 接受 stop_event，每任务/文件前检查取消信号；③ `_execute_scene_file` 接受 stop_event，轮询循环检查取消；④ 模块加载时立即调用 `_get_orchestrator()` 初始化；⑤ `/api/sim/stop` 先停止所有场景 runner 再停止全局 runner；⑥ 新增 `POST /api/scenes/<id>/stop` 端点；⑦ `_graceful_shutdown` 先发送场景停止信号 |
+| `web/static/js/scene.js` | 修改 | ① 场景卡片添加"⏹停止"按钮；② 新增 `window._stopScene()` 处理函数调用 `/api/scenes/<id>/stop` |
+
+#### 汇总
+
+| 操作 | 数量 |
+|------|------|
+| 修改文件 | 3 |
+| 新增方法 | 6 (set_callback, _trigger_scene, stop_scene, stop_all_scenes, get_stop_event, list_active_executions) |
+| 新增 API 端点 | 1 (POST /api/scenes/<id>/stop) |
+| 修复 Bug | 2 |
+
+| 状态 | ✅ 已完成，语法验证通过 |

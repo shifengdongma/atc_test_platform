@@ -96,8 +96,15 @@ class SceneOrchestrator:
         self._thread: Optional[threading.Thread] = None
         self._execute_callback = execute_callback
         self._last_check: Dict[int, datetime] = {}  # scene_id -> last triggered time
+        # 活跃执行注册表（支持外部取消）
+        self._active_executions: Dict[int, Dict[str, Any]] = {}
+        self._exec_lock = threading.RLock()
 
     # ── 生命周期 ──────────────────────────────────────────────────
+
+    def set_callback(self, callback: Callable) -> None:
+        """设置/更新执行回调（线程安全）。"""
+        self._execute_callback = callback
 
     def start(self) -> None:
         """启动后台调度线程。"""
@@ -125,13 +132,17 @@ class SceneOrchestrator:
             time.sleep(30)
 
     def _check_and_execute(self) -> None:
-        """检查所有启用的场景，匹配 cron 则执行。"""
+        """检查所有启用的场景，匹配 cron 则触发异步执行。"""
         now = datetime.now()
         try:
             scenes = query(SCENE_TABLE, where="enabled = 1", order_by="id")
         except Exception as e:
             print(f"[Orchestrator] 查询场景失败 (MySQL 可能不可用): {e}")
             return
+
+        if scenes:
+            print(f"[Orchestrator] Cron 检查: {now.strftime('%Y-%m-%d %H:%M')}, "
+                  f"已启用场景数={len(scenes)}")
 
         for scene in scenes:
             scene_id = scene["id"]
@@ -148,10 +159,37 @@ class SceneOrchestrator:
                 continue
 
             self._last_check[scene_id] = now
-            self._execute_scene(scene)
+            print(f"[Orchestrator] Cron 匹配: 场景='{scene.get('name', '')}' "
+                  f"(id={scene_id}) cron='{cron_expr}' at {now.strftime('%H:%M:%S')}")
+            self._trigger_scene(scene)
 
-    def _execute_scene(self, scene: Dict[str, Any]) -> None:
-        """执行场景中的所有任务。"""
+    def _trigger_scene(self, scene: Dict[str, Any]) -> None:
+        """触发场景执行（非阻塞，在后台线程中运行）。
+
+        与旧版 _execute_scene 不同，此方法立即返回，
+        不阻塞编排器的 30 秒调度循环。
+        """
+        scene_id = scene["id"]
+        stop_event = threading.Event()
+        with self._exec_lock:
+            self._active_executions[scene_id] = {
+                "stop": stop_event,
+                "scene_name": scene.get("name", f"scene-{scene_id}"),
+                "started_at": datetime.now(),
+            }
+        thread = threading.Thread(
+            target=self._execute_scene_impl,
+            args=(scene, stop_event),
+            daemon=True,
+            name=f"scene-exec-{scene_id}",
+        )
+        thread.start()
+        with self._exec_lock:
+            if scene_id in self._active_executions:
+                self._active_executions[scene_id]["thread"] = thread
+
+    def _execute_scene_impl(self, scene: Dict[str, Any], stop_event: threading.Event) -> None:
+        """场景执行实现（在独立线程中运行）。"""
         scene_id = scene["id"]
         scene_name = scene.get("name", f"scene-{scene_id}")
 
@@ -169,7 +207,7 @@ class SceneOrchestrator:
         try:
             # 如果有外部回调（web_server 提供的仿真执行），优先使用
             if self._execute_callback:
-                result = self._execute_callback(scene)
+                result = self._execute_callback(scene, stop_event)
                 msg = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
             else:
                 msg = f"场景 {scene_name} 已触发（无需执行回调）"
@@ -195,6 +233,10 @@ class SceneOrchestrator:
                 "finished_at": _now(),
             })
             print(f"[Orchestrator] 场景失败: {scene_name} — {e}")
+
+        finally:
+            with self._exec_lock:
+                self._active_executions.pop(scene_id, None)
 
     # ── 场景 CRUD ─────────────────────────────────────────────────
 
@@ -352,16 +394,57 @@ class SceneOrchestrator:
         return query_one(SCENE_TABLE, scene_id)
 
     def run_scene_now(self, scene_id: int) -> Dict[str, Any]:
-        """立即执行场景一次（异步线程）。"""
+        """立即执行场景一次（异步，非阻塞）。"""
         scene = query_one(SCENE_TABLE, scene_id)
         if not scene:
             return {"success": False, "message": "场景不存在"}
-        threading.Thread(target=self._execute_scene, args=(scene,), daemon=True).start()
+        self._trigger_scene(scene)
         return {"success": True, "message": f"场景 '{scene.get('name', '')}' 已触发"}
 
     def get_scene_history(self, scene_id: int, limit: int = 20) -> List[Dict[str, Any]]:
         """获取场景执行历史。"""
         return query(LOG_TABLE, where=f"scene_id = {int(scene_id)}", order_by="id DESC")[:limit]
+
+    # ── 停止/取消机制 ──────────────────────────────────────────────
+
+    def stop_scene(self, scene_id: int) -> bool:
+        """请求停止正在执行的场景。返回 True 表示找到并发送了停止信号。"""
+        with self._exec_lock:
+            info = self._active_executions.get(scene_id)
+            if info is None:
+                return False
+            info["stop"].set()
+            print(f"[Orchestrator] 场景停止信号已发送: scene_id={scene_id}")
+            return True
+
+    def stop_all_scenes(self) -> int:
+        """停止所有正在执行的场景。返回停止的数量。"""
+        count = 0
+        with self._exec_lock:
+            for sid, info in list(self._active_executions.items()):
+                info["stop"].set()
+                count += 1
+        if count:
+            print(f"[Orchestrator] 已发送 {count} 个场景停止信号")
+        return count
+
+    def get_stop_event(self, scene_id: int) -> Optional[threading.Event]:
+        """获取场景的停止事件（供回调函数检查取消信号）。"""
+        with self._exec_lock:
+            info = self._active_executions.get(scene_id)
+            return info["stop"] if info else None
+
+    def list_active_executions(self) -> List[Dict[str, Any]]:
+        """列出当前正在执行的场景。"""
+        result = []
+        with self._exec_lock:
+            for sid, info in self._active_executions.items():
+                result.append({
+                    "scene_id": sid,
+                    "scene_name": info["scene_name"],
+                    "started_at": info["started_at"].isoformat() if info["started_at"] else "",
+                })
+        return result
 
     # ── 任务 CRUD ─────────────────────────────────────────────────
 
@@ -448,6 +531,9 @@ def get_orchestrator(execute_callback: Optional[Callable] = None) -> SceneOrches
     """获取编排调度器单例（线程安全）。"""
     global _orchestrator
     if _orchestrator is not None:
+        # 如果已有单例但回调为 None，补设回调（防止先被无回调路径初始化）
+        if execute_callback is not None and _orchestrator._execute_callback is None:
+            _orchestrator.set_callback(execute_callback)
         return _orchestrator
     with _orch_lock:
         if _orchestrator is None:

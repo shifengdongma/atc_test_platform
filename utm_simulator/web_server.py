@@ -174,6 +174,15 @@ def _graceful_shutdown():
     """优雅关闭：停止所有后台服务后退出。"""
     global _orchestrator
     print("[web_server] 优雅关闭中...", flush=True)
+    # 0. 先停止所有活跃的场景执行
+    if _orchestrator is not None:
+        try:
+            stopped = _orchestrator.stop_all_scenes()
+            if stopped:
+                print(f"[web_server] 已发送 {stopped} 个场景停止信号", flush=True)
+                time.sleep(1)  # 短暂等待场景线程响应停止信号
+        except Exception as e:
+            print(f"[web_server] 停止场景执行异常: {e}", flush=True)
     # 1. 停止场景编排调度器
     if _orchestrator is not None:
         try:
@@ -1073,15 +1082,38 @@ def api_start_sim():
 
 @app.route("/api/sim/stop", methods=["POST"])
 def api_stop_sim():
-    """停止仿真。停止后自动重启进程以隔离 ctypes/Kafka 堆污染。"""
+    """停止仿真。先停止场景编排执行，再停止全局仿真运行器。"""
     global _sim_runner
+
+    # 1. 先停止所有活跃的场景编排执行（不依赖 _sim_runner）
+    scene_stopped = 0
+    try:
+        och = _get_orchestrator()
+        scene_stopped = och.stop_all_scenes()
+        if scene_stopped:
+            _add_log(f"[场景编排] 已发送 {scene_stopped} 个场景停止信号")
+            # 等待场景 runner 退出（最多 5 秒）
+            for _ in range(50):
+                if not och.list_active_executions():
+                    break
+                time.sleep(0.1)
+    except Exception as e:
+        print(f"[web_server] 停止场景执行异常: {e}", flush=True)
+
+    # 2. 停止全局 _sim_runner（如果有）
     if not _sim_runner:
+        if scene_stopped > 0:
+            _add_log("场景执行已停止")
+            with _lock:
+                _runtime_state["running"] = False
+            socketio.emit("status_change", {"event": "stopped", "message": "场景执行已停止"})
+            return jsonify({"success": True, "message": "场景执行已停止"})
         return jsonify({"success": False, "message": "无运行中的仿真"}), 404
 
     _sim_runner.stop()
     _sim_runner = None
 
-    # 重启进程 — Simulator(ctypes) 与 kafka-python(librdkafka)
+    # 3. 重启进程 — Simulator(ctypes) 与 kafka-python(librdkafka)
     # 在同一进程中先后运行会导致 C-level 堆损坏，重启获得干净环境
     import sys as _sys, subprocess as _sp
     env = os.environ.copy()
@@ -1295,9 +1327,15 @@ def api_list_data_files():
             size = os.path.getsize(path)
             try:
                 with open(path, "r", encoding="utf-8") as f:
-                    # 只读取前 64KB 用于格式检测，避免大文件 OOM
+                    # 先读取前 64KB 用于快速解析和格式检测
                     content = f.read(65536)
-                    data = json.loads(content)
+                    try:
+                        data = json.loads(content)
+                    except (json.JSONDecodeError, ValueError):
+                        # 大文件截断导致解析失败 → 回退读取完整文件
+                        f.seek(0)
+                        content = f.read()
+                        data = json.loads(content)
                 if isinstance(data, list):
                     records = len(data)
                     sample_keys = list(data[0].keys())[:5] if data else []
@@ -1307,8 +1345,8 @@ def api_list_data_files():
                 else:
                     records = 0
                     sample_keys = []
-                # 格式检测
-                fmt_info = _detect_file_format(content)
+                # 格式检测（使用前 64KB 样本即可，避免大文件全文分析）
+                fmt_info = _detect_file_format(content[:65536])
             except Exception:
                 records = -1
                 sample_keys = []
@@ -2233,14 +2271,26 @@ def api_ai_generate():
 _orchestrator = None
 
 
+def _wait_with_stop(duration_sec: float, stop_event) -> None:
+    """等待指定秒数，期间检查停止信号（0.5s 粒度）。"""
+    if stop_event is None:
+        time.sleep(duration_sec)
+        return
+    deadline = time.time() + duration_sec
+    while time.time() < deadline:
+        if stop_event.is_set():
+            return
+        time.sleep(0.5)
+
+
 def _get_orchestrator():
-    """获取场景编排调度器单例（延迟初始化）。"""
+    """获取场景编排调度器单例。首次调用时初始化并启动 cron 调度线程。"""
     global _orchestrator
     if _orchestrator is None:
         from orchestrator import get_orchestrator
 
-        def _run_scene(scene):
-            """编排回调：执行场景中的所有任务。"""
+        def _run_scene(scene, stop_event=None):
+            """编排回调：执行场景中的所有任务（支持通过 stop_event 取消）。"""
             from orchestrator import get_orchestrator as _get_och
             och = _get_och()
             scene_id = scene["id"]
@@ -2250,6 +2300,11 @@ def _get_orchestrator():
             _add_log(f"[场景编排] {scene_name} 开始执行 ({len(tasks)} 个任务)")
 
             for task in tasks:
+                # 每个任务前检查停止信号
+                if stop_event and stop_event.is_set():
+                    _add_log(f"[场景编排] {scene_name} 收到停止信号，终止执行")
+                    return f"场景已停止: {scene_name}"
+
                 task_id = task["id"]
                 task_name = task.get("name", f"task-{task_id}")
                 task_type = task.get("task_type", "sequential")
@@ -2265,39 +2320,70 @@ def _get_orchestrator():
                 _add_log(f"[场景编排] 任务 '{task_name}' ({task_type}, {len(files)} 个文件, 重复{repeat_count}次)")
 
                 for rep in range(repeat_count):
+                    if stop_event and stop_event.is_set():
+                        _add_log(f"[场景编排] {scene_name} 收到停止信号，终止执行")
+                        return f"场景已停止: {scene_name}"
+
                     if task_type == "sequential":
                         # 顺序执行：按文件列表顺序逐个执行
                         for fi, tf in enumerate(files):
-                            _execute_scene_file(tf, scene, task, rep + 1)
+                            if stop_event and stop_event.is_set():
+                                break
+                            _execute_scene_file(tf, scene, task, rep + 1, stop_event)
+                            if stop_event and stop_event.is_set():
+                                break
                             interval = tf.get("interval_sec", 0)
                             if interval > 0 and fi < len(files) - 1:
                                 _add_log(f"[场景编排] 文件间隔等待 {interval}s")
-                                time.sleep(interval)
+                                _wait_with_stop(interval, stop_event)
+                                if stop_event and stop_event.is_set():
+                                    break
                     elif task_type == "parallel":
                         # 并行执行：多线程同时执行所有文件
-                        from concurrent.futures import ThreadPoolExecutor
+                        from concurrent.futures import ThreadPoolExecutor, wait as _futures_wait, FIRST_COMPLETED
                         max_workers = min(len(files), 5)  # 最多5个并发
                         with ThreadPoolExecutor(max_workers=max_workers) as executor:
                             futures = [
-                                executor.submit(_execute_scene_file, tf, scene, task, rep + 1)
+                                executor.submit(_execute_scene_file, tf, scene, task, rep + 1, stop_event)
                                 for tf in files
                             ]
-                            for f in futures:
-                                try:
-                                    f.result(timeout=timeout_sec)
-                                except Exception as exc:
-                                    _add_log(f"[场景编排] 并行执行异常: {exc}")
+                            # 使用 wait 循环检查停止信号（而非阻塞的 result）
+                            remaining = list(futures)
+                            while remaining:
+                                if stop_event and stop_event.is_set():
+                                    _add_log(f"[场景编排] 收到停止信号，等待并行任务退出...")
+                                    for f in remaining:
+                                        try:
+                                            f.result(timeout=timeout_sec)
+                                        except Exception:
+                                            pass
+                                    break
+                                done, remaining = _futures_wait(
+                                    remaining, timeout=1.0,
+                                    return_when=FIRST_COMPLETED
+                                )
+                                for f in done:
+                                    try:
+                                        f.result(timeout=0)
+                                    except Exception as exc:
+                                        _add_log(f"[场景编排] 并行执行异常: {exc}")
 
                     # 循环间隔等待
                     if cycle_interval > 0 and rep < repeat_count - 1:
+                        if stop_event and stop_event.is_set():
+                            break
                         _add_log(f"[场景编排] 循环间隔等待 {cycle_interval}s")
-                        time.sleep(cycle_interval)
+                        _wait_with_stop(cycle_interval, stop_event)
+
+                if stop_event and stop_event.is_set():
+                    _add_log(f"[场景编排] {scene_name} 收到停止信号，终止执行")
+                    return f"场景已停止: {scene_name}"
 
             _add_log(f"[场景编排] {scene_name} 执行完成")
             return f"场景完成: {scene_name}"
 
-        def _execute_scene_file(tf, scene, task, rep_num):
-            """执行单个场景文件。"""
+        def _execute_scene_file(tf, scene, task, rep_num, stop_event=None):
+            """执行单个场景文件（支持通过 stop_event 取消）。"""
             try:
                 import json_data_manager as jdm
                 file_id = tf.get("file_id", 0)
@@ -2335,14 +2421,33 @@ def _get_orchestrator():
                 wait = params.get("duration_min", 5) * 60
                 deadline = time.time() + min(wait, 3600)
                 while runner._running and time.time() < deadline:
+                    if stop_event and stop_event.is_set():
+                        _add_log(f"[场景编排] 收到停止信号，正在停止仿真...")
+                        runner.stop()
+                        break
                     time.sleep(1)
-                runner.stop()
+                else:
+                    # 正常运行结束或超时
+                    if runner._running:
+                        runner.stop()
 
             except Exception as e:
                 _add_log(f"[场景编排] 文件执行异常: {e}")
 
         _orchestrator = get_orchestrator(execute_callback=_run_scene)
     return _orchestrator
+
+
+# 在模块加载时立即初始化编排器，确保 cron 调度线程在服务启动时就运行
+# （解决 Bug: 延迟初始化导致进程重启后定时任务失效）
+_init_orch_done = False
+if not _init_orch_done:
+    try:
+        _get_orchestrator()
+        _init_orch_done = True
+        print("[web_server] 场景编排调度器已在启动时初始化", flush=True)
+    except Exception as _orch_init_err:
+        print(f"[web_server] 场景编排调度器初始化失败（DB 可能未就绪）: {_orch_init_err}", flush=True)
 
 
 # ── 辅助装饰器 ──────────────────────────────────────────────────────
@@ -2423,6 +2528,17 @@ def api_scene_run_now(scene_id):
     och = _get_orchestrator()
     result = och.run_scene_now(scene_id)
     return jsonify(result)
+
+
+@app.route("/api/scenes/<int:scene_id>/stop", methods=["POST"])
+@_safe_json
+def api_scene_stop(scene_id):
+    """停止正在执行的场景。"""
+    och = _get_orchestrator()
+    if och.stop_scene(scene_id):
+        _add_log(f"[场景编排] 收到停止请求: scene_id={scene_id}")
+        return jsonify({"success": True, "message": "场景执行已停止"})
+    return jsonify({"success": False, "message": "场景未在运行"}), 404
 
 
 @app.route("/api/scenes/<int:scene_id>/history", methods=["GET"])

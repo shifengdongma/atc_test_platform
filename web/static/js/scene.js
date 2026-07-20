@@ -359,6 +359,7 @@ async function loadTaskList() {
       html += '<div class="actions">'+
         '<button class="btn-tiny" onclick="window._toggleScene('+s.id+')">'+(s.enabled?'⏸暂停':'▶启用')+'</button>'+
         '<button class="btn-tiny" onclick="window._runScene('+s.id+')">⚡立即执行</button>'+
+        '<button class="btn-tiny" onclick="window._stopScene('+s.id+')" style="color:var(--danger);">⏹停止</button>'+
         '<button class="btn-tiny" onclick="window._editScene('+s.id+',\''+s.scene_type+'\')">✏️编辑</button>'+
         '<button class="btn-tiny" onclick="window._delScene('+s.id+')">🗑删除</button>'+
         '<button class="btn-tiny" onclick="window._viewHistory('+s.id+')">📜记录</button>'+
@@ -370,6 +371,7 @@ async function loadTaskList() {
 
 window._toggleScene = async function(id) { await apiPost('/api/scenes/'+id+'/toggle'); showToast('已切换','success'); loadTaskList(); };
 window._runScene = async function(id) { var r = await apiPost('/api/scenes/'+id+'/run-now'); showToast(r.message||'已触发',r.success?'success':'error'); };
+window._stopScene = async function(id) { var r = await apiPost('/api/scenes/'+id+'/stop'); showToast(r.message||'已发送停止信号',r.success?'success':'error'); if(r.success) loadTaskList(); };
 window._delScene = async function(id) { if(!confirm('确定删除此场景？'))return; await fetch('/api/scenes/'+id,{method:'DELETE'}); showToast('已删除','success'); loadTaskList(); };
 window._viewHistory = async function(id) { showHistory(id, 'single-history'); };
 

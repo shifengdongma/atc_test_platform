@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Callable
 
 from mysql_db_manager import (
@@ -77,9 +77,9 @@ def cron_matches(cron_expr: str, dt: Optional[datetime] = None) -> bool:
 def next_cron_time(cron_expr: str, after: Optional[datetime] = None) -> Optional[datetime]:
     """计算 cron 表达式的下一次触发时间（近似，向后搜索最多 365 天）。"""
     after = after or datetime.now()
-    dt = after.replace(second=0, microsecond=0) + time.resolution
+    dt = after.replace(second=0, microsecond=0) + timedelta.resolution
     for _ in range(365 * 24 * 60):  # 最多搜一年
-        dt = dt + time.resolution * 60  # +1 分钟
+        dt = dt + timedelta(minutes=1)
         if cron_matches(cron_expr, dt):
             return dt
     return None

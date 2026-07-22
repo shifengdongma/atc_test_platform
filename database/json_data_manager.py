@@ -512,7 +512,7 @@ def update_file(file_id: int, data: Dict[str, Any]) -> bool:
     """更新文件字段（名称/描述/标签等），不修改磁盘文件。"""
     # 过滤掉不应该通过此接口修改的字段
     safe_fields = {"name", "category", "alarm_type", "linked_route",
-                   "description", "tags", "source"}
+                   "description", "tags", "source", "simulator_id"}
     clean = {k: v for k, v in data.items() if k in safe_fields}
     return update(TABLE, file_id, clean)
 
@@ -636,7 +636,8 @@ def preview_file(file_id: int, offset: int = 0, limit: int = 500) -> Dict[str, A
 
     fpath = _resolve_path(record)
     if not fpath or not os.path.exists(fpath):
-        return {"error": "文件不存在于磁盘"}
+        return {"content": "", "truncated": False, "total_size": 0,
+                "message": "文件内容在磁盘上不可用（可从数据管理页面重新上传）"}
 
     lines = []
     total_lines = 0
@@ -700,7 +701,8 @@ def read_file_content_partial(file_id: int, max_chars: int = 102400) -> Dict[str
 
     fpath = _resolve_path(record)
     if not fpath or not os.path.exists(fpath):
-        return {"error": "文件不存在于磁盘"}
+        return {"content": "", "truncated": False, "total_size": 0,
+                "message": "文件内容在磁盘上不可用（可从数据管理页面重新上传）"}
 
     total_size = os.path.getsize(fpath)
     truncated = total_size > max_chars

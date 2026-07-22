@@ -2218,7 +2218,7 @@ _ai_gen = None
 def _get_ai_gen():
     global _ai_gen
     if _ai_gen is None:
-        import ai_data_gen as aig
+        from ai import ai_data_gen as aig
         _ai_gen = aig
     return _ai_gen
 

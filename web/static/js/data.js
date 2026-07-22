@@ -38,13 +38,6 @@ window.loadFiles = async function(page) {
       return renderFileRow(f);
     }).join('');
 
-    // 异步加载航线校验状态
-    data.files.forEach(function(f) {
-      if (f.linked_route) {
-        validateRouteCell(f.id, f.linked_route);
-      }
-    });
-
     // 分页
     renderPagination(data.total, data.page, data.page_size);
   } catch(e) {
@@ -61,7 +54,7 @@ function renderFileRow(f) {
 
   var alarmHtml = getAlarmTypeBadge(f.alarm_type || '');
   var routeHtml = f.linked_route
-    ? '<span id="route-' + f.id + '" class="route-cell">' + escHtml(f.linked_route) + ' <span class="route-check" style="color:#888;">⏳</span></span>'
+    ? '<span class="route-cell">' + escHtml(f.linked_route) + '</span>'
     : '<span class="text-dim">-</span>';
 
   return '<tr>' +
@@ -280,7 +273,12 @@ window.editFile = async function(id) {
     $('#edit-name').value = data.name || '';
     $('#edit-category').value = data.category || '';
     $('#edit-alarm-type').value = data.alarm_type || '';
-    $('#edit-simulator-id').value = data.simulator_id || '';
+    // 若 simulator_id 为空，尝试从 JSON 内容中提取 uniqueProductIdentificationCode
+    var simId = data.simulator_id || '';
+    if (!simId && data.content) {
+      simId = extractSimulatorIdFromContent(data.content);
+    }
+    $('#edit-simulator-id').value = simId;
     $('#edit-linked-route').value = data.linked_route || '';
     $('#edit-desc').value = data.description || '';
     $('#edit-content').value = data.content || '';
@@ -768,6 +766,35 @@ $('#data-alarm-type').addEventListener('change', function() { loadFiles(1); });
 $('#btn-data-refresh').addEventListener('click', function() { loadFiles(currentPage); });
 
 // ── 工具 ───────────────────────────────────────────────────────────
+// ── 客户端提取模拟器ID（来自 uniqueProductIdentificationCode）───────
+function extractSimulatorIdFromContent(content) {
+  if (!content) return '';
+  try {
+    var data = JSON.parse(content);
+    var seen = {};
+    var ids = [];
+    function add(uid) {
+      if (uid && !seen[uid]) { seen[uid] = true; ids.push(uid); }
+    }
+    if (Array.isArray(data)) {
+      for (var i = 0; i < data.length && ids.length < 10; i++) {
+        var item = data[i];
+        if (!item || typeof item !== 'object') continue;
+        if (item.uniqueProductIdentificationCode) {
+          add(String(item.uniqueProductIdentificationCode));
+        } else if (item.key && item.value && typeof item.value === 'object') {
+          add(String(item.value.uniqueProductIdentificationCode || item.key));
+        } else if (item.key) {
+          add(String(item.key));
+        }
+      }
+    } else if (data && typeof data === 'object') {
+      add(String(data.uniqueProductIdentificationCode || ''));
+    }
+    return ids.join(', ');
+  } catch(e) { return ''; }
+}
+
 function formatSimulatorId(simId) {
   // 将逗号分隔的 UAV ID 列表格式化显示（最多展示前 2 个，超出显示 +N）
   if (!simId) return '-';

@@ -432,18 +432,22 @@ def _now() -> str:
 
 
 _tables_initialized = False
+_tables_init_lock = threading.RLock()
 
 
 def init_tables() -> None:
-    """初始化所有 MySQL 表（首次调用执行，后续跳过）。
+    """初始化所有 MySQL 表（首次调用执行，后续跳过，线程安全）。
 
     MySQL 不可用时抛出异常，不再降级到 SQLite。
     """
     global _tables_initialized
     if _tables_initialized:
         return
-    _ensure_mysql_tables()
-    _tables_initialized = True
+    with _tables_init_lock:
+        if _tables_initialized:
+            return
+        _ensure_mysql_tables()
+        _tables_initialized = True
 
 
 def query_all(table: str, order_by: str = "id DESC") -> List[Dict[str, Any]]:

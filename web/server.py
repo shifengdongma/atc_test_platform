@@ -2816,19 +2816,23 @@ if __name__ == "__main__":
         import time as _t
         print("[web_server] 等待端口释放...", flush=True)
         _t.sleep(2.0)
-    # ── 启动预热：提前建表 + 预连接 MySQL，避免首次 API 请求承受全部延迟 ──
-    # 注意：database/ 已加入 sys.path，直接用 import mysql_db_manager（不带 database. 前缀）
-    try:
-        import mysql_db_manager as _warmup_mdb
-        print("[web_server] 预热数据库...", flush=True)
-        _warmup_mdb.init_tables()
-        _client = _warmup_mdb._get_client()
-        if _client:
+    # ── 启动预热：提前建表，避免首次 API 请求承受全部延迟 ──
+    # 注意：init_tables() 内部已通过 _get_client() 连接 MySQL 并验证建表，
+    # 返回后连接就绪，无需再次调用 _get_client()（可能导致锁竞争）。
+    # 整个预热放在后台线程中执行，确保 Flask 端口优先绑定。
+    def _warmup_db() -> None:
+        try:
+            import mysql_db_manager as _warmup_mdb
+            print("[web_server] 预热数据库...", flush=True)
+            _warmup_mdb.init_tables()
             print("[web_server] 数据库预热完成", flush=True)
-        else:
-            print("[web_server] MySQL 未配置或不可用，跳过预热", flush=True)
-    except Exception as e:
-        print(f"[web_server] 数据库预热跳过: {e}", flush=True)
+        except Exception as e:
+            print(f"[web_server] 数据库预热跳过: {e}", flush=True)
+
+    _warmup_thread = threading.Thread(
+        target=_warmup_db, daemon=True, name="db-warmup"
+    )
+    _warmup_thread.start()
     # 达梦连接在首次 generate 页面使用航线选择时惰性加载，无需预热
     try:
         print(f"[web_server] 正在启动 HTTP 服务 {host}:{port} ...", flush=True)

@@ -170,10 +170,11 @@ def _kill_telemetry_bridge() -> None:
 
 
 def _graceful_shutdown():
-    """优雅关闭：停止所有后台服务后退出。"""
+    """优雅关闭：并行停止后台服务后退出。"""
     global _orchestrator
     print("[web_server] 优雅关闭中...", flush=True)
-    # 0. 先停止所有活跃的场景执行
+
+    # 0. 先停止所有活跃的场景执行（必须串行，确保场景线程收到停止信号）
     if _orchestrator is not None:
         try:
             stopped = _orchestrator.stop_all_scenes()
@@ -182,21 +183,38 @@ def _graceful_shutdown():
                 time.sleep(1)  # 短暂等待场景线程响应停止信号
         except Exception as e:
             print(f"[web_server] 停止场景执行异常: {e}", flush=True)
-    # 1. 停止场景编排调度器
-    if _orchestrator is not None:
-        try:
-            _orchestrator.stop()
-        except Exception as e:
-            print(f"[web_server] 停止编排器异常: {e}", flush=True)
-    # 2. 停止仿真运行器
-    if _sim_runner is not None:
-        try:
-            _sim_runner.stop()
-        except Exception as e:
-            print(f"[web_server] 停止仿真异常: {e}", flush=True)
-    # 3. 清理桥接进程
+
+    # 1+2. 并行停止编排器调度线程和仿真运行器（两者操作独立对象）
+    def _stop_orch():
+        if _orchestrator is not None:
+            try:
+                _orchestrator.stop()
+            except Exception as e:
+                print(f"[web_server] 停止编排器异常: {e}", flush=True)
+
+    def _stop_runner():
+        if _sim_runner is not None:
+            try:
+                _sim_runner.stop()
+            except Exception as e:
+                print(f"[web_server] 停止仿真异常: {e}", flush=True)
+
+    threads = []
+    for target in (_stop_orch, _stop_runner):
+        t = threading.Thread(target=target, daemon=True)
+        t.start()
+        threads.append(t)
+
+    # 等待所有停止操作完成，总超时 8 秒
+    deadline = time.time() + 8.0
+    for t in threads:
+        remaining = max(0.0, deadline - time.time())
+        t.join(timeout=remaining)
+
+    # 3. 清理桥接进程（快速，不阻塞）
     _kill_telemetry_bridge()
-    # 4. 关闭 MySQL 连接
+
+    # 4. 关闭 MySQL 连接（快速）
     try:
         from mysql_db_manager import _mysql_client, _lock as _mdb_lock
         with _mdb_lock:
@@ -208,6 +226,7 @@ def _graceful_shutdown():
                     pass
     except Exception:
         pass
+
     print("[web_server] 退出", flush=True)
 
 

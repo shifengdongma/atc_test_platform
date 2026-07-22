@@ -63,7 +63,6 @@ _mysql_last_fail_time: float = 0.0
 _MYSQL_RETRY_COOLDOWN: float = 60.0
 _mysql_conn_target: str = ""
 _pool: Optional[Any] = None                  # PooledDB 实例
-_tables_verified: bool = False               # DDL 验证只执行一次
 
 
 def _get_or_create_pool():
@@ -140,7 +139,7 @@ def _get_client():
     线程安全。连接池的 ping=1 确保每次借出时连接有效，
     不再需要手动健康检查。断线后下次调用自动从池中获取新连接。
     """
-    global _mysql_client, _mysql_available, _mysql_last_fail_time, _tables_verified
+    global _mysql_client, _mysql_available, _mysql_last_fail_time
 
     # 冷却期内直接返回 None，避免频繁重试
     if _mysql_available is False:
@@ -167,9 +166,6 @@ def _get_client():
                     return None
                 _mysql_client = pool.connection()
                 _mysql_available = True
-                if not _tables_verified:
-                    _ensure_mysql_tables(client=_mysql_client)
-                    _tables_verified = True
                 print(f"[mysql_db_manager] MySQL 连接成功 ({_mysql_conn_target})")
             except Exception as e:
                 print(f"[mysql_db_manager] MySQL 初始化异常: {e}")
@@ -317,7 +313,6 @@ def _ensure_mysql_tables(client=None):
 
     先 SHOW TABLES 获取已有表，只对缺失的表执行 CREATE，避免
     对已存在的表重复执行 DDL 触发远程 MySQL 网络超时。
-    通过 _tables_verified 标记确保整个进程生命周期只执行一次。
     """
     import sys as _sys
     _p = lambda msg: print(msg, file=_sys.stderr, flush=True)
@@ -410,11 +405,10 @@ def _ensure_mysql_tables(client=None):
 
 def _try_reset_broken_connection():
     """强制重置全局连接状态（DDL 超时导致连接损坏后调用）。"""
-    global _mysql_client, _mysql_available, _mysql_last_fail_time, _tables_verified
+    global _mysql_client, _mysql_available, _mysql_last_fail_time
     _mysql_client = None
     _mysql_available = None
     _mysql_last_fail_time = 0.0
-    _tables_verified = False
 
 
 def _cursor(client):

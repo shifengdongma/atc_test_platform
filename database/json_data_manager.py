@@ -46,8 +46,6 @@ def _lazy_init():
     _migrate_file_paths_once()
 
 
-# ── 一次性迁移：将旧绝对路径 file_path 标准化为仅文件名 ────────
-# 解决 Windows/Docker 跨环境路径不兼容导致 "文件不存在于磁盘" 的问题
 _MIGRATION_DONE = False
 
 
@@ -79,42 +77,6 @@ def _migrate_file_paths_once():
     except Exception as e:
         print(f"[json_data_manager] file_path 迁移跳过: {e}")
 
-# ── 一次性迁移：将旧绝对路径 file_path 标准化为仅文件名 ────────
-# 解决 Windows/Docker 跨环境路径不兼容导致 "文件不存在于磁盘" 的问题
-_MIGRATION_DONE = False
-
-
-def _migrate_file_paths_once():
-    """将 sim_json_files 表中旧的绝对路径 file_path 转换为纯文件名。
-
-    仅首次调用时执行，后续调用为 no-op。
-    将 Windows 路径 (D:\\...) 和 Linux 路径 (/app/...) 统一转为文件名。
-    """
-    global _MIGRATION_DONE
-    if _MIGRATION_DONE:
-        return
-    _MIGRATION_DONE = True
-
-    try:
-        rows = query_all(TABLE)
-        updated = 0
-        for row in rows:
-            fp = (row.get("file_path") or "").strip()
-            if not fp or os.path.sep not in fp.replace("\\", "/").lstrip("/"):
-                # 已经是纯文件名或为空，无需迁移
-                continue
-            basename = os.path.basename(fp)
-            if basename and basename != fp:
-                update(TABLE, row["id"], {"file_path": basename})
-                updated += 1
-        if updated > 0:
-            print(f"[json_data_manager] 已迁移 {updated} 条旧 file_path 为纯文件名（跨平台兼容）")
-    except Exception as e:
-        print(f"[json_data_manager] file_path 迁移跳过: {e}")
-
-
-# 模块加载后立即执行迁移
-_migrate_file_paths_once()
 
 
 # ── 路径工具 ──────────────────────────────────────────────────────────

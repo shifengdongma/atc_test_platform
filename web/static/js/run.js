@@ -684,9 +684,9 @@ async function initRun() {
     elMode.value = _presetMode;
     updateMode(); // 触发对应参数面板显示
   }
-  // 加载环境列表
-  await loadEnvSelector();
-  // 初始化图表和地图
+  // 加载环境列表（后台异步，不阻塞地图初始化，MySQL 可能未就绪）
+  loadEnvSelector().catch(function(e){});
+  // 初始化图表和地图（不受 MySQL 连接状态影响，立即渲染）
   if (typeof initCharts === 'function') initCharts();
   if (typeof initMap === 'function') initMap();
   // 检查运行状态

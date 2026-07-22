@@ -1,6 +1,16 @@
 #!/bin/bash
 # ATC/UTM 模拟器 Docker 入口脚本
-# 功能：启动前环境检查 + 信号处理 + 优雅退出
+# 功能：启动前环境检查 + 数据库诊断 + 信号处理 + 优雅退出
+#
+# 项目目录结构（容器内）：
+#   /app/web/server.py     — Flask 主服务
+#   /app/env.py            — 敏感配置（运行时挂载）
+#   /app/core/             — 仿真核心
+#   /app/common/           — 基础设施
+#   /app/database/         — 持久化层
+#   /app/services/         — 服务层
+#   /app/tools/            — 工具层
+#   /app/data/             — JSON 数据文件
 
 set -e
 
@@ -14,17 +24,18 @@ echo "============================================"
 echo "[1/3] 检查运行环境..."
 
 # 检查 env.py 是否存在
-if [ -f "/app/utm_simulator/env.py" ]; then
+if [ -f "/app/env.py" ]; then
     echo "  ✓ env.py 配置文件已挂载"
 else
-    echo "  ⚠ env.py 未找到，使用环境变量模式"
+    echo "  ⚠ env.py 未挂载到 /app/env.py"
+    echo "    部分配置将从环境变量读取，未设置环境变量的配置将使用默认值"
 fi
 
 # 检查 Python 版本
 PYTHON_VERSION=$(python --version 2>&1)
 echo "  ✓ ${PYTHON_VERSION}"
 
-# ── 连接测试（可选，超时 5s）─────────────────────────
+# ── 连接测试（超时 5s）─────────────────────────────────
 echo "[2/3] 连通性检测..."
 
 # Redis
@@ -64,25 +75,25 @@ if [ -n "${UTM_MYSQL_HOST}" ]; then
     echo "    PORT=${UTM_MYSQL_PORT:-3306}, DB=${UTM_MYSQL_DB:-utm_simulator}, USER=${UTM_MYSQL_USER:-(默认)}"
 else
     echo "    ⚠ UTM_MYSQL_HOST 未设置"
-    echo "    容器将尝试从 /app/utm_simulator/env.py 读取 MYSQL_HOST"
-    if [ -f "/app/utm_simulator/env.py" ]; then
-        ENV_MYSQL_HOST=$(grep -oP 'MYSQL_HOST\s*=\s*["'"'"']?\K[^"'"'"'\n]+' /app/utm_simulator/env.py 2>/dev/null || echo "无法解析")
+    echo "    容器将尝试从 /app/env.py 读取 MYSQL_HOST"
+    if [ -f "/app/env.py" ]; then
+        ENV_MYSQL_HOST=$(grep -oP 'MYSQL_HOST\s*=\s*["'"'"']?\K[^"'"'"'\n]+' /app/env.py 2>/dev/null || echo "无法解析")
         echo "    env.py 中 MYSQL_HOST=${ENV_MYSQL_HOST}"
         if [ "${ENV_MYSQL_HOST}" = "127.0.0.1" ] || [ "${ENV_MYSQL_HOST}" = "localhost" ]; then
             echo "    ⚠⚠⚠ WARNING: env.py 中 MYSQL_HOST=${ENV_MYSQL_HOST}，容器内不可达！"
-            echo "    请在 1Panel 环境变量中设置 UTM_MYSQL_HOST=实际的MySQL地址"
+            echo "    请在 .env 中设置 UTM_MYSQL_HOST=实际的MySQL地址（宿主机IP或容器名）"
         fi
     else
-        echo "    env.py 未挂载，MySQL 将保持未配置状态 (configured=False)"
+        echo "    env.py 未挂载，MySQL 将保持未配置状态"
     fi
 fi
 
 # 达梦
 echo "  [达梦]"
 if [ -n "${UTM_DM_HOST}" ]; then
-    echo "    UTM_DM_HOST=${UTM_DM_HOST}, PORT=${UTM_DM_PORT:-5237}, SCHEMA=${UTM_DM_SCHEMA:-ATC_DKWRJ_TEST}"
+    echo "    UTM_DM_HOST=${UTM_DM_HOST}, PORT=${UTM_DM_PORT:-5236}, SCHEMA=${UTM_DM_SCHEMA:-ATC_DKWRJ}"
 else
-    echo "    UTM_DM_HOST 未设置，使用默认值 10.165.32.32"
+    echo "    UTM_DM_HOST 未设置，使用 env.py 默认值或 10.165.32.212"
 fi
 echo "    OpenSSL 1.1 库检测:"
 if ldconfig -p 2>/dev/null | grep -q libssl.so.1.1; then
@@ -96,32 +107,14 @@ else
     echo "      ✗ libcrypto.so.1.1 未安装！达梦加密模块将不可用 (-70089)"
 fi
 
-# 命名卷代码版本检查
-echo "  [代码版本]"
-if [ -f "/app/database/json_data_manager.py" ]; then
-    if grep -q "query_available_routes" /app/database/json_data_manager.py 2>/dev/null; then
-        echo "    ✓ json_data_manager.py: 包含 query_available_routes"
-    else
-        echo "    ✗✗✗ CRITICAL: json_data_manager.py 版本过旧（缺少 query_available_routes）！"
-        echo "    命名卷缓存了旧代码，请执行以下步骤更新："
-        echo "      docker compose down"
-        echo "      docker volume rm atc_test_platfrom_utm-database"
-        echo "      docker compose build --no-cache"
-        echo "      docker compose up -d"
-    fi
-else
-    echo "    ⚠ /app/database/json_data_manager.py 未找到"
-fi
-
 # pymysql/MySQL 导入验证
 echo "  [pymysql/MySQL]"
 PYMYSQL_CHECK=$(python -c "import pymysql; print(pymysql.__version__)" 2>&1) || true
 if echo "$PYMYSQL_CHECK" | grep -qE '^[0-9]+\.[0-9]+'; then
-    echo "    ✓ pymysql ${PYMYSQL_CHECK} 已安装，mysqldbclient 可导入"
+    echo "    ✓ pymysql ${PYMYSQL_CHECK} 已安装"
 else
     echo "    ✗✗✗ CRITICAL: pymysql 未安装或导入失败！"
     echo "    错误详情: ${PYMYSQL_CHECK}"
-    echo "    修复: docker compose build --no-cache (确保 pip install pymysql 成功)"
 fi
 
 # DBUtils/PooledDB 导入验证
@@ -132,10 +125,9 @@ if [ "$DBUTILS_CHECK" = "OK" ]; then
 else
     echo "    ✗✗✗ CRITICAL: DBUtils 未安装或导入失败！"
     echo "    错误详情: ${DBUTILS_CHECK}"
-    echo "    修复: docker compose build --no-cache (确保 pip install DBUtils>=3.0 成功)"
 fi
 
-# MySQL 连接测试（仅在配置了 UTM_MYSQL_HOST 时）
+# MySQL 连接测试
 if [ -n "${UTM_MYSQL_HOST}" ]; then
     MYSQL_TEST=$(python -c "
 import pymysql
@@ -143,7 +135,7 @@ try:
     conn = pymysql.connect(host='${UTM_MYSQL_HOST}', port=${UTM_MYSQL_PORT:-3306},
                            user='${UTM_MYSQL_USER}', password='${UTM_MYSQL_PASSWORD}',
                            database='${UTM_MYSQL_DB:-utm_simulator}',
-                           ssl={}, connect_timeout=5)
+                           connect_timeout=5)
     conn.close()
     print('OK')
 except Exception as e:
@@ -154,7 +146,7 @@ except Exception as e:
     else
         echo "    ✗ MySQL 连接失败: ${MYSQL_TEST}"
         echo "    检查: 1) UTM_MYSQL_HOST/PORT/USER/PASSWORD 是否正确"
-        echo "         2) MySQL 用户 '${UTM_MYSQL_USER}' 是否允许从容器 IP 连接"
+        echo "         2) MySQL 用户是否允许从容器 IP 连接"
         echo "         3) MySQL 服务是否正常运行"
     fi
 else
@@ -167,15 +159,15 @@ echo ""
 # ── 启动 Web 服务 ────────────────────────────────────
 echo "[3/3] 启动 Web 控制台..."
 echo "  监听地址: http://0.0.0.0:${FLASK_PORT:-5000}"
+echo "  Web 页面: http://<宿主机IP>:${FLASK_PORT:-5000}"
 echo "============================================"
 
-cd /app/utm_simulator
+cd /app
 
 # 捕获 SIGTERM/SIGINT，优雅关闭
 cleanup() {
     echo ""
     echo "收到退出信号，正在关闭..."
-    # Flask 进程会收到信号自行退出
     wait
     echo "服务已停止。"
     exit 0
@@ -183,8 +175,6 @@ cleanup() {
 trap cleanup SIGTERM SIGINT
 
 # ── 达梦 dmPython 加密模块：强制预加载 OpenSSL 1.1 库 ──
-# dmPython 自带 dmssl/libcrypto.so 可能与系统库冲突导致 -70089
-# LD_PRELOAD 确保系统 OpenSSL 1.1 库最先被动态链接器加载
 if [ -f /usr/lib/x86_64-linux-gnu/libssl.so.1.1 ] && [ -f /usr/lib/x86_64-linux-gnu/libcrypto.so.1.1 ]; then
     export LD_PRELOAD="/usr/lib/x86_64-linux-gnu/libssl.so.1.1:/usr/lib/x86_64-linux-gnu/libcrypto.so.1.1"
     echo "  ✓ LD_PRELOAD 已设置 (OpenSSL 1.1 优先加载)"
@@ -192,4 +182,4 @@ else
     echo "  ⚠ 未找到 OpenSSL 1.1 库，LD_PRELOAD 跳过"
 fi
 
-exec python web_server.py
+exec python web/server.py

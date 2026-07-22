@@ -351,7 +351,6 @@ def _ensure_mysql_tables(client=None):
             if "Lost connection" in err_msg or "timed out" in err_msg:
                 _try_reset_broken_connection()
 
-    # 3. 对已存在的表，检查并补全缺失列（ALTER TABLE ADD COLUMN）
     _ALTER_COLUMNS = {
         "sim_env_config": [
             ("dm_host",     "VARCHAR(128) DEFAULT '' COMMENT '达梦数据库地址'"),
@@ -381,26 +380,108 @@ def _ensure_mysql_tables(client=None):
             ("updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
         ],
     }
+    # 仅检测缺失列（不自动 ALTER，避免 DDL 阻塞启动）
+    # 使用 migrate_schema() 独立函数执行实际的 DDL 迁移
     for table_name, columns in _ALTER_COLUMNS.items():
         if table_name not in existing_tables:
             continue
         try:
             cur = client.cursor()
             cur.execute(f"SHOW COLUMNS FROM `{table_name}`")
-            existing_cols = set()
-            for row in cur.fetchall():
-                existing_cols.add(list(row.values())[0])
-            for col_name, col_def in columns:
-                if col_name in existing_cols:
-                    continue
-                try:
-                    cur2 = client.cursor()
-                    cur2.execute(f"ALTER TABLE `{table_name}` ADD COLUMN `{col_name}` {col_def}")
-                    _p(f"[mysql_db_manager] ALTER {table_name} 已增加列: {col_name}")
-                except Exception as e:
-                    _p(f"[mysql_db_manager] ALTER {table_name}.{col_name} 跳过: {e}")
+            existing_cols = {list(row.values())[0] for row in cur.fetchall()}
+            missing = [(c, d) for c, d in columns if c not in existing_cols]
+            if missing:
+                _p(f"[mysql_db_manager] {table_name} 缺失 {len(missing)} 列，"
+                   f"请运行 python database/migrate_schema.py 补全")
         except Exception as e:
             _p(f"[mysql_db_manager] 检查 {table_name} 列信息失败: {e}")
+
+
+def migrate_schema():
+    """独立 DDL 迁移函数：补全所有缺失的列。
+
+    与 _ensure_mysql_tables() 分离，避免 ALTER TABLE 阻塞 init_tables()
+    导致启动挂死。可通过命令行或管理脚本手动调用。
+    """
+    client = _get_client()
+    if not client:
+        print("[migrate_schema] MySQL 不可用，无法执行迁移")
+        return {"success": False, "message": "MySQL 不可用"}
+
+    _ALTER_COLUMNS = {
+        "sim_env_config": [
+            ("dm_host",     "VARCHAR(128) DEFAULT '' COMMENT '达梦数据库地址'"),
+            ("dm_port",     "INT DEFAULT 5236 COMMENT '达梦数据库端口'"),
+            ("dm_user",     "VARCHAR(128) DEFAULT 'SYSDBA' COMMENT '达梦用户名'"),
+            ("dm_password", "VARCHAR(128) DEFAULT '' COMMENT '达梦密码'"),
+            ("dm_schema",   "VARCHAR(128) DEFAULT '' COMMENT '达梦模式名'"),
+            ("mysql_host",     "VARCHAR(128) DEFAULT '' COMMENT 'MySQL地址'"),
+            ("mysql_port",     "INT DEFAULT 3306 COMMENT 'MySQL端口'"),
+            ("mysql_user",     "VARCHAR(128) DEFAULT '' COMMENT 'MySQL用户'"),
+            ("mysql_password", "VARCHAR(128) DEFAULT '' COMMENT 'MySQL密码'"),
+            ("mysql_database", "VARCHAR(128) DEFAULT '' COMMENT 'MySQL数据库名'"),
+            ("atc_cluster_api", "VARCHAR(256) DEFAULT '' COMMENT '集群API'"),
+            ("atc_vip",      "VARCHAR(128) DEFAULT '' COMMENT 'ATC VIP'"),
+            ("atc_node_a",   "VARCHAR(128) DEFAULT '' COMMENT 'ATC A节点'"),
+            ("atc_node_b",   "VARCHAR(128) DEFAULT '' COMMENT 'ATC B节点'"),
+            ("es_hosts",     "VARCHAR(512) DEFAULT '' COMMENT 'ES地址(JSON)'"),
+        ],
+        "sim_scene_tasks": [
+            ("updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
+        ],
+        "sim_scene_task_files": [
+            ("updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
+        ],
+        "sim_task_logs": [
+            ("created_at", "DATETIME DEFAULT CURRENT_TIMESTAMP"),
+            ("updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
+        ],
+    }
+
+    added = 0
+    skipped = 0
+    failed = 0
+
+    # 获取已存在的表
+    cur = client.cursor()
+    cur.execute("SHOW TABLES")
+    existing_tables = set()
+    for row in cur.fetchall():
+        existing_tables.add(list(row.values())[0])
+
+    # 设置 DDL 超时保护
+    try:
+        cur.execute("SET SESSION lock_wait_timeout = 5")
+    except Exception:
+        pass
+
+    for table_name, columns in _ALTER_COLUMNS.items():
+        if table_name not in existing_tables:
+            print(f"[migrate_schema] {table_name} 表不存在，跳过")
+            continue
+        try:
+            cur2 = client.cursor()
+            cur2.execute(f"SHOW COLUMNS FROM `{table_name}`")
+            existing_cols = {list(row.values())[0] for row in cur2.fetchall()}
+            for col_name, col_def in columns:
+                if col_name in existing_cols:
+                    skipped += 1
+                    continue
+                try:
+                    cur3 = client.cursor()
+                    cur3.execute(f"ALTER TABLE `{table_name}` ADD COLUMN `{col_name}` {col_def}")
+                    client.commit()
+                    added += 1
+                    print(f"[migrate_schema] + {table_name}.{col_name}")
+                except Exception as e:
+                    failed += 1
+                    print(f"[migrate_schema] ✗ {table_name}.{col_name}: {e}")
+        except Exception as e:
+            print(f"[migrate_schema] 检查 {table_name} 失败: {e}")
+
+    result = {"success": True, "added": added, "skipped": skipped, "failed": failed}
+    print(f"[migrate_schema] 完成: +{added} 新增, {skipped} 已存在, {failed} 失败")
+    return result
 
 
 def _try_reset_broken_connection():

@@ -90,51 +90,15 @@
     <main style="padding:20px 24px;overflow-y:auto;flex:1;">
       <!-- ── 标签页切换栏 ── -->
       <div class="tab-bar">
-        <button class="tab-btn active" data-tab="tab-single">📄 单文件场景</button>
-        <button class="tab-btn" data-tab="tab-multi">📑 多文件场景</button>
+        <button class="tab-btn active" data-tab="tab-multi">📑 场景编辑</button>
         <button class="tab-btn" data-tab="tab-list">📋 场景任务列表</button>
       </div>
 
-      <!-- ═══════════ 标签页1: 单文件场景 ═══════════ -->
-      <div class="tab-panel active" id="tab-single">
+      <!-- ═══════════ 标签页1: 场景编辑（多文件场景） ═══════════ -->
+      <div class="tab-panel active" id="tab-multi">
         <div class="scene-panel-wide">
           <div class="panel-form">
-            <h2 id="single-form-title">➕ 新建单文件场景</h2>
-            <div class="form-row"><label>场景名称 *</label><input type="text" id="s-name" placeholder="例如：每日航线注入"><span class="form-hint">给场景起个名字，便于识别</span></div>
-            <div class="form-row"><label>仿真环境</label><select id="s-env"><option value="0">— 默认环境 —</option></select><span class="form-hint">选择此场景使用的 Redis/Kafka 连接环境</span></div>
-            <div class="form-row"><label>仿真模式</label><select id="s-mode"><option value="scene">🎬 场景文件注入</option></select><span class="form-hint">将JSON文件按配置推送到Kafka</span></div>
-            <div class="form-row">
-              <label>数据文件</label><select id="s-file"><option value="">— 选择文件 —</option></select>
-              <button id="btn-s-refresh" class="btn btn-small" style="flex-shrink:0;">🔄</button>
-            </div>
-            <div class="form-row">
-              <label>循环间隔</label><input type="number" id="s-interval" value="30" min="0" max="86400">
-              <span class="form-hint">秒 &nbsp; 一次仿真完成后等待N秒再自动开始下一次；设为0则不循环</span>
-            </div>
-            <div class="form-row"><label>执行日期</label><input type="date" id="s-date"><label style="min-width:auto;margin-left:8px;">时间</label><input type="time" id="s-time" value="09:00"><span class="form-hint">设定自动执行的日期和时间，留空则仅手动触发</span></div>
-            <div class="form-row">
-              <label>重复方式</label><select id="s-repeat"><option value="once">仅一次（手动触发）</option><option value="daily">每天</option><option value="weekly">每周</option><option value="monthly">每月</option></select>
-              <label style="min-width:auto;margin-left:12px;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="s-enabled" checked> 启用调度</label>
-              <span class="form-hint">开启后按设定的日期时间自动执行；关闭则仅在手动点击"立即执行"时触发</span>
-            </div>
-            <input type="hidden" id="s-edit-id" value="">
-            <div class="btn-row">
-              <button id="btn-s-cancel" class="btn btn-secondary" style="display:none;">取消编辑</button>
-              <button id="btn-s-save" class="btn btn-start">保存场景</button>
-            </div>
-          </div>
-          <div class="panel-form">
-            <h2>📋 执行记录</h2>
-            <div class="history-box" id="single-history"><div class="empty-hint">选择场景查看记录</div></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ═══════════ 标签页2: 多文件场景 ═══════════ -->
-      <div class="tab-panel" id="tab-multi">
-        <div class="scene-panel-wide">
-          <div class="panel-form">
-            <h2 id="multi-form-title">➕ 新建多文件场景</h2>
+            <h2 id="multi-form-title">➕ 新建场景</h2>
             <div class="form-row"><label>场景名称 *</label><input type="text" id="m-name" placeholder="例如：综合测试场景"><span class="form-hint">给场景起个名字</span></div>
             <div class="form-row"><label>仿真环境</label><select id="m-env"><option value="0">— 默认环境 —</option></select><span class="form-hint">选择此场景使用的 Redis/Kafka 连接环境</span></div>
             <div class="form-row"><label>仿真模式</label><select id="m-mode"><option value="scene">🎬 场景文件注入</option></select><span class="form-hint">将JSON文件按任务配置推送到Kafka</span></div>
@@ -198,6 +162,7 @@
               <h2 style="margin:0;padding:0;border:none;">📋 所有场景任务</h2>
               <button id="btn-list-refresh" class="btn btn-small">🔄 刷新列表</button>
             </div>
+            <div id="scheduler-status" style="font-size:11px;padding:4px 8px;margin-bottom:10px;background:var(--bg-card);border-radius:4px;color:var(--text-dim);">检查中...</div>
             <div id="task-list-container" style="max-height:540px;overflow-y:auto;">
               <div class="empty-hint" style="text-align:center;padding:40px;color:var(--text-dim);">加载中...</div>
             </div>

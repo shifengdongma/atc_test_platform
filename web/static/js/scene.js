@@ -1,5 +1,5 @@
 /* -*- coding: utf-8 -*- */
-/* 场景编排 — 三标签页 (单文件 / 多文件 / 任务列表) */
+/* 场景编排 — 两标签页 (场景编辑 / 任务列表) */
 
 (function() {
 'use strict';
@@ -27,9 +27,6 @@ async function refreshJsonFiles() {
     var data = await apiGet('/api/data/db/files?page_size=200');
     if (data.files && data.files.length) {
       jsonFileCache = data.files;
-      var opts = '<option value="">— 选择文件 —</option>' + data.files.map(function(f) { return '<option value="'+f.id+'">'+escHtml(f.name)+' ['+(f.category||'')+']</option>'; }).join('');
-      var sel = $('#s-file');
-      if (sel) sel.innerHTML = opts;
     }
   } catch(e) {}
 }
@@ -45,8 +42,7 @@ async function refreshEnvList() {
     var data = await apiGet('/api/env/list');
     if (data.envs && data.envs.length) {
       var opts = '<option value="0">— 默认环境 —</option>' + data.envs.map(function(e) { return '<option value="'+e.id+'">'+escHtml(e.name||'')+'</option>'; }).join('');
-      var s = $('#s-env'), m = $('#m-env');
-      if (s) s.innerHTML = opts;
+      var m = $('#m-env');
       if (m) m.innerHTML = opts;
     }
   } catch(e) {}
@@ -113,58 +109,7 @@ async function showHistory(sceneId, elId) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// 标签页1: 单文件场景
-// ═══════════════════════════════════════════════════════════════════
-
-(function() { var d = new Date(Date.now()+86400000); var el = $('#s-date'); if (el) el.value = d.toISOString().substring(0,10); })();
-
-$('#btn-s-refresh').addEventListener('click', refreshJsonFiles);
-
-function resetSingleForm() {
-  $('#single-form-title').textContent = '➕ 新建单文件场景';
-  $('#s-name').value = '';
-  $('#s-mode').value = 'scene';
-  $('#s-interval').value = 30;
-  $('#s-file').value = '';
-  $('#s-date').value = '';
-  $('#s-time').value = '09:00';
-  $('#s-repeat').value = 'once';
-  $('#s-enabled').checked = true;
-  $('#s-edit-id').value = '';
-  $('#btn-s-cancel').style.display = 'none';
-}
-
-$('#btn-s-cancel').addEventListener('click', resetSingleForm);
-
-$('#btn-s-save').addEventListener('click', async function() {
-  var name = $('#s-name').value.trim();
-  if (!name) { showToast('请输入场景名称','error'); return; }
-  var body = {
-    name: name,
-    env_id: parseInt($('#s-env').value)||0,
-    scene_type: 'single',
-    sim_mode: $('#s-mode').value,
-    cron_expr: buildCron('#s-date','#s-time','#s-repeat'),
-    enabled: $('#s-enabled').checked?1:0,
-    file_id: $('#s-file').value||null,
-    cycle_interval_sec: parseInt($('#s-interval').value)||30,
-  };
-  var editId = $('#s-edit-id').value;
-  try {
-    var r;
-    if (editId) {
-      var resp = await fetch('/api/scenes/'+editId, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-      r = await resp.json();
-    } else {
-      r = await apiPost('/api/scenes', body);
-    }
-    if (r.success) { showToast(r.message||'已保存','success'); resetSingleForm(); loadTaskList(); }
-    else { showToast(r.message||'保存失败','error'); }
-  } catch(e) { showToast('请求异常: '+e.message,'error'); }
-});
-
-// ═══════════════════════════════════════════════════════════════════
-// 标签页2: 多文件场景
+// 标签页1: 场景编辑
 // ═══════════════════════════════════════════════════════════════════
 
 (function() { var d = new Date(Date.now()+86400000); var el = $('#m-date'); if (el) el.value = d.toISOString().substring(0,10); })();
@@ -173,7 +118,7 @@ var mTasks = [];
 var mActiveTask = -1;
 
 function resetMultiForm() {
-  $('#multi-form-title').textContent = '➕ 新建多文件场景';
+  $('#multi-form-title').textContent = '➕ 新建场景';
   $('#m-name').value = '';
   $('#m-edit-id').value = '';
   $('#m-enabled').checked = true;
@@ -283,7 +228,7 @@ $('#btn-m-save').addEventListener('click', async function() {
   saveMultiTaskEditor();
   var body = {
     name: name, env_id: parseInt($('#m-env').value)||0, scene_type: 'multi',
-    sim_mode: 'scene', cron_expr: buildCron('#m-date','#m-time','#m-repeat'),
+    sim_mode: $('#m-mode').value, cron_expr: buildCron('#m-date','#m-time','#m-repeat'),
     enabled: $('#m-enabled').checked?1:0,
     tasks: mTasks.map(function(t) {
       return { name: t.name||'未命名', task_type: t.task_type, cycle_interval_sec: t.cycle_interval_sec,
@@ -306,12 +251,29 @@ $('#btn-m-save').addEventListener('click', async function() {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// 标签页3: 场景任务列表
+// 标签页2: 场景任务列表
 // ═══════════════════════════════════════════════════════════════════
+
+async function checkSchedulerHealth() {
+  var el = $('#scheduler-status');
+  if (!el) return;
+  try {
+    var data = await apiGet('/api/scenes/health');
+    if (data.scheduler_alive) {
+      var lastCheck = data.last_check_at ? escHtml(data.last_check_at.substring(0,16)) : '--';
+      el.innerHTML = '<span style="color:#2ecc71;">●</span> 调度器运行中 | 上次检查: '+lastCheck+' | 启用场景: '+(data.enabled_scenes_count||0)+' | 执行中: '+(data.active_executions||0);
+    } else {
+      el.innerHTML = '<span style="color:#e74c3c;">●</span> 调度器未运行';
+    }
+  } catch(e) {
+    el.innerHTML = '<span style="color:#f39c12;">●</span> 调度器状态未知';
+  }
+}
 
 async function loadTaskList() {
   var el = $('#task-list-container');
   if (!el) return;
+  checkSchedulerHealth();
   try {
     var data = await apiGet('/api/scenes');
     if (!data.scenes||!data.scenes.length) { el.innerHTML = '<div class="empty-hint">暂无场景</div>'; return; }
@@ -319,12 +281,11 @@ async function loadTaskList() {
     for (var si=0; si<data.scenes.length; si++) {
       var s = data.scenes[si];
       var st = s.enabled ? '<span class="current-badge">启用</span>' : '<span style="color:var(--danger);font-size:10px;">暂停</span>';
-      var typeLabel = s.scene_type==='multi'?'多文件':'单文件';
       var cronDisplay = s.cron_expr ? escHtml(s.cron_expr) : '手动触发';
       var lastRun = s.last_run_at ? escHtml(s.last_run_at.substring(0,16)) : '--';
       var nextRun = s.next_run_at ? escHtml(s.next_run_at.substring(0,16)) : (s.cron_expr?'计算中...':'--');
       html += '<div class="scene-card">'+
-        '<h4>'+escHtml(s.name||'')+' '+st+' <span style="font-size:10px;color:var(--text-dim);">['+typeLabel+' | '+escHtml(s.sim_mode||'scene')+']</span></h4>'+
+        '<h4>'+escHtml(s.name||'')+' '+st+' <span style="font-size:10px;color:var(--text-dim);">['+escHtml(s.sim_mode||'scene')+']</span></h4>'+
         '<div class="meta">调度: '+cronDisplay+' | 环境: '+(s.env_id||'默认')+' | 上次: '+lastRun+' | 下次: '+nextRun+'</div>';
       // 加载任务和文件信息
       try {
@@ -360,7 +321,7 @@ async function loadTaskList() {
         '<button class="btn-tiny" onclick="window._toggleScene('+s.id+')">'+(s.enabled?'⏸暂停':'▶启用')+'</button>'+
         '<button class="btn-tiny" onclick="window._runScene('+s.id+')">⚡立即执行</button>'+
         '<button class="btn-tiny" onclick="window._stopScene('+s.id+')" style="color:var(--danger);">⏹停止</button>'+
-        '<button class="btn-tiny" onclick="window._editScene('+s.id+',\''+s.scene_type+'\')">✏️编辑</button>'+
+        '<button class="btn-tiny" onclick="window._editScene('+s.id+')">✏️编辑</button>'+
         '<button class="btn-tiny" onclick="window._delScene('+s.id+')">🗑删除</button>'+
         '<button class="btn-tiny" onclick="window._viewHistory('+s.id+')">📜记录</button>'+
         '</div></div>';
@@ -374,63 +335,28 @@ window._runScene = async function(id) { var r = await apiPost('/api/scenes/'+id+
 window._stopScene = async function(id) { var r = await apiPost('/api/scenes/'+id+'/stop'); showToast(r.message||'已发送停止信号',r.success?'success':'error'); if(r.success) loadTaskList(); };
 window._delScene = async function(id) { if(!confirm('确定删除此场景？'))return; await fetch('/api/scenes/'+id,{method:'DELETE'}); showToast('已删除','success'); loadTaskList(); };
 window._viewHistory = async function(id) {
-  // 查找场景类型，切换到对应标签页显示记录
-  try {
-    var data = await apiGet('/api/scenes');
-    var s = (data.scenes||[]).find(function(x){return x.id===id;});
-    var stype = s ? s.scene_type : 'single';
-    if (stype === 'multi') {
-      document.querySelector('.tab-btn[data-tab="tab-multi"]').click();
-      showHistory(id, 'multi-history');
-    } else {
-      document.querySelector('.tab-btn[data-tab="tab-single"]').click();
-      showHistory(id, 'single-history');
-    }
-  } catch(e) { showHistory(id, 'single-history'); }
+  document.querySelector('.tab-btn[data-tab="tab-multi"]').click();
+  showHistory(id, 'multi-history');
 };
 
-window._editScene = async function(id, stype) {
+window._editScene = async function(id) {
   try {
     var data = await apiGet('/api/scenes');
     var s = (data.scenes||[]).find(function(x){return x.id===id;});
     if (!s) return;
-    if (stype==='single') {
-      // 切到单文件标签
-      document.querySelector('.tab-btn[data-tab="tab-single"]').click();
-      $('#single-form-title').textContent = '✏️ 编辑: '+escHtml(s.name||'');
-      $('#s-name').value = s.name||'';
-      $('#s-env').value = s.env_id||0;
-      $('#s-mode').value = s.sim_mode||'scene';
-      $('#s-edit-id').value = s.id;
-      $('#s-enabled').checked = s.enabled===1;
-      $('#btn-s-cancel').style.display = '';
-      // 恢复 cron 日期/时间/重复
-      parseCron(s.cron_expr, '#s-date', '#s-time', '#s-repeat');
-      // 加载任务信息
-      try {
-        var tr = await apiGet('/api/scenes/'+id+'/tasks');
-        if (tr.tasks&&tr.tasks[0]) {
-          var t = tr.tasks[0];
-          $('#s-interval').value = t.cycle_interval_sec||30;
-          var fr = await apiGet('/api/scenes/'+id+'/tasks/'+t.id+'/files');
-          if (fr.files&&fr.files[0]) $('#s-file').value = fr.files[0].file_id||'';
-        }
-      } catch(e) {}
-      showHistory(id, 'single-history');
-    } else {
-      // 切到多文件标签
-      document.querySelector('.tab-btn[data-tab="tab-multi"]').click();
-      $('#multi-form-title').textContent = '✏️ 编辑: '+escHtml(s.name||'');
-      $('#m-name').value = s.name||'';
-      $('#m-env').value = s.env_id||0;
-      $('#m-edit-id').value = s.id;
-      $('#m-enabled').checked = s.enabled===1;
-      $('#btn-m-cancel').style.display = '';
-      // 恢复 cron 日期/时间/重复
-      parseCron(s.cron_expr, '#m-date', '#m-time', '#m-repeat');
-      loadMultiSceneTasks(id);
-      showHistory(id, 'multi-history');
-    }
+    // 统一使用多文件编辑
+    document.querySelector('.tab-btn[data-tab="tab-multi"]').click();
+    $('#multi-form-title').textContent = '✏️ 编辑: '+escHtml(s.name||'');
+    $('#m-name').value = s.name||'';
+    $('#m-env').value = s.env_id||0;
+    $('#m-mode').value = s.sim_mode||'scene';
+    $('#m-edit-id').value = s.id;
+    $('#m-enabled').checked = s.enabled===1;
+    $('#btn-m-cancel').style.display = '';
+    // 恢复 cron 日期/时间/重复
+    parseCron(s.cron_expr, '#m-date', '#m-time', '#m-repeat');
+    loadMultiSceneTasks(id);
+    showHistory(id, 'multi-history');
   } catch(e) { console.error(e); }
 };
 
@@ -445,3 +371,10 @@ init();
 })();
 // defer 脚本在 DOM 解析后按序执行，此时 common.js 已就绪
 initCommon('/scene');
+
+// 定时刷新调度器状态（每30秒）
+setInterval(function() {
+  if (document.getElementById('tab-list') && document.getElementById('tab-list').classList.contains('active')) {
+    checkSchedulerHealth();
+  }
+}, 30000);

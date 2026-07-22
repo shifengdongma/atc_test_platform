@@ -2552,6 +2552,15 @@ def api_scene_history(scene_id):
     return jsonify({"history": history})
 
 
+@app.route("/api/scenes/health", methods=["GET"])
+@_safe_json
+def api_scene_health():
+    """获取场景编排调度器健康状态。"""
+    och = _get_orchestrator()
+    health = och.get_health()
+    return jsonify(health)
+
+
 # ── 任务 CRUD（场景内）──────────────────────────────────────────────
 
 @app.route("/api/scenes/<int:scene_id>/tasks", methods=["GET"])

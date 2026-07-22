@@ -99,6 +99,8 @@ class SceneOrchestrator:
         # 活跃执行注册表（支持外部取消）
         self._active_executions: Dict[int, Dict[str, Any]] = {}
         self._exec_lock = threading.RLock()
+        self._last_check_at: Optional[datetime] = None  # 上次 cron 检查时间
+        self._loop_count: int = 0  # 循环计数器，用于心跳降频
 
     # ── 生命周期 ──────────────────────────────────────────────────
 
@@ -123,26 +125,36 @@ class SceneOrchestrator:
         print("[Orchestrator] 场景编排调度器已停止")
 
     def _loop(self) -> None:
-        """后台循环：每 30 秒检查一次。"""
+        """后台循环：每 30 秒检查一次。每 10 个循环（~5 分钟）输出心跳。"""
         while self._running:
             try:
                 self._check_and_execute()
             except Exception as e:
                 print(f"[Orchestrator] 检查异常: {e}")
+            self._loop_count += 1
+            # 每 10 个循环（约 5 分钟）输出一次心跳，证明调度器存活
+            if self._loop_count % 10 == 0:
+                print(f"[Orchestrator] 心跳 #{self._loop_count // 10} — "
+                      f"活跃执行: {len(self._active_executions)}, "
+                      f"上次检查: {self._last_check_at.strftime('%H:%M:%S') if self._last_check_at else 'N/A'}")
             time.sleep(30)
 
     def _check_and_execute(self) -> None:
         """检查所有启用的场景，匹配 cron 则触发异步执行。"""
         now = datetime.now()
+        self._last_check_at = now
         try:
             scenes = query(SCENE_TABLE, where="enabled = 1", order_by="id")
         except Exception as e:
             print(f"[Orchestrator] 查询场景失败 (MySQL 可能不可用): {e}")
             return
 
-        if scenes:
+        # 始终输出检查日志（每 10 个循环降频一次完整日志，其他循环仅在匹配时输出）
+        matched_any = False
+        enabled_count = len(scenes)
+        if self._loop_count % 10 == 0 and enabled_count > 0:
             print(f"[Orchestrator] Cron 检查: {now.strftime('%Y-%m-%d %H:%M')}, "
-                  f"已启用场景数={len(scenes)}")
+                  f"已启用场景数={enabled_count}")
 
         for scene in scenes:
             scene_id = scene["id"]
@@ -153,15 +165,25 @@ class SceneOrchestrator:
             if not cron_matches(cron_expr, now):
                 continue
 
-            # 防重复：同一分钟内不重复触发
+            # 防重复：基于 cron 分钟的去重（同一场景在同一天的同一分钟最多触发1次）
             last = self._last_check.get(scene_id)
-            if last and (now - last).total_seconds() < 60:
-                continue
+            if last:
+                # 将与 last 和 now 都对齐到分钟边界进行比较
+                last_minute = last.replace(second=0, microsecond=0)
+                now_minute = now.replace(second=0, microsecond=0)
+                if last_minute == now_minute:
+                    continue
 
             self._last_check[scene_id] = now
+            matched_any = True
             print(f"[Orchestrator] Cron 匹配: 场景='{scene.get('name', '')}' "
                   f"(id={scene_id}) cron='{cron_expr}' at {now.strftime('%H:%M:%S')}")
             self._trigger_scene(scene)
+
+        # 降频日志：仅在匹配或心跳周期输出
+        if not matched_any and self._loop_count % 20 == 0:
+            print(f"[Orchestrator] Cron 检查: {now.strftime('%H:%M')} — "
+                  f"{enabled_count} 个启用场景，无匹配")
 
     def _trigger_scene(self, scene: Dict[str, Any]) -> None:
         """触发场景执行（非阻塞，在后台线程中运行）。
@@ -249,13 +271,14 @@ class SceneOrchestrator:
         return query_one(SCENE_TABLE, scene_id)
 
     def create_scene(self, data: Dict[str, Any]) -> int:
-        """创建场景。单文件场景可通过 data['tasks'] 内嵌创建任务和文件。
+        """创建场景。统一使用 scene_type='multi'。
 
-        单文件场景 data 格式:
+        兼容旧 single 格式（自动转为 multi）:
             {name, env_id, scene_type='single', cron_expr, sim_mode, enabled,
              file_id, cycle_interval_sec}
+            → 自动创建 1 个任务 + 1 个文件关联
 
-        多文件场景 data 格式:
+        标准 multi 格式:
             {name, env_id, scene_type='multi', cron_expr, sim_mode, enabled,
              tasks: [{name, task_type, cycle_interval_sec, repeat_count,
                       execution_timeout_sec, files: [{file_id, interval_sec}]}]}
@@ -264,36 +287,30 @@ class SceneOrchestrator:
         file_id = data.pop("file_id", None)
         cycle_interval = data.pop("cycle_interval_sec", 0)
 
+        # 统一存储为 multi
+        scene_type = data.pop("scene_type", "multi")
+        data["scene_type"] = "multi"
+
         now = _now()
         data["created_at"] = data.get("created_at", now)
         data["updated_at"] = data.get("updated_at", now)
 
         scene_id = insert(SCENE_TABLE, data)
 
-        # 单文件场景：自动创建单个任务和单个文件
-        if data.get("scene_type", "single") == "single":
-            task_data = {
-                "scene_id": scene_id,
+        # 兼容旧 single 格式：自动创建单个任务和单个文件
+        if scene_type == "single" and not tasks_data:
+            tasks_data = [{
                 "name": data.get("name", ""),
                 "task_type": "sequential",
                 "cycle_interval_sec": cycle_interval,
                 "repeat_count": 1,
                 "execution_timeout_sec": 300,
                 "sort_order": 0,
-                "created_at": now,
-            }
-            task_id = insert(TASK_TABLE, task_data)
-            if file_id:
-                insert(TASK_FILE_TABLE, {
-                    "task_id": task_id,
-                    "file_id": int(file_id),
-                    "interval_sec": 0,
-                    "sort_order": 0,
-                    "created_at": now,
-                })
+                "files": [{"file_id": int(file_id), "interval_sec": 0}] if file_id else [],
+            }]
 
-        # 多文件场景：创建多个任务和文件
-        elif tasks_data:
+        # 创建任务和文件
+        if tasks_data:
             for ti, task_item in enumerate(tasks_data):
                 task_files = task_item.pop("files", [])
                 task_item["scene_id"] = scene_id
@@ -314,8 +331,8 @@ class SceneOrchestrator:
     def update_scene(self, scene_id: int, data: Dict[str, Any]) -> bool:
         """更新场景基本信息及其关联的任务/文件。
 
-        单文件场景: 通过 data['file_id'] / data['cycle_interval_sec'] 更新关联。
-        多文件场景: 通过 data['tasks'] 重建任务和文件结构。
+        兼容旧 single 场景：前端的 multi 格式编辑请求到达时，
+        自动将 scene_type 更新为 'multi' 并按多文件逻辑重建任务/文件。
         """
         tasks_data = data.pop("tasks", None)
         file_id = data.pop("file_id", None)
@@ -328,34 +345,40 @@ class SceneOrchestrator:
         if not scene:
             return result
 
-        # ── 单文件场景：更新关联的任务和文件 ──
-        if scene.get("scene_type") == "single" and (file_id is not None or cycle_interval is not None):
-            existing_tasks = self.list_tasks(scene_id)
-            if existing_tasks:
-                task = existing_tasks[0]
-                # 更新任务参数
-                task_update = {}
-                if cycle_interval is not None:
-                    task_update["cycle_interval_sec"] = int(cycle_interval)
-                if task_update:
-                    update(TASK_TABLE, task["id"], task_update)
+        # 统一为 multi 类型
+        if scene.get("scene_type") == "single":
+            update(SCENE_TABLE, scene_id, {"scene_type": "multi"})
 
-                # 更新文件关联
-                if file_id is not None:
-                    existing_files = self.list_task_files(task["id"])
-                    for ef in existing_files:
-                        delete(TASK_FILE_TABLE, ef["id"])
-                    if int(file_id) > 0:
-                        insert(TASK_FILE_TABLE, {
-                            "task_id": task["id"],
-                            "file_id": int(file_id),
-                            "interval_sec": 0,
-                            "sort_order": 0,
-                            "created_at": _now(),
-                        })
+        # ── 兼容旧 single 格式（file_id / cycle_interval）→ 转为多文件格式 ──
+        if scene.get("scene_type") == "single" and (file_id is not None or cycle_interval is not None):
+            # 删除已有任务重建
+            existing_tasks = self.list_tasks(scene_id)
+            for et in existing_tasks:
+                self.delete_task(et["id"])
+            cyc = int(cycle_interval) if cycle_interval is not None else 0
+            fid = int(file_id) if file_id is not None else 0
+            task_data = {
+                "scene_id": scene_id,
+                "name": scene.get("name", ""),
+                "task_type": "sequential",
+                "cycle_interval_sec": cyc,
+                "repeat_count": 1,
+                "execution_timeout_sec": 300,
+                "sort_order": 0,
+                "created_at": _now(),
+            }
+            task_id = insert(TASK_TABLE, task_data)
+            if fid > 0:
+                insert(TASK_FILE_TABLE, {
+                    "task_id": task_id,
+                    "file_id": fid,
+                    "interval_sec": 0,
+                    "sort_order": 0,
+                    "created_at": _now(),
+                })
 
         # ── 多文件场景：重建任务和文件结构 ──
-        if scene.get("scene_type") == "multi" and tasks_data is not None:
+        if tasks_data is not None:
             existing_tasks = self.list_tasks(scene_id)
             for et in existing_tasks:
                 self.delete_task(et["id"])
@@ -445,6 +468,20 @@ class SceneOrchestrator:
                     "started_at": info["started_at"].isoformat() if info["started_at"] else "",
                 })
         return result
+
+    def get_health(self) -> Dict[str, Any]:
+        """返回调度器健康状态（供 /api/scenes/health 使用）。"""
+        try:
+            enabled_count = len(query(SCENE_TABLE, where="enabled = 1"))
+        except Exception:
+            enabled_count = -1
+        return {
+            "scheduler_alive": self._running and self._thread is not None and self._thread.is_alive(),
+            "last_check_at": self._last_check_at.isoformat() if self._last_check_at else None,
+            "active_executions": len(self._active_executions),
+            "enabled_scenes_count": enabled_count,
+            "loop_count": self._loop_count,
+        }
 
     # ── 任务 CRUD ─────────────────────────────────────────────────
 

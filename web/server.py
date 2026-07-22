@@ -1937,7 +1937,13 @@ def api_env_activate(env_id):
             _current_config["redis_ip"] = cfg.get("redis_ip", _current_config["redis_ip"])
             _current_config["redis_port"] = cfg.get("redis_port", _current_config["redis_port"])
             _current_config["kafka_url"] = cfg.get("kafka_url", _current_config["kafka_url"])
-        _add_log(f"已切换环境配置: Redis={cfg.get('redis_ip')}:{cfg.get('redis_port')}, Kafka={cfg.get('kafka_url')}")
+            # 同步达梦配置
+            _current_config["dm_host"] = cfg.get("dm_host", "")
+            _current_config["dm_port"] = cfg.get("dm_port", 5236)
+            _current_config["dm_user"] = cfg.get("dm_user", "SYSDBA")
+            _current_config["dm_password"] = cfg.get("dm_password", "")
+            _current_config["dm_schema"] = cfg.get("dm_schema", "")
+        _add_log(f"已切换环境配置: Redis={cfg.get('redis_ip')}:{cfg.get('redis_port')}, Kafka={cfg.get('kafka_url')}, 达梦={cfg.get('dm_host')}")
     return jsonify(result)
 
 

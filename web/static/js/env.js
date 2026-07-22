@@ -35,8 +35,10 @@ async function loadEnvList() {
     // 显示当前激活信息
     var cur = data.current || {};
     info.innerHTML = '<strong>当前激活：</strong>Redis <code>' + (cur.redis_ip||'?') + ':' + (cur.redis_port||'?') +
-      '</code> &nbsp;|&nbsp; Kafka <code>' + (cur.kafka_url||'?') + '</code>' +
-      (cur.kafka_url2 ? ' (Kafka地址2: ' + cur.kafka_url2 + ')' : '');
+      '</code> | Kafka <code>' + (cur.kafka_url||'?') + '</code>' +
+      (cur.kafka_url2 ? ' (地址2: ' + cur.kafka_url2 + ')' : '') +
+      ' | 达梦 <code>' + (cur.dm_host||'?') + (cur.dm_schema ? '/' + cur.dm_schema : '') + '</code>' +
+      ' | MySQL <code>' + (cur.mysql_host||'?') + (cur.mysql_database ? '/' + cur.mysql_database : '') + '</code>';
   } catch(e) {
     tbody.innerHTML = '<tr><td colspan="5" class="empty-hint">加载失败: ' + e.message + '</td></tr>';
   }
@@ -47,11 +49,32 @@ function showModal(title, data) {
   $('#modal-title').textContent = title;
   editingId = data ? data.id : null;
   $('#ev-name').value = data ? (data.name||'') : '';
+  // Redis
   $('#ev-redis-ip').value = data ? (data.redis_ip||'127.0.0.1') : '127.0.0.1';
   $('#ev-redis-port').value = data ? (data.redis_port||'6379') : '6379';
   $('#ev-redis-pwd').value = data ? (data.redis_pwd||'') : '';
+  // Kafka
   $('#ev-kafka-url').value = data ? (data.kafka_url||'127.0.0.1:9092') : '127.0.0.1:9092';
   $('#ev-kafka-url2').value = data ? (data.kafka_url2||'') : '';
+  // 达梦
+  $('#ev-dm-host').value = data ? (data.dm_host||'') : '';
+  $('#ev-dm-port').value = data ? (data.dm_port||5236) : 5236;
+  $('#ev-dm-user').value = data ? (data.dm_user||'SYSDBA') : 'SYSDBA';
+  $('#ev-dm-pwd').value = data ? (data.dm_password||'') : '';
+  $('#ev-dm-schema').value = data ? (data.dm_schema||'') : '';
+  // MySQL
+  $('#ev-mysql-host').value = data ? (data.mysql_host||'') : '';
+  $('#ev-mysql-port').value = data ? (data.mysql_port||3306) : 3306;
+  $('#ev-mysql-user').value = data ? (data.mysql_user||'') : '';
+  $('#ev-mysql-pwd').value = data ? (data.mysql_password||'') : '';
+  $('#ev-mysql-database').value = data ? (data.mysql_database||'') : '';
+  // ATC 集群
+  $('#ev-atc-cluster-api').value = data ? (data.atc_cluster_api||'') : '';
+  $('#ev-atc-vip').value = data ? (data.atc_vip||'') : '';
+  $('#ev-atc-node-a').value = data ? (data.atc_node_a||'') : '';
+  $('#ev-atc-node-b').value = data ? (data.atc_node_b||'') : '';
+  // ES
+  $('#ev-es-hosts').value = data ? (data.es_hosts||'') : '';
   $('#env-modal').classList.add('show');
 }
 
@@ -75,6 +98,25 @@ $('#btn-modal-save').addEventListener('click', async function() {
     redis_pwd: $('#ev-redis-pwd').value,
     kafka_url: $('#ev-kafka-url').value.trim(),
     kafka_url2: $('#ev-kafka-url2').value.trim(),
+    // 达梦
+    dm_host: $('#ev-dm-host').value.trim(),
+    dm_port: parseInt($('#ev-dm-port').value) || 5236,
+    dm_user: $('#ev-dm-user').value.trim(),
+    dm_password: $('#ev-dm-pwd').value,
+    dm_schema: $('#ev-dm-schema').value.trim(),
+    // MySQL
+    mysql_host: $('#ev-mysql-host').value.trim(),
+    mysql_port: parseInt($('#ev-mysql-port').value) || 3306,
+    mysql_user: $('#ev-mysql-user').value.trim(),
+    mysql_password: $('#ev-mysql-pwd').value,
+    mysql_database: $('#ev-mysql-database').value.trim(),
+    // ATC 集群
+    atc_cluster_api: $('#ev-atc-cluster-api').value.trim(),
+    atc_vip: $('#ev-atc-vip').value.trim(),
+    atc_node_a: $('#ev-atc-node-a').value.trim(),
+    atc_node_b: $('#ev-atc-node-b').value.trim(),
+    // ES
+    es_hosts: $('#ev-es-hosts').value.trim(),
   };
   if (editingId) body.id = editingId;
   var result = await apiPost('/api/env/save', body);

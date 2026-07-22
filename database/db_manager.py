@@ -32,6 +32,21 @@ _TABLE_DDL = {
             kafka_url   TEXT DEFAULT '',
             kafka_url2  TEXT DEFAULT '',
             is_default  INTEGER DEFAULT 0,
+            dm_host     TEXT DEFAULT '',
+            dm_port     INTEGER DEFAULT 5236,
+            dm_user     TEXT DEFAULT 'SYSDBA',
+            dm_password TEXT DEFAULT '',
+            dm_schema   TEXT DEFAULT '',
+            mysql_host     TEXT DEFAULT '',
+            mysql_port     INTEGER DEFAULT 3306,
+            mysql_user     TEXT DEFAULT '',
+            mysql_password TEXT DEFAULT '',
+            mysql_database TEXT DEFAULT '',
+            atc_cluster_api TEXT DEFAULT '',
+            atc_vip      TEXT DEFAULT '',
+            atc_node_a   TEXT DEFAULT '',
+            atc_node_b   TEXT DEFAULT '',
+            es_hosts     TEXT DEFAULT '',
             created_at  TEXT DEFAULT '',
             updated_at  TEXT DEFAULT ''
         )
@@ -165,6 +180,22 @@ def init_tables() -> None:
             # 迁移：为已存在的 sim_alarm_types 表补加 updated_at 列
             _migrate_add_column(conn, "sim_alarm_types", "updated_at",
                                 "TEXT DEFAULT ''")
+            # 迁移：为已存在的 sim_env_config 表补加新配置列
+            _migrate_add_column(conn, "sim_env_config", "dm_host", "TEXT DEFAULT ''")
+            _migrate_add_column(conn, "sim_env_config", "dm_port", "INTEGER DEFAULT 5236")
+            _migrate_add_column(conn, "sim_env_config", "dm_user", "TEXT DEFAULT 'SYSDBA'")
+            _migrate_add_column(conn, "sim_env_config", "dm_password", "TEXT DEFAULT ''")
+            _migrate_add_column(conn, "sim_env_config", "dm_schema", "TEXT DEFAULT ''")
+            _migrate_add_column(conn, "sim_env_config", "mysql_host", "TEXT DEFAULT ''")
+            _migrate_add_column(conn, "sim_env_config", "mysql_port", "INTEGER DEFAULT 3306")
+            _migrate_add_column(conn, "sim_env_config", "mysql_user", "TEXT DEFAULT ''")
+            _migrate_add_column(conn, "sim_env_config", "mysql_password", "TEXT DEFAULT ''")
+            _migrate_add_column(conn, "sim_env_config", "mysql_database", "TEXT DEFAULT ''")
+            _migrate_add_column(conn, "sim_env_config", "atc_cluster_api", "TEXT DEFAULT ''")
+            _migrate_add_column(conn, "sim_env_config", "atc_vip", "TEXT DEFAULT ''")
+            _migrate_add_column(conn, "sim_env_config", "atc_node_a", "TEXT DEFAULT ''")
+            _migrate_add_column(conn, "sim_env_config", "atc_node_b", "TEXT DEFAULT ''")
+            _migrate_add_column(conn, "sim_env_config", "es_hosts", "TEXT DEFAULT ''")
             conn.commit()
         finally:
             conn.close()

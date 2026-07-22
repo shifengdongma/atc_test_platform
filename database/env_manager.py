@@ -91,13 +91,28 @@ def activate_env(env_id: int) -> Dict[str, Any]:
     # 标记为默认
     set_default(int(env_id))
 
-    # 写入 config.json
+    # 写入 config.json（包含全部配置字段）
     config_data = {
         "redis_ip": env.get("redis_ip", "127.0.0.1"),
         "redis_port": str(env.get("redis_port", "6379")),
         "redis_password": env.get("redis_pwd", ""),
         "kafka_url": env.get("kafka_url", "127.0.0.1:9092"),
         "kafka_url2": env.get("kafka_url2", ""),
+        "dm_host": env.get("dm_host", ""),
+        "dm_port": env.get("dm_port", 5236),
+        "dm_user": env.get("dm_user", "SYSDBA"),
+        "dm_password": env.get("dm_password", ""),
+        "dm_schema": env.get("dm_schema", ""),
+        "mysql_host": env.get("mysql_host", ""),
+        "mysql_port": env.get("mysql_port", 3306),
+        "mysql_user": env.get("mysql_user", ""),
+        "mysql_password": env.get("mysql_password", ""),
+        "mysql_database": env.get("mysql_database", ""),
+        "atc_cluster_api": env.get("atc_cluster_api", ""),
+        "atc_vip": env.get("atc_vip", ""),
+        "atc_node_a": env.get("atc_node_a", ""),
+        "atc_node_b": env.get("atc_node_b", ""),
+        "es_hosts": env.get("es_hosts", ""),
     }
     try:
         with open(_CONFIG_JSON, "w", encoding="utf-8") as f:
@@ -119,6 +134,12 @@ def get_current_config() -> Dict[str, Any]:
         "redis_password": "",
         "kafka_url": "127.0.0.1:9092",
         "kafka_url2": "",
+        "dm_host": "", "dm_port": 5236, "dm_user": "SYSDBA",
+        "dm_password": "", "dm_schema": "",
+        "mysql_host": "", "mysql_port": 3306, "mysql_user": "",
+        "mysql_password": "", "mysql_database": "",
+        "atc_cluster_api": "", "atc_vip": "", "atc_node_a": "", "atc_node_b": "",
+        "es_hosts": "",
     }
     try:
         if os.path.exists(_CONFIG_JSON):
@@ -136,12 +157,31 @@ def import_from_env_py() -> Dict[str, Any]:
     try:
         import env as _env
         data = {
-            "name": f"env.py-{_env.redis_ip or 'local'}",
+            "name": f"env.py-{getattr(_env, 'redis_ip', 'local')}",
             "redis_ip": getattr(_env, "redis_ip", "127.0.0.1"),
             "redis_port": str(getattr(_env, "redis_port", "6379")),
             "redis_pwd": getattr(_env, "redis_password", ""),
             "kafka_url": getattr(_env, "kafka_url", "127.0.0.1:9092"),
             "kafka_url2": getattr(_env, "kafka_url2", ""),
+            # 达梦数据库
+            "dm_host": getattr(_env, "DB_HOST", getattr(_env, "dm_a_host", "")),
+            "dm_port": getattr(_env, "DB_PORT", getattr(_env, "dm_a_port", 5236)),
+            "dm_user": getattr(_env, "DB_USER", getattr(_env, "dm_a_user", "SYSDBA")),
+            "dm_password": getattr(_env, "DB_PASSWORD", getattr(_env, "dm_a_password", "")),
+            "dm_schema": getattr(_env, "DB_SCHEMA", getattr(_env, "dm_a_schema", "")),
+            # MySQL
+            "mysql_host": getattr(_env, "MYSQL_HOST", ""),
+            "mysql_port": getattr(_env, "MYSQL_PORT", 3306),
+            "mysql_user": getattr(_env, "MYSQL_USER", ""),
+            "mysql_password": getattr(_env, "MYSQL_PASSWORD", ""),
+            "mysql_database": getattr(_env, "MYSQL_DATABASE", ""),
+            # ATC 集群
+            "atc_cluster_api": getattr(_env, "cluster_api", ""),
+            "atc_vip": getattr(_env, "atc_vip", ""),
+            "atc_node_a": getattr(_env, "atc_a", ""),
+            "atc_node_b": getattr(_env, "atc_b", ""),
+            # ES
+            "es_hosts": str(getattr(_env, "es_hosts", "")),
         }
         env_id = save_env(data)
         data["id"] = env_id
@@ -162,15 +202,84 @@ def _update_env_py(config: Dict[str, Any]) -> None:
         with open(env_path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        mappings = [
-            (r'redis_ip\s*=\s*"[^"]*"', f'redis_ip = "{config.get("redis_ip", "127.0.0.1")}"'),
-            (r'redis_port\s*=\s*"[^"]*"', f'redis_port = "{config.get("redis_port", "6379")}"'),
-            (r'redis_password\s*=\s*"[^"]*"', f'redis_password = "{config.get("redis_password", "")}"'),
-            (r'kafka_url\s*=\s*"[^"]*"', f'kafka_url = "{config.get("kafka_url", "127.0.0.1:9092")}"'),
-            (r'kafka_url2\s*=\s*"[^"]*"', f'kafka_url2 = "{config.get("kafka_url2", "")}"'),
+        # 字符串值字段 (key = "...")
+        _str_fields = [
+            ("redis_ip", "127.0.0.1"),
+            ("redis_port", "6379"),
+            ("redis_password", ""),
+            ("kafka_url", "127.0.0.1:9092"),
+            ("kafka_url2", ""),
+            ("dm_a_host", ""), ("dm_a_user", "SYSDBA"), ("dm_a_password", ""), ("dm_a_schema", ""),
+            ("dm_b_host", ""), ("dm_b_user", "SYSDBA"), ("dm_b_password", ""), ("dm_b_schema", ""),
+            ("dm_vip", ""),
+            ("DB_HOST", ""), ("DB_USER", "SYSDBA"), ("DB_PASSWORD", ""), ("DB_SCHEMA", ""),
+            ("MYSQL_HOST", ""), ("MYSQL_USER", ""), ("MYSQL_PASSWORD", ""), ("MYSQL_DATABASE", ""),
+            ("cluster_api", ""), ("atc_vip", ""), ("atc_a", ""), ("atc_b", ""),
+            ("ACCESS_KEY_a", ""), ("ACCESS_KEY_b", ""),
+            ("dops_a", ""), ("dops_b", ""),
+            ("kafka_url_a", ""), ("kafka_url_b", ""),
+            ("redis_ip_a", ""), ("redis_port_a", "6379"), ("redis_password_a", ""),
+            ("redis_ip_b", ""), ("redis_port_b", "6379"), ("redis_password_b", ""),
         ]
-        for pattern, replacement in mappings:
-            content = re.sub(pattern, replacement, content)
+        # 整数值字段 (key = 1234)
+        _int_fields = [
+            ("MYSQL_PORT", 3306),
+            ("dm_a_port", 5236), ("dm_b_port", 5236),
+            ("DB_PORT", 5236),
+            ("iomp_port_a", 8801), ("iomp_port_b", 8801),
+        ]
+        # 列表值字段 (key = [...])
+        _list_fields = [
+            ("es_hosts", '["10.165.26.119:29200", "10.165.26.139:29200"]'),
+        ]
+
+        # 从数据库字段映射到 env.py 字段名
+        _db_to_env = {
+            "redis_password": "redis_password",
+            "dm_host": "DB_HOST",
+            "dm_port": "DB_PORT",
+            "dm_user": "DB_USER",
+            "dm_password": "DB_PASSWORD",
+            "dm_schema": "DB_SCHEMA",
+            "mysql_host": "MYSQL_HOST",
+            "mysql_port": "MYSQL_PORT",
+            "mysql_user": "MYSQL_USER",
+            "mysql_password": "MYSQL_PASSWORD",
+            "mysql_database": "MYSQL_DATABASE",
+            "atc_cluster_api": "cluster_api",
+            "atc_node_a": "atc_a",
+            "atc_node_b": "atc_b",
+        }
+
+        for field, default in _str_fields:
+            env_field = _db_to_env.get(field, field)
+            val = config.get(field, default)
+            # 同时尝试 db 列名（如 redis_password → redis_pwd）
+            if field in ("redis_password",) and config.get("redis_pwd"):
+                val = config.get("redis_pwd", default)
+            content = re.sub(
+                rf'{env_field}\s*=\s*"[^"]*"',
+                f'{env_field} = "{val}"',
+                content,
+            )
+
+        for field, default in _int_fields:
+            env_field = _db_to_env.get(field, field)
+            val = config.get(field, default)
+            content = re.sub(
+                rf'{env_field}\s*=\s*\d+',
+                f'{env_field} = {val}',
+                content,
+            )
+
+        for field, default_str in _list_fields:
+            val = config.get(field, None)
+            if val:
+                content = re.sub(
+                    rf'{field}\s*=\s*\[[^\]]*\]',
+                    f'{field} = {val}',
+                    content,
+                )
 
         with open(env_path, "w", encoding="utf-8") as f:
             f.write(content)

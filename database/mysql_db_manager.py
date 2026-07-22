@@ -173,6 +173,21 @@ _MYSQL_TABLE_DDL = {
             `kafka_url`   VARCHAR(256) DEFAULT '',
             `kafka_url2`  VARCHAR(256) DEFAULT '',
             `is_default`  TINYINT DEFAULT 0,
+            `dm_host`     VARCHAR(128) DEFAULT '' COMMENT '达梦数据库地址',
+            `dm_port`     INT DEFAULT 5236 COMMENT '达梦数据库端口',
+            `dm_user`     VARCHAR(128) DEFAULT 'SYSDBA' COMMENT '达梦用户名',
+            `dm_password` VARCHAR(128) DEFAULT '' COMMENT '达梦密码',
+            `dm_schema`   VARCHAR(128) DEFAULT '' COMMENT '达梦模式名',
+            `mysql_host`     VARCHAR(128) DEFAULT '' COMMENT 'MySQL地址',
+            `mysql_port`     INT DEFAULT 3306 COMMENT 'MySQL端口',
+            `mysql_user`     VARCHAR(128) DEFAULT '' COMMENT 'MySQL用户',
+            `mysql_password` VARCHAR(128) DEFAULT '' COMMENT 'MySQL密码',
+            `mysql_database` VARCHAR(128) DEFAULT '' COMMENT 'MySQL数据库名',
+            `atc_cluster_api` VARCHAR(256) DEFAULT '' COMMENT '集群API地址',
+            `atc_vip`      VARCHAR(128) DEFAULT '' COMMENT 'ATC VIP地址',
+            `atc_node_a`   VARCHAR(128) DEFAULT '' COMMENT 'ATC A节点',
+            `atc_node_b`   VARCHAR(128) DEFAULT '' COMMENT 'ATC B节点',
+            `es_hosts`     VARCHAR(512) DEFAULT '' COMMENT 'ES地址(JSON)',
             `created_at`  DATETIME DEFAULT CURRENT_TIMESTAMP,
             `updated_at`  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='仿真环境配置表'
@@ -323,6 +338,23 @@ def _ensure_mysql_tables(client=None):
 
     # 3. 对已存在的表，检查并补全缺失列（ALTER TABLE ADD COLUMN）
     _ALTER_COLUMNS = {
+        "sim_env_config": [
+            ("dm_host",     "VARCHAR(128) DEFAULT '' COMMENT '达梦数据库地址'"),
+            ("dm_port",     "INT DEFAULT 5236 COMMENT '达梦数据库端口'"),
+            ("dm_user",     "VARCHAR(128) DEFAULT 'SYSDBA' COMMENT '达梦用户名'"),
+            ("dm_password", "VARCHAR(128) DEFAULT '' COMMENT '达梦密码'"),
+            ("dm_schema",   "VARCHAR(128) DEFAULT '' COMMENT '达梦模式名'"),
+            ("mysql_host",     "VARCHAR(128) DEFAULT '' COMMENT 'MySQL地址'"),
+            ("mysql_port",     "INT DEFAULT 3306 COMMENT 'MySQL端口'"),
+            ("mysql_user",     "VARCHAR(128) DEFAULT '' COMMENT 'MySQL用户'"),
+            ("mysql_password", "VARCHAR(128) DEFAULT '' COMMENT 'MySQL密码'"),
+            ("mysql_database", "VARCHAR(128) DEFAULT '' COMMENT 'MySQL数据库名'"),
+            ("atc_cluster_api", "VARCHAR(256) DEFAULT '' COMMENT '集群API'"),
+            ("atc_vip",      "VARCHAR(128) DEFAULT '' COMMENT 'ATC VIP'"),
+            ("atc_node_a",   "VARCHAR(128) DEFAULT '' COMMENT 'ATC A节点'"),
+            ("atc_node_b",   "VARCHAR(128) DEFAULT '' COMMENT 'ATC B节点'"),
+            ("es_hosts",     "VARCHAR(512) DEFAULT '' COMMENT 'ES地址(JSON)'"),
+        ],
         "sim_scene_tasks": [
             ("updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
         ],

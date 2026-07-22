@@ -69,6 +69,37 @@ class MysqlConfig:
 
 
 @dataclass
+class DamengConfig:
+    """达梦数据库连接配置（只读，外部 ATC 系统）。"""
+    host: str = "127.0.0.1"
+    port: int = 5236
+    user: str = "SYSDBA"
+    password: str = ""
+    schema: str = "ATC_DKWRJ"
+    vip: str = ""
+
+    @property
+    def port_int(self) -> int:
+        return int(self.port)
+
+
+@dataclass
+class AtcClusterConfig:
+    """ATC 集群 + IOMP + DOPS + ES 配置。"""
+    cluster_api: str = ""
+    vip: str = ""
+    node_a: str = ""
+    node_b: str = ""
+    iomp_a: str = ""
+    iomp_b: str = ""
+    access_key_a: str = ""
+    access_key_b: str = ""
+    dops_a: str = ""
+    dops_b: str = ""
+    es_hosts: str = ""
+
+
+@dataclass
 class AppConfig:
     """应用全局配置。"""
     env: str = "dev"
@@ -76,6 +107,8 @@ class AppConfig:
     redis: RedisConfig = field(default_factory=RedisConfig)
     kafka: KafkaConfig = field(default_factory=KafkaConfig)
     mysql: MysqlConfig = field(default_factory=MysqlConfig)
+    dameng: DamengConfig = field(default_factory=DamengConfig)
+    atc_cluster: AtcClusterConfig = field(default_factory=AtcClusterConfig)
     simulation: SimulationConfig = field(default_factory=SimulationConfig)
 
 
@@ -115,6 +148,55 @@ def _read_env_py() -> Optional[dict]:
                         "redis_password": getattr(mod, "redis_password", ""),
                         "kafka_url": getattr(mod, "kafka_url", "127.0.0.1:9092"),
                         "kafka_url2": getattr(mod, "kafka_url2", None),
+                        # MySQL
+                        "mysql_host": getattr(mod, "MYSQL_HOST", None),
+                        "mysql_port": getattr(mod, "MYSQL_PORT", 3306),
+                        "mysql_user": getattr(mod, "MYSQL_USER", "root"),
+                        "mysql_password": getattr(mod, "MYSQL_PASSWORD", ""),
+                        "mysql_database": getattr(mod, "MYSQL_DATABASE", "utm_simulator"),
+                        "mysql_charset": getattr(mod, "MYSQL_CHARSET", "utf8mb4"),
+                        # 达梦数据库
+                        "dm_vip": getattr(mod, "dm_vip", ""),
+                        "dm_host": getattr(mod, "DB_HOST", getattr(mod, "dm_a_host", "")),
+                        "dm_port": getattr(mod, "DB_PORT", getattr(mod, "dm_a_port", 5236)),
+                        "dm_user": getattr(mod, "DB_USER", getattr(mod, "dm_a_user", "SYSDBA")),
+                        "dm_password": getattr(mod, "DB_PASSWORD", getattr(mod, "dm_a_password", "")),
+                        "dm_schema": getattr(mod, "DB_SCHEMA", getattr(mod, "dm_a_schema", "")),
+                        "dm_a_host": getattr(mod, "dm_a_host", ""),
+                        "dm_a_port": getattr(mod, "dm_a_port", 5236),
+                        "dm_a_user": getattr(mod, "dm_a_user", "SYSDBA"),
+                        "dm_a_password": getattr(mod, "dm_a_password", ""),
+                        "dm_a_schema": getattr(mod, "dm_a_schema", ""),
+                        "dm_b_host": getattr(mod, "dm_b_host", ""),
+                        "dm_b_port": getattr(mod, "dm_b_port", 5236),
+                        "dm_b_user": getattr(mod, "dm_b_user", "SYSDBA"),
+                        "dm_b_password": getattr(mod, "dm_b_password", ""),
+                        "dm_b_schema": getattr(mod, "dm_b_schema", ""),
+                        # ATC 集群
+                        "cluster_api": getattr(mod, "cluster_api", ""),
+                        "atc_vip": getattr(mod, "atc_vip", ""),
+                        "atc_a": getattr(mod, "atc_a", ""),
+                        "atc_b": getattr(mod, "atc_b", ""),
+                        # IOMP
+                        "iomp_a": getattr(mod, "iomp_a", ""),
+                        "iomp_b": getattr(mod, "iomp_b", ""),
+                        "ACCESS_KEY_a": getattr(mod, "ACCESS_KEY_a", ""),
+                        "ACCESS_KEY_b": getattr(mod, "ACCESS_KEY_b", ""),
+                        # DOPS
+                        "dops_a": getattr(mod, "dops_a", ""),
+                        "dops_b": getattr(mod, "dops_b", ""),
+                        # ES
+                        "es_hosts": str(getattr(mod, "es_hosts", "")),
+                        # Kafka A/B
+                        "kafka_url_a": getattr(mod, "kafka_url_a", ""),
+                        "kafka_url_b": getattr(mod, "kafka_url_b", ""),
+                        # Redis A/B
+                        "redis_ip_a": getattr(mod, "redis_ip_a", ""),
+                        "redis_port_a": getattr(mod, "redis_port_a", "6379"),
+                        "redis_password_a": getattr(mod, "redis_password_a", ""),
+                        "redis_ip_b": getattr(mod, "redis_ip_b", ""),
+                        "redis_port_b": getattr(mod, "redis_port_b", "6379"),
+                        "redis_password_b": getattr(mod, "redis_password_b", ""),
                     }
     except Exception:
         pass
@@ -320,13 +402,40 @@ def load_config(env_name: Optional[str] = None) -> AppConfig:
     # 5. 构建 MysqlConfig（从根目录 env.py 读取）
     mysql = _load_mysql_config()
 
-    # 6. 组装 AppConfig
+    # 6. 构建 DamengConfig
+    dameng = DamengConfig(
+        host=env_py.get("dm_host", "127.0.0.1"),
+        port=int(env_py.get("dm_port", 5236)),
+        user=env_py.get("dm_user", "SYSDBA"),
+        password=env_py.get("dm_password", ""),
+        schema=env_py.get("dm_schema", "ATC_DKWRJ"),
+        vip=env_py.get("dm_vip", ""),
+    )
+
+    # 7. 构建 AtcClusterConfig
+    atc_cluster = AtcClusterConfig(
+        cluster_api=env_py.get("cluster_api", ""),
+        vip=env_py.get("atc_vip", ""),
+        node_a=env_py.get("atc_a", ""),
+        node_b=env_py.get("atc_b", ""),
+        iomp_a=env_py.get("iomp_a", ""),
+        iomp_b=env_py.get("iomp_b", ""),
+        access_key_a=env_py.get("ACCESS_KEY_a", ""),
+        access_key_b=env_py.get("ACCESS_KEY_b", ""),
+        dops_a=env_py.get("dops_a", ""),
+        dops_b=env_py.get("dops_b", ""),
+        es_hosts=env_py.get("es_hosts", ""),
+    )
+
+    # 8. 组装 AppConfig
     return AppConfig(
         env=_env_str("ENV", "dev"),
         log_level=_env_str("LOG_LEVEL", "INFO"),
         redis=redis,
         kafka=kafka,
         mysql=mysql,
+        dameng=dameng,
+        atc_cluster=atc_cluster,
         simulation=simulation,
     )
 

@@ -100,8 +100,7 @@ def _read_env_py() -> Optional[dict]:
         # 优先从调用方目录查找 env，也尝试当前目录
         import importlib.util
         env_paths = [
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.py"),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "utm_simulator", "env.py"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "env.py"),
             os.path.join(os.getcwd(), "env.py"),
         ]
         for env_path in env_paths:
@@ -152,8 +151,7 @@ def _load_mysql_config() -> MysqlConfig:
 
     优先级：
     1. 环境变量 UTM_MYSQL_*
-    2. utm_simulator/env.py（本项目专用 MySQL）
-    3. atc_api_autotest/env.py（回退）
+    2. 根目录 env.py（本项目专用 MySQL）
     4. 默认值（configured=False，调用方应跳过 MySQL 连接）
 
     返回值中 configured 字段指示 MySQL 是否被显式配置：
@@ -169,13 +167,12 @@ def _load_mysql_config() -> MysqlConfig:
     configured = False  # 是否显式配置
     source = "默认值（MySQL 未配置，将跳过连接）"  # 配置来源追踪
 
-    # 尝试从 utm_simulator/env.py 导入
+    # 尝试从根目录 env.py 导入
     try:
         import importlib.util
         _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         env_paths = [
-            os.path.join(_root, "utm_simulator", "env.py"),
-            os.path.join(_root, "atc_api_autotest", "env.py"),
+            os.path.join(_root, "env.py"),
         ]
         for env_path in env_paths:
             if not os.path.exists(env_path):
@@ -320,7 +317,7 @@ def load_config(env_name: Optional[str] = None) -> AppConfig:
         ids_index=_env_int("SIM_IDS_INDEX", 1),
     )
 
-    # 5. 构建 MysqlConfig（从 utm_simulator/env.py 或 atc_api_autotest/env.py 读取）
+    # 5. 构建 MysqlConfig（从根目录 env.py 读取）
     mysql = _load_mysql_config()
 
     # 6. 组装 AppConfig
@@ -367,5 +364,5 @@ TEMPLATES_DIR = str(_PROJECT_ROOT / "data" / "templates")
 SCHEMAS_DIR = str(_PROJECT_ROOT / "data" / "schemas")
 UPLOADS_DIR = str(_PROJECT_ROOT / "data" / "uploads")
 DATABASE_DIR = str(_PROJECT_ROOT / "database")
-UTM_SIMULATOR_DIR = str(_PROJECT_ROOT / "utm_simulator")
+
 DOCS_DIR = str(_PROJECT_ROOT / "docs")

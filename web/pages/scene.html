@@ -76,7 +76,6 @@
   <header class="topbar">
     <div class="topbar-left">
       <h1>🛩️ UTM 模拟器控制台</h1>
-      <span class="version">utm_moc52 v3.1</span>
     </div>
     <nav class="topbar-nav" id="top-nav"></nav>
     <div class="topbar-right">
@@ -103,7 +102,7 @@
             <h2 id="single-form-title">➕ 新建单文件场景</h2>
             <div class="form-row"><label>场景名称 *</label><input type="text" id="s-name" placeholder="例如：每日航线注入"><span class="form-hint">给场景起个名字，便于识别</span></div>
             <div class="form-row"><label>仿真环境</label><select id="s-env"><option value="0">— 默认环境 —</option></select><span class="form-hint">选择此场景使用的 Redis/Kafka 连接环境</span></div>
-            <div class="form-row"><label>仿真模式</label><select id="s-mode"><option value="scene">🎬 场景文件注入</option><option value="replay">🔁 预生成回放(循环)</option><option value="replay_once">▶️ 预生成回放(单次)</option></select><span class="form-hint">场景文件注入：将JSON推送到Kafka；回放：从mock目录循环/单次读取</span></div>
+            <div class="form-row"><label>仿真模式</label><select id="s-mode"><option value="scene">🎬 场景文件注入</option></select><span class="form-hint">将JSON文件按配置推送到Kafka</span></div>
             <div class="form-row">
               <label>数据文件</label><select id="s-file"><option value="">— 选择文件 —</option></select>
               <button id="btn-s-refresh" class="btn btn-small" style="flex-shrink:0;">🔄</button>

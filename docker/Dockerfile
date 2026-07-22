@@ -66,8 +66,7 @@ RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ --trus
 # ── 复制项目文件 ─────────────────────────────────────
 # 仅复制运行时需要的模块（利用 .dockerignore 排除不必要文件）
 COPY utm_simulator/ /app/utm_simulator/
-COPY atc_api_autotest/ /app/atc_api_autotest/
-COPY atc_ha_test/ /app/atc_ha_test/
+COPY tools/ /app/tools/
 COPY web/ /app/web/
 COPY data/ /app/data/
 COPY database/ /app/database/

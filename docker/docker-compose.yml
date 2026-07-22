@@ -47,8 +47,8 @@ services:
     volumes:
       # 配置文件（env.py 等敏感文件不在仓库中，从宿主机挂载）
       - /opt/atc_test_platfrom/utm_simulator/env.py:/app/utm_simulator/env.py:ro
-      # 达梦数据库配置（dmdbclient.py 需要 atc_api_autotest/env.py，含 DB_HOST 等）
-      - /opt/atc_test_platfrom/atc_api_autotest/env.py:/app/atc_api_autotest/env.py:ro
+      # 达梦数据库配置（dmdbclient.py 需要根目录 env.py，含 DB_HOST 等）
+      - /opt/atc_test_platfrom/env.py:/app/env.py:ro
       #- ${ENV_PY_PATH:-./env.py}:/app/utm_simulator/env.py:ro
       # SQLite 数据持久化
       - /opt/utm-simulator/data:/app/utm_simulator/data

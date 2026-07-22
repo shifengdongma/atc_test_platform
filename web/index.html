@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>UTM 模拟器控制台 — utm_moc52</title>
+  <title>UTM 模拟器控制台</title>
   <!-- Leaflet CSS (本地) -->
   <link rel="stylesheet" href="/static/lib/leaflet/leaflet.css" />
   <!-- Chart.js -->
@@ -20,7 +20,6 @@
   <header class="topbar">
     <div class="topbar-left">
       <h1>🛩️ UTM 模拟器控制台</h1>
-      <span class="version">utm_moc52 v3.1</span>
     </div>
     <div class="topbar-right">
       <span id="connection-dot" class="dot red" title="WebSocket 连接状态"></span>
@@ -40,9 +39,6 @@
       <div class="form-group">
         <label for="mode-select">运行模式</label>
         <select id="mode-select">
-          <option value="dynamic">🎮 动态仿真 — 实时生成计划+仿真计算遥测</option>
-          <option value="replay">🔁 预生成回放(循环) — mock目录JSON循环发射，永不停止</option>
-          <option value="replay_once">▶️ 预生成回放(单次) — 数据耗尽自动停止，输出精度报告</option>
           <option value="scene">🎬 场景文件注入 — 选择JSON按间隔发射，可控时间戳</option>
           <option value="plan">📐 Redis计划插值 — 从计划路线数学插值生成遥测</option>
         </select>
@@ -72,19 +68,6 @@
           <label for="scene-loop">
             <input type="checkbox" id="scene-loop"> 循环发射（数据耗尽后重新开始）
           </label>
-        </div>
-      </div>
-
-      <!-- replay/replay_once 模式参数（默认隐藏） -->
-      <div id="replay-params" style="display:none;">
-        <div class="form-group">
-          <label for="replay-data-file">遥测数据文件 (mock/)</label>
-          <select id="replay-data-file" style="width:100%;background:#0d1b2a;color:#82aaff;border:1px solid #2a3a5c;font-size:12px;"></select>
-        </div>
-        <div class="form-group">
-          <label for="replay-route-file">航线数据文件 (mock/)</label>
-          <select id="replay-route-file" style="width:100%;background:#0d1b2a;color:#82aaff;border:1px solid #2a3a5c;font-size:12px;"></select>
-          <button id="btn-refresh-replay-files" class="btn btn-small" style="margin-top:4px;">🔄 刷新文件列表</button>
         </div>
       </div>
 
@@ -123,7 +106,7 @@
         </label>
         <label for="nfz-count" class="sub-label">数量</label>
         <input type="number" id="nfz-count" value="3" min="0" max="10" disabled>
-        <div class="mode-description" style="margin-top:2px;">仅在 🎮 动态仿真 模式下生效：随机生成禁飞区多边形写入 Redis <code>BIZ_DATA:AIRSPACE</code>，Dashboard 可展示空域管控区域。replay/plan/scene 模式不生成禁飞区。</div>
+        <div class="mode-description" style="margin-top:2px;">生成禁飞区多边形写入 Redis <code>BIZ_DATA:AIRSPACE</code>，Dashboard 可展示空域管控区域。</div>
       </div>
 
       <!-- Redis/Kafka 连接信息（可编辑） -->
@@ -364,15 +347,6 @@
         <span id="upload-result" style="font-size:12px;"></span>
       </div>
 
-      <!-- 用此数据启动 -->
-      <div class="action-buttons">
-        <label for="launch-replay-mode" style="display:block;margin-bottom:4px;">启动回放模式</label>
-        <select id="launch-replay-mode" style="width:100%;background:#0d1b2a;border:1px solid #2a3a5c;color:#82aaff;padding:4px 8px;border-radius:3px;margin-bottom:6px;">
-          <option value="replay">🔁 循环回放（永不停止）</option>
-          <option value="replay_once">▶️ 单次回放（数据耗尽自动停止）</option>
-        </select>
-        <button id="btn-launch-data" class="btn btn-start" style="width:100%;">🚀 用选中数据启动回放</button>
-      </div>
     </aside>
 
     <!-- 面板 B：实时监控 -->

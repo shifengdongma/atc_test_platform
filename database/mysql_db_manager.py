@@ -17,13 +17,13 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
-# 确保 mysqldbclient 可导入
-_atc_tools = os.path.join(
+# 确保 tools/ 可导入（mysqldbclient 在 tools/ 目录下）
+_tools_dir = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    "..", "atc_api_autotest", "api_tools",
+    "..", "tools",
 )
-if _atc_tools not in sys.path:
-    sys.path.insert(0, _atc_tools)
+if _tools_dir not in sys.path:
+    sys.path.insert(0, _tools_dir)
 
 # ── 导入 MySQL 客户端 ──────────────────────────────────────────────
 from mysqldbclient import MysqlDbClient

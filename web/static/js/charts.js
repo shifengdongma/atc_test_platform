@@ -1,5 +1,5 @@
 /* -*- coding: utf-8 -*- */
-/* utm_moc52 Web 可视化控制台 — 趋势图表模块 */
+/* 趋势图表模块 */
 
 'use strict';
 

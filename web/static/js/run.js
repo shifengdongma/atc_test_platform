@@ -36,16 +36,10 @@ var _allModeOptions = [];
 
 // ── 模式描述 ────────────────────────────────────────────────────────
 var modeDescriptions = {
-  dynamic: '🎮 动态仿真：实时生成飞行计划，Simulator引擎计算遥测，持续运行。适合开发调试和实时测试。',
-  replay: '🔁 预生成回放(循环)：读取mock目录JSON循环发射，每轮刷新Redis航线，永不停止。适合长期稳定注入。',
-  replay_once: '▶️ 预生成回放(单次)：JSON回放一次，耗尽自动停止并输出精度报告。适合单次回归测试。',
   scene: '🎬 场景文件注入：选择JSON按间隔发射，支持3种时间戳模式。适合特定场景精确回放。',
   plan: '📐 Redis计划插值：从Redis读飞行计划，沿航段插值生成遥测。实时监听Redis变更。'
 };
 var modeScriptTags = {
-  dynamic: 'simulation_core.py (Simulator 引擎 → sim_manager.py)',
-  replay: 'tools/run_kafka_alive.py (循环回放 → sim_manager.py)',
-  replay_once: 'tools/run_kafka.py (DataSource 单次回放)',
   scene: 'tools/run_kafka_scene.py (SceneEmitter 场景注入)',
   plan: 'tools/run_plan.py (PlanRunner Redis插值)'
 };
@@ -91,7 +85,7 @@ function setRunningState(running) {
   if (elDrones) elDrones.disabled = running;
   if (elNfzOn) elNfzOn.disabled = running;
   if (elNfzCnt) elNfzCnt.disabled = running || !elNfzOn.checked;
-  ['scene-params','replay-params','plan-params'].forEach(function(id) {
+  ['scene-params','plan-params'].forEach(function(id) {
     var p = document.getElementById(id);
     if (p) p.querySelectorAll('input,select,button').forEach(function(e) { e.disabled = running; });
   });
@@ -117,12 +111,10 @@ function bindModeToFile() {
   // 获取当前活跃面板中选中的文件
   var selectedFile = null;
   var sceneSel = document.getElementById('scene-file-select');
-  var replayDataSel = document.getElementById('replay-data-file');
   var planSel = document.getElementById('plan-route-file');
   var activeMode = elMode.value;
 
   if (activeMode === 'scene' && sceneSel) selectedFile = sceneSel.value;
-  else if ((activeMode === 'replay' || activeMode === 'replay_once') && replayDataSel) selectedFile = replayDataSel.value;
   else if (activeMode === 'plan' && planSel) selectedFile = planSel.value;
 
   if (!selectedFile) {
@@ -174,7 +166,7 @@ function updateMode() {
   if (elDesc) elDesc.textContent = modeDescriptions[elMode.value] || '';
   var scriptTag = document.getElementById('mode-script-tag');
   if (scriptTag) scriptTag.textContent = modeScriptTags[elMode.value] || '';
-  ['scene-params','replay-params','plan-params'].forEach(function(id) {
+  ['scene-params','plan-params'].forEach(function(id) {
     var p = document.getElementById(id);
     if (p) p.style.display = 'none';
   });
@@ -182,10 +174,6 @@ function updateMode() {
     var sp = document.getElementById('scene-params');
     if (sp) sp.style.display = '';
     refreshSceneFileList();
-  } else if (elMode.value === 'replay' || elMode.value === 'replay_once') {
-    var rp = document.getElementById('replay-params');
-    if (rp) rp.style.display = '';
-    refreshReplayFileList();
   } else if (elMode.value === 'plan') {
     var pp = document.getElementById('plan-params');
     if (pp) pp.style.display = '';
@@ -226,30 +214,6 @@ async function refreshSceneFileList() {
   bindModeToFile();  // 初始绑定
 }
 
-async function refreshReplayFileList() {
-  var files = await _loadFileListWithFormats('replay-data-file');
-  var dataSel = document.getElementById('replay-data-file');
-  var routeSel = document.getElementById('replay-route-file');
-  if (dataSel) {
-    dataSel.innerHTML = files.map(function(f) {
-      return '<option value="' + f.name + '"' + (f.name.indexOf('kafka_data') >= 0 ? ' selected' : '') + '>' + f.name + '</option>';
-    }).join('');
-    if (_presetFileName) {
-      for (var i = 0; i < dataSel.options.length; i++) {
-        if (dataSel.options[i].value === _presetFileName) { dataSel.options[i].selected = true; break; }
-      }
-    }
-    dataSel.onchange = bindModeToFile;
-  }
-  if (routeSel) {
-    routeSel.innerHTML = files.map(function(f) {
-      return '<option value="' + f.name + '"' + (f.name.indexOf('redis_route') >= 0 ? ' selected' : '') + '>' + f.name + '</option>';
-    }).join('');
-    routeSel.onchange = bindModeToFile;
-  }
-  bindModeToFile();
-}
-
 async function loadPlanRouteList() {
   var list = document.getElementById('plan-route-list');
   if (!list) return;
@@ -285,7 +249,7 @@ async function refreshPlanFileList() {
 async function fetchConfig() {
   try {
     var data = await apiGet('/api/sim/config');
-    if (elMode) elMode.value = data.mode || 'dynamic';
+    if (elMode) elMode.value = data.mode || 'scene';
     if (elDrones) { elDrones.value = data.target_drones || 1; }
     if (elDronesVal) elDronesVal.textContent = data.target_drones || 1;
     if (elNfzOn) elNfzOn.checked = data.nfz_enabled !== false;
@@ -345,10 +309,6 @@ if (elBtnStart) elBtnStart.addEventListener('click', async function() {
     body.scene_interval = parseInt((document.getElementById('scene-interval')||{}).value || 1000);
     body.timestamp_mode = (document.getElementById('scene-timestamp-mode')||{}).value || 'replace';
     body.scene_loop = (document.getElementById('scene-loop')||{}).checked || false;
-  }
-  if (mode === 'replay' || mode === 'replay_once') {
-    body.data_file = (document.getElementById('replay-data-file')||{}).value || 'kafka_data.json';
-    body.route_file = (document.getElementById('replay-route-file')||{}).value || 'redis_route.json';
   }
   if (mode === 'plan') {
     var hasCheckboxes = document.querySelectorAll('.plan-route-cb').length > 0;
@@ -413,10 +373,6 @@ if (btnPlanFileRefresh) btnPlanFileRefresh.addEventListener('click', refreshPlan
 // Scene 刷新按钮
 var btnRefScene = document.getElementById('btn-refresh-scene-files');
 if (btnRefScene) btnRefScene.addEventListener('click', refreshSceneFileList);
-
-// Replay 刷新按钮
-var btnRefReplay = document.getElementById('btn-refresh-replay-files');
-if (btnRefReplay) btnRefReplay.addEventListener('click', refreshReplayFileList);
 
 // ── 监控更新 ────────────────────────────────────────────────────────
 function updateMonitor(data) {
@@ -746,7 +702,7 @@ async function initRun() {
   // 提示预设文件
   if (_presetFileName) {
     setTimeout(function() {
-      showToast('已预选文件: ' + _presetFileName + ' (模式: ' + (_presetMode || 'replay') + ')', 'info');
+      showToast('已预选文件: ' + _presetFileName + ' (模式: ' + (_presetMode || 'scene') + ')', 'info');
     }, 1000);
   }
 }

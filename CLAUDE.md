@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-低空空管（ATC/UTM）自动化测试平台，服务于"海豚"（Dolphin）ATC 态势感知 Dashboard（`dkkgsit-test.testdolphin.com`）。通过无人机模拟器向 Redis/Kafka 注入仿真数据，驱动 Dashboard 展示，并对其进行 API 自动化测试、高可用测试和性能测试。
+低空空管（ATC/UTM）仿真数据注入平台，服务于"海豚"（Dolphin）ATC 态势感知 Dashboard（`dkkgsit-test.testdolphin.com`）。通过向 Redis/Kafka 注入仿真数据，驱动 Dashboard 展示。
 
 ## Python 环境（强制）
 
@@ -16,23 +16,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | 目录 | 说明 |
 |------|------|
-| `utm_simulator/` | 无人机模拟器核心（aka utm_moc52），仿真数千架无人机飞行，向 Redis 写飞行计划、向 Kafka 发实时遥测 |
-| `atc_api_autotest/` | IOMP API 自动化测试：JWT 鉴权、服务管理、Redis/Kafka 一致性校验、达梦数据库操作 |
-| `atc_ha_test/` | 高可用测试：双集群服务重启、Kafka 积压监控、大规模模拟器发射（3000/5000 架） |
+| `core/` | 仿真核心层：仿真编排（scene + plan 模式）、Redis/Kafka 客户端、UAV 标识符 |
+| `common/` | 基础设施层：统一配置管理（环境变量 + JSON）、结构化日志、数据模型、Pydantic 验证、异常层次 |
+| `database/` | 持久化层：MySQL/SQLite CRUD、JSON 文件管理、多环境配置管理、Cron 场景编排调度、实时日志流 |
+| `services/` | 服务层：AI 数据生成集成、态势监控 (WebSocket STOMP)、TCP 网关日志轮询、Web 数据生成桥接、ATC API 桥接 |
+| `tools/` | 工具层：达梦/MySQL 数据库客户端、IOMP API/JWT 工具、Kafka 注入脚本、Redis 计划插值、数据生成脚本 |
+| `web/` | 表示层：Flask WebSocket 后端 + 前端页面 (HTML/JS/CSS) |
+| `data/` | 数据文件：JSON Schema、场景模板、Mock 数据 |
+| `docker/` | Docker 部署配置 |
 | `docs/` | 中文架构文档、核心原理、环境配置说明 |
+| `tests/` | 单元测试 |
 | `skills_hub/` | 团队协作工具（子模块） |
 
 ## 核心数据流
 
 ```
-utm_simulator → Redis BIZ_DATA:UAV_ROUTE (飞行计划)    → ATC Dashboard 读取展示航线
-utm_simulator → Kafka uav_runtime_data (实时遥测)      → ATC Dashboard 消费展示无人机位置/状态
-utm_simulator ← Kafka uav_runtime_trace (轨迹预测)     → 消费下游 UTM 系统的预测结果
-ATC_backend  → Redis (预测结果/空域)                   → Dashboard 前端查询
-ATC_backend  → Kafka uav_collision_alarm (冲突告警)    → Dashboard 展示告警
+仿真注入（scene/plan 模式）
+  ├── scene: JSON 场景文件 → tools/run_kafka_scene.py → Kafka uav_runtime_data
+  └── plan:  Redis BIZ_DATA:UAV_ROUTE → tools/run_plan.py → 插值 → Kafka uav_runtime_data
+
+ATC Dashboard 消费:
+  Redis BIZ_DATA:UAV_ROUTE (飞行计划)  → Dashboard 展示航线
+  Kafka uav_runtime_data (实时遥测)    → Dashboard 展示无人机位置/状态
+  Kafka uav_runtime_trace (轨迹预测)   ← 下游 UTM 系统产出的预测结果
+  Kafka uav_collision_alarm (冲突告警) → Dashboard 展示告警
 ```
 
-核心技术原理：模拟器扮演"虚拟无人机群"，通过共享的 Redis/Kafka 基础设施向 ATC 系统注入仿真数据，Dashboard 对数据来源（真实 vs 仿真）完全无感知。
+核心技术原理：通过共享的 Redis/Kafka 基础设施向 ATC 系统注入仿真数据，Dashboard 对数据来源（真实 vs 仿真）完全无感知。
 
 ## 常用命令
 
@@ -40,69 +50,62 @@ ATC_backend  → Kafka uav_collision_alarm (冲突告警)    → Dashboard 展�
 # 激活环境
 conda activate utm
 
-# 启动模拟器（动态仿真模式）
-cd utm_simulator && python main.py
+# 启动 Web 可视化控制台
+python cli.py server
+# 或 PowerShell: .\start_web.ps1
 
-# 安装模拟器依赖
-cd utm_simulator && pip install -r requirements.txt
+# 安装依赖
+pip install -r requirements.txt
 
-# 运行 API 测试用例
-cd atc_api_autotest && python run_testcase.py
+# 场景文件注入（scene 模式）
+python tools/run_kafka_scene.py --file data/mock/scene.json
 
-# 高可用 — 双集群服务重启
-cd atc_ha_test && python ha_iomp_server_reboot.py --service la-atc-biz-backend
+# Redis 计划插值（plan 模式）
+python tools/run_plan.py
 
-# 高可用 — Kafka 积压监控
-cd atc_ha_test && python ha_kafka_lag_check.py
+# 数据生成
+python tools/create_data_scene.py --help
+python tools/create_data_scenes.py --help
 
-# 获取 IOMP JWT Token（独立测试）
-cd atc_api_autotest/api_tools && python iomp_api_common.py
+# 运行单元测试
+python -m pytest tests/ -v
 ```
+
+## 数据库架构（重要：两种数据库职责完全不同）
+
+| 数据库 | 类型 | 职责 | 访问方式 | 配置入口 |
+|--------|------|------|----------|----------|
+| **达梦 (Dameng)** | 只读 | 外部 ATC 系统数据库，查询飞行航线 (`air_route`) 和飞行计划等业务数据 | `dmPython` 驱动，通过 `tools/dmdbclient.py` → `DmDbClient` 连接 | 根目录 `env.py` 的 `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_SCHEMA` |
+| **MySQL** | 读写 | 测试平台主数据库：仿真配置、JSON文件元数据、定时任务、任务日志、告警类型 | `pymysql` → `tools/mysqldbclient.py` → `MysqlDbClient` | `common/config.py` 的 `load_mysql_config()`，环境变量 `UTM_MYSQL_*` |
+
+**关键规则**：
+- 达梦和 MySQL **完全独立**，不可混用。达梦是只读的外部数据源，MySQL/SQLite 是测试平台的本地存储。
+- 达梦连接失败 ≠ MySQL 连接失败，排查时先确认是哪个数据库报错。
+- `database/mysql_db_manager.py` 只管理 MySQL/SQLite，不涉及达梦。
+- `database/json_data_manager.py` 中的 `_get_dm_client()` 只管理达梦，不涉及 MySQL。
+- 修改任一数据库配置时，确认不会影响另一个。
+
+## Redis/Kafka 连接约定
+
+- **配置入口**: 根目录 `env.py` 和 `common/config.py`
+- **Redis Key**: `BIZ_DATA:UAV_ROUTE`（飞行计划 Hash）、`BIZ_DATA:AIRSPACE`（空域 Hash）
+- **Kafka Topic**: `uav_runtime_data`（遥测）、`uav_runtime_trace`（轨迹预测）
+- 连接配置含敏感信息，勿提交版本库
 
 ## 代码规范
 
 - 所有 Python 文件 UTF-8 编码，文件头 `# -*- coding: utf-8 -*-`
 - 注释、文档字符串、打印信息使用中文；与外部系统一致的字段名/枚举值使用英文
 - 推荐使用 `typing` 类型注解（`List[Dict[str, Any]]`、`Optional[str]` 等）
-- 在子目录运行的脚本需将项目根目录加入 `sys.path`，方便无包前缀导入
 - JSON 读写：`encoding='utf-8'`，写入 `ensure_ascii=False`
-- **修改原则**：聚焦修复实际 bug，不添加防御性预判代码。异常路径的兜底逻辑优先用已有的 fallback 机制（如 MySQL→SQLite 降级），不在每个函数中重复添加相同的 if 判断。保持代码精简，不为"可能发生但从未出现"的场景预先加代码
+- **修改原则**：聚焦修复实际 bug，不添加防御性预判代码。异常路径的兜底逻辑优先用已有的 fallback 机制（如 MySQL→SQLite 降级），不在每个函数中重复添加相同的 if 判断。
 
-## 数据库架构（重要：两种数据库职责完全不同）
+## 仿真模式
 
-| 数据库 | 类型 | 职责 | 访问方式 | 配置入口 |
-|--------|------|------|----------|----------|
-| **达梦 (Dameng)** | 只读 | 外部 ATC 系统数据库，查询飞行航线 (`air_route`) 和飞行计划等业务数据 | `dmPython` 驱动，通过 `dmdbclient.py` → `DmDbClient` 连接 | `atc_api_autotest/env.py` 的 `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_SCHEMA` |
-| **MySQL** | 读写 | 测试平台主数据库：仿真配置、JSON文件元数据、定时任务、任务日志、告警类型 | `pymysql` → `mysqldbclient.py` → `MysqlDbClient` | `common/config.py` 的 `load_mysql_config()`，环境变量 `UTM_MYSQL_*` |
-
-**关键规则**：
-- 达梦和 MySQL **完全独立**，不可混用。达梦是只读的外部数据源，MySQL/SQLite 是测试平台的本地存储。
-- 达梦连接失败 ≠ MySQL 连接失败，排查时先确认是哪个数据库报错。
-- `mysql_db_manager.py` 只管理 MySQL/SQLite，不涉及达梦。
-- `json_data_manager.py` 中的 `_get_dm_client()` 只管理达梦，不涉及 MySQL。
-- 修改任一数据库配置时，确认不会影响另一个。
-
-## Redis/Kafka 连接约定
-
-- **配置入口**: `atc_api_autotest/env.py` 和 `atc_ha_test/ha_env.py`
-- **Redis Key**: `BIZ_DATA:UAV_ROUTE`（飞行计划 Hash）、`BIZ_DATA:AIRSPACE`（空域 Hash）
-- **Kafka Topic**: `uav_runtime_data`（遥测）、`uav_runtime_trace`（轨迹预测）
-- 连接配置含敏感信息，勿提交版本库
-
-## 关键依赖
-
-- `kafka-python` — Kafka 生产者/消费者
-- `redis` — Redis 客户端
-- `requests` — HTTP 接口调用
-- `dmPython` — 达梦数据库连接（需单独安装）
-- `utm_simulator/pylib/` — C++ UTM 核心库的 Python 封装（数据结构 + 引擎）
-
-## 重要说明
-
-- `utm_simulator/` 有独立的 `CLAUDE.md`，包含模拟器子项目的详细规则和数据格式约定
-- 算法对接文档位于 `utm_simulator/_source/算法对接 2026030301.md`，字段/枚举以此为准
-- 项目工作流要求**先出方案、用户确认后再改代码**（参见 `.agent/rules.md`）
-- HA 测试涉及 A/B 双集群，配置在 `ha_env.py`（不提交仓库）
+| 模式 | 入口 | 数据流 |
+|------|------|--------|
+| scene (场景文件注入) | `tools/run_kafka_scene.py` | JSON 文件 → Kafka `uav_runtime_data` |
+| plan (Redis 计划插值) | `tools/run_plan.py` | Redis `BIZ_DATA:UAV_ROUTE` → 插值 → Kafka |
 
 ## 工作日志维护规则
 

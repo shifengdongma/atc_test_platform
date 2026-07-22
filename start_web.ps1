@@ -175,9 +175,9 @@ Write-Host "  Env:  $EnvName" -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host ""
 
-Push-Location "$ScriptDir\utm_simulator"
+Push-Location $ScriptDir
 try {
-    & $PythonExe web_server.py
+    & $PythonExe web/server.py
 } finally {
     Pop-Location
 }

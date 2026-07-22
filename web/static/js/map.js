@@ -1,5 +1,5 @@
 /* -*- coding: utf-8 -*- */
-/* utm_moc52 Web 可视化控制台 — 地图可视化模块 (Leaflet) */
+/* 地图可视化模块 (Leaflet) */
 
 'use strict';
 

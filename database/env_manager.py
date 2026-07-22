@@ -154,7 +154,7 @@ def import_from_env_py() -> Dict[str, Any]:
 
 def _update_env_py(config: Dict[str, Any]) -> None:
     """尝试更新 env.py 文件中的连接地址（简单正则替换，仅更新主流配置行）。"""
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "utm_simulator", "env.py")
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "env.py")
     if not os.path.exists(env_path):
         return
     import re

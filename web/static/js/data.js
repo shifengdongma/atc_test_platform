@@ -55,7 +55,7 @@ window.loadFiles = async function(page) {
 function renderFileRow(f) {
   var modes = f.compatible_modes || [];
   var modeBadges = modes.length ? modes.map(function(m) {
-    var labels = {scene:'🎬场景',replay:'🔁回放',replay_once:'▶️单次',plan:'📐计划'};
+    var labels = {scene:'🎬场景',plan:'📐计划'};
     return '<span class="mode-badge mode-' + m + '">' + (labels[m]||m) + '</span>';
   }).join(' ') : '<span class="mode-badge mode-unknown">通用</span>';
 
@@ -251,7 +251,7 @@ window.executeFile = async function(id) {
       showToast('导出失败: ' + (exportResult.message || ''), 'error');
       return;
     }
-    var presetMode = (fileName.indexOf('route') >= 0) ? 'plan' : 'replay';
+    var presetMode = (fileName.indexOf('route') >= 0) ? 'plan' : 'scene';
     var encodedName = encodeURIComponent(fileName);
     window.location.href = '/run?preset_file=' + encodedName + '&preset_mode=' + presetMode;
   } catch(e) {

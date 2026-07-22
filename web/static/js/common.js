@@ -1,5 +1,5 @@
 /* -*- coding: utf-8 -*- */
-/* utm_moc52 — 公共模块：导航栏、WebSocket、API封装、工具函数 */
+/* 公共模块：导航栏、WebSocket、API封装、工具函数 */
 
 (function() {
 'use strict';
@@ -157,9 +157,6 @@ var NAV_PAGES = [
   { href: '/scene',      icon: '🎬', label: '场景编排' },
   { href: '/generate',   icon: '📊', label: '数据生成' },
   { href: '/data',       icon: '📁', label: '数据管理' },
-  { href: '/basicdata',  icon: '🗄️', label: '基础数据' },
-  { href: '/performance',icon: '📈', label: '性能' },
-  { href: '/ha',         icon: '🔁', label: '高可用' },
   { href: '/env',        icon: '🔧', label: '环境管理' },
   { href: '/logs',       icon: '📋', label: '系统日志' },
 ];

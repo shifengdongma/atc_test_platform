@@ -7,18 +7,12 @@
 var isRunning = false;
 var history = [];
 var modeDescriptions = {
-  dynamic: '🎮 动态仿真：实时生成飞行计划，Simulator引擎计算遥测，持续运行。适合开发调试和实时测试。',
-  replay: '🔁 预生成回放(循环)：读取mock目录JSON循环发射，每轮刷新Redis航线，永不停止。适合长期稳定注入。',
-  replay_once: '▶️ 预生成回放(单次)：JSON回放一次，耗尽自动停止并输出精度报告。适合单次回归测试。',
   scene: '🎬 场景文件注入：选择JSON按间隔发射，支持3种时间戳模式。适合特定场景精确回放。',
   plan: '📐 Redis计划插值：从Redis读飞行计划，沿航段插值生成遥测。实时监听Redis变更。'
 };
 
 // 每种仿真模式对应的工具脚本
 var modeScriptTags = {
-  dynamic: 'simulation_core.py (Simulator 引擎 → sim_manager.py)',
-  replay: 'tools/run_kafka_alive.py (循环回放 → sim_manager.py)',
-  replay_once: 'tools/run_kafka.py (DataSource 单次回放)',
   scene: 'tools/run_kafka_scene.py (SceneEmitter 场景注入)',
   plan: 'tools/run_plan.py (PlanRunner Redis插值)'
 };
@@ -54,7 +48,7 @@ function setRunningState(running) {
   if (elNfzOn) elNfzOn.disabled = running;
   if (elNfzCnt) elNfzCnt.disabled = running || !elNfzOn.checked;
   // 禁用特定模式参数
-  ['scene-params','replay-params','plan-params'].forEach(function(id) {
+  ['scene-params','plan-params'].forEach(function(id) {
     var p = document.getElementById(id);
     if (p) p.querySelectorAll('input,select,button').forEach(function(e) { e.disabled = running; });
   });
@@ -68,7 +62,7 @@ function updateMode() {
   // 更新调用脚本标注
   var scriptTag = document.getElementById('mode-script-tag');
   if (scriptTag) scriptTag.textContent = modeScriptTags[elMode.value] || '';
-  ['scene-params','replay-params','plan-params'].forEach(function(id) {
+  ['scene-params','plan-params'].forEach(function(id) {
     var p = document.getElementById(id);
     if (p) p.style.display = 'none';
   });
@@ -76,14 +70,9 @@ function updateMode() {
     var sp = document.getElementById('scene-params');
     if (sp) sp.style.display = '';
     refreshSceneFileList();
-  } else if (elMode.value === 'replay' || elMode.value === 'replay_once') {
-    var rp = document.getElementById('replay-params');
-    if (rp) rp.style.display = '';
-    refreshReplayFileList();
   } else if (elMode.value === 'plan') {
     var pp = document.getElementById('plan-params');
     if (pp) pp.style.display = '';
-    // 加载航线列表供选择
     loadPlanRouteList();
   }
 }
@@ -116,27 +105,6 @@ async function refreshSceneFileList() {
   } catch (e) { sel.innerHTML = '<option>加载失败</option>'; }
 }
 
-// ── replay 文件列表 ─────────────────────────────────────────────
-async function refreshReplayFileList() {
-  try {
-    var data = await apiGet('/api/data/files');
-    if (data.files) {
-      var dataSel = document.getElementById('replay-data-file');
-      var routeSel = document.getElementById('replay-route-file');
-      if (dataSel) {
-        dataSel.innerHTML = data.files.map(function(f) {
-          return '<option value="' + f.name + '"' + (f.name.indexOf('kafka_data') >= 0 ? ' selected' : '') + '>' + f.name + '</option>';
-        }).join('');
-      }
-      if (routeSel) {
-        routeSel.innerHTML = data.files.map(function(f) {
-          return '<option value="' + f.name + '"' + (f.name.indexOf('redis_route') >= 0 ? ' selected' : '') + '>' + f.name + '</option>';
-        }).join('');
-      }
-    }
-  } catch (e) {}
-}
-
 // Plan 模式刷新按钮
 var btnPlanRefresh = document.getElementById('btn-plan-refresh-routes');
 if (btnPlanRefresh) btnPlanRefresh.addEventListener('click', loadPlanRouteList);
@@ -145,15 +113,11 @@ if (btnPlanRefresh) btnPlanRefresh.addEventListener('click', loadPlanRouteList);
 var btnRefScene = document.getElementById('btn-refresh-scene-files');
 if (btnRefScene) btnRefScene.addEventListener('click', refreshSceneFileList);
 
-// Replay 模式刷新按钮
-var btnRefReplay = document.getElementById('btn-refresh-replay-files');
-if (btnRefReplay) btnRefReplay.addEventListener('click', refreshReplayFileList);
-
 // ── 加载配置 ───────────────────────────────────────────────────────
 async function fetchConfig() {
   try {
     var data = await apiGet('/api/sim/config');
-    elMode.value = data.mode || 'dynamic';
+    elMode.value = data.mode || 'scene';
     elDrones.value = data.target_drones || 1;
     elDronesVal.textContent = data.target_drones || 1;
     elRedisHost.value = data.redis_ip || '127.0.0.1';
@@ -192,10 +156,6 @@ elBtnStart.addEventListener('click', async function() {
     body.scene_interval = parseInt((document.getElementById('scene-interval')||{}).value || 1000);
     body.timestamp_mode = (document.getElementById('scene-timestamp-mode')||{}).value || 'replace';
     body.scene_loop = (document.getElementById('scene-loop')||{}).checked || false;
-  }
-  if (mode === 'replay' || mode === 'replay_once') {
-    body.data_file = (document.getElementById('replay-data-file')||{}).value || 'kafka_data.json';
-    body.route_file = (document.getElementById('replay-route-file')||{}).value || 'redis_route.json';
   }
   if (mode === 'plan') {
     // 仅当航线列表已渲染时才发送选择；未渲染时发送 null（后端视为"全部航线"）
@@ -312,7 +272,7 @@ window.editTask = async function(id) {
     editingTaskId = t.id;
     document.getElementById('task-form-title').textContent = '✏️ 编辑定时任务: ' + (t.name||'');
     document.getElementById('tk-name').value = t.name||'';
-    document.getElementById('tk-mode').value = t.sim_mode||'replay';
+    document.getElementById('tk-mode').value = t.sim_mode||'scene';
     document.getElementById('tk-edit-id').value = t.id;
     document.getElementById('tk-enabled').checked = (t.enabled===1);
     document.getElementById('btn-task-cancel-edit').style.display = '';
@@ -338,7 +298,7 @@ var editingTaskId = null;
 function resetTaskForm() {
   document.getElementById('task-form-title').textContent = '➕ 新建定时任务';
   document.getElementById('tk-name').value = '';
-  document.getElementById('tk-mode').value = 'replay';
+  document.getElementById('tk-mode').value = 'scene';
   document.getElementById('tk-drones').value = 10;
   document.getElementById('tk-date').value = '';
   document.getElementById('tk-time').value = '09:00';

@@ -17,7 +17,6 @@
   <header class="topbar">
     <div class="topbar-left">
       <h1>🛩️ UTM 模拟器控制台</h1>
-      <span class="version">utm_moc52 v3.1</span>
     </div>
     <nav class="topbar-nav" id="top-nav"></nav>
     <div class="topbar-right">
@@ -39,9 +38,6 @@
         <div class="form-group">
           <label for="mode-select">运行模式</label>
           <select id="mode-select">
-            <option value="dynamic">🎮 动态仿真 — 实时生成计划+仿真计算遥测</option>
-            <option value="replay">🔁 预生成回放(循环) — mock目录JSON循环发射</option>
-            <option value="replay_once">▶️ 预生成回放(单次) — 数据耗尽自动停止</option>
             <option value="scene">🎬 场景文件注入 — 选择JSON按间隔发射</option>
             <option value="plan">📐 Redis计划插值 — 从计划路线数学插值生成遥测</option>
           </select>
@@ -73,18 +69,6 @@
             <label for="scene-loop">
               <input type="checkbox" id="scene-loop"> 循环发射（数据耗尽后重新开始）
             </label>
-          </div>
-        </div>
-
-        <div id="replay-params" style="display:none;">
-          <div class="form-group">
-            <label for="replay-data-file">遥测数据文件 (mock/)</label>
-            <select id="replay-data-file" style="width:100%;background:#0d1b2a;color:#82aaff;border:1px solid #2a3a5c;font-size:12px;"></select>
-          </div>
-          <div class="form-group">
-            <label for="replay-route-file">航线数据文件 (mock/)</label>
-            <select id="replay-route-file" style="width:100%;background:#0d1b2a;color:#82aaff;border:1px solid #2a3a5c;font-size:12px;"></select>
-            <button id="btn-refresh-replay-files" class="btn btn-small" style="margin-top:4px;">🔄 刷新文件列表</button>
           </div>
         </div>
 
@@ -120,7 +104,7 @@
           <label for="nfz-enabled"><input type="checkbox" id="nfz-enabled" checked> 生成禁飞区</label>
           <label for="nfz-count" class="sub-label">数量</label>
           <input type="number" id="nfz-count" value="3" min="0" max="10" disabled>
-          <div class="mode-description" style="margin-top:2px;">仅在 🎮 动态仿真 模式下生效</div>
+          <div class="mode-description" style="margin-top:2px;">生成禁飞区多边形写入 Redis <code>BIZ_DATA:AIRSPACE</code>，Dashboard 可展示空域管控区域。</div>
         </div>
 
         <!-- ★ 环境选择器（替代连接信息） ★ -->

@@ -1,5 +1,5 @@
 /* -*- coding: utf-8 -*- */
-/* utm_moc52 Web 可视化控制台 — 主逻辑 */
+/* UTM 模拟器控制台 — 主逻辑 */
 
 (function() {
 'use strict';
@@ -125,7 +125,7 @@ async function fetchStatus() {
 
 async function fetchConfig() {
   const data = await apiGet('/api/sim/config');
-  dom.modeSelect.value = data.mode || 'dynamic';
+  dom.modeSelect.value = data.mode || 'scene';
   dom.targetDrones.value = data.target_drones || 100;
   dom.dronesValue.textContent = data.target_drones || 100;
   dom.nfzEnabled.checked = data.nfz_enabled !== false;
@@ -249,11 +249,6 @@ dom.nfzEnabled.addEventListener('change', () => {
 	    body.scene_interval = parseInt(document.getElementById('scene-interval')?.value || 1000);
 	    body.timestamp_mode = document.getElementById('scene-timestamp-mode')?.value || 'replace';
 	    body.scene_loop = document.getElementById('scene-loop')?.checked || false;
-	  }
-	  // replay/replay_once 模式参数
-	  if (mode === 'replay' || mode === 'replay_once') {
-	    body.data_file = document.getElementById('replay-data-file')?.value || 'kafka_data.json';
-	    body.route_file = document.getElementById('replay-route-file')?.value || 'redis_route.json';
 	  }
 	  // plan 模式参数
 	  if (mode === 'plan') {
@@ -630,14 +625,13 @@ async function launchFromData() {
     addLog('请先在文件列表中选择一个数据文件');
     return;
   }
-  addLog('从 ' + selectedDataFile + ' 启动 replay...');
+  addLog('从 ' + selectedDataFile + ' 启动 scene 模式...');
   try {
-    const result = await apiPost('/api/data/launch-replay', { data_file: selectedDataFile });
+    const result = await apiPost('/api/sim/start', { mode: 'scene', data_file: selectedDataFile });
     if (result.success) {
       addLog('已启动: ' + result.message);
       setRunningState(true);
-      addHistory(true, 'replay | ' + selectedDataFile);
-      // 切回配置面板
+      addHistory(true, 'scene | ' + selectedDataFile);
       document.querySelector('.tab-btn[data-tab="tab-config"]').click();
     } else {
       addLog('启动失败: ' + result.message);
@@ -649,9 +643,6 @@ async function launchFromData() {
 
 // ── 模式说明映射 ─────────────────────────────────────────────────
 const MODE_DESCRIPTIONS = {
-  dynamic: '🎮 动态仿真：实时生成飞行计划，Simulator引擎计算遥测，持续运行。适合开发调试和实时测试。',
-  replay: '🔁 预生成回放(循环)：读取mock目录JSON循环发射，每轮刷新Redis航线，永不停止。适合长期持续数据注入测试。',
-  replay_once: '▶️ 预生成回放(单次)：读取mock目录JSON回放一次，数据耗尽自动停止。自动调用轨迹精度校验。适合单次回归测试。',
   scene: '🎬 场景文件注入：选择场景JSON文件按配置间隔发射，支持3种时间戳模式(replace/align/preserve)。适合特定场景的精确回放测试。',
   plan: '📐 Redis计划插值：从Redis读取飞行计划，沿路线段数学插值生成平滑遥测。实时监听Redis计划变更。适合UTM系统集成测试。'
 };
@@ -667,11 +658,9 @@ function updateModeDescription() {
   const planParams = document.getElementById('plan-params');
   const mode = dom.modeSelect.value;
   if (sceneParams) sceneParams.style.display = (mode === 'scene') ? '' : 'none';
-  if (replayParams) replayParams.style.display = (mode === 'replay' || mode === 'replay_once') ? '' : 'none';
   if (planParams) planParams.style.display = (mode === 'plan') ? '' : 'none';
   // scene 模式时刷新场景文件列表
   if (mode === 'scene') refreshSceneFileList();
-  if (mode === 'replay' || mode === 'replay_once') refreshReplayFileList();
   // plan 模式：刷新已有航线列表勾选状态
   if (mode === 'plan') updatePlanRouteSummary();
 }
@@ -719,66 +708,11 @@ async function refreshSceneFileList() {
   } catch (e) { sel.innerHTML = '<option>加载失败</option>'; }
 }
 
-// ── replay 文件列表 ─────────────────────────────────────────────
-async function refreshReplayFileList() {
-  try {
-    const data = await apiGet('/api/data/files');
-    if (data.files) {
-      const dataSel = document.getElementById('replay-data-file');
-      const routeSel = document.getElementById('replay-route-file');
-      if (dataSel) {
-        dataSel.innerHTML = data.files.map(f =>
-          '<option value="' + f.name + '"' + (f.name.indexOf('kafka_data') >= 0 ? ' selected' : '') + '>' + f.name + '</option>'
-        ).join('');
-      }
-      if (routeSel) {
-        routeSel.innerHTML = data.files.map(f =>
-          '<option value="' + f.name + '"' + (f.name.indexOf('redis_route') >= 0 ? ' selected' : '') + '>' + f.name + '</option>'
-        ).join('');
-      }
-    }
-  } catch (e) {}
-}
-
 // 刷新按钮事件
 var btnRefScene = document.getElementById('btn-refresh-scene-files');
 if (btnRefScene) btnRefScene.addEventListener('click', refreshSceneFileList);
-var btnRefReplay = document.getElementById('btn-refresh-replay-files');
-if (btnRefReplay) btnRefReplay.addEventListener('click', refreshReplayFileList);
 
 // ── 批量预设 ─────────────────────────────────────────────────────
-async function loadBatchPresets() {
-  const container = document.getElementById('batch-preset-list');
-  if (!container) return;
-  try {
-    const data = await apiGet('/api/data/batch/presets');
-    if (!data.presets || data.presets.length === 0) {
-      container.innerHTML = '<div class="empty-hint">无预设数据</div>';
-      return;
-    }
-    container.innerHTML = data.presets.map(function(p) {
-      return '<button class="batch-btn" data-idx="' + p.index + '" title="' + p.lat.toFixed(1) + ',' + p.lng.toFixed(1) + ' ' + p.count + '架">' +
-        '#' + (p.index + 1) + ' ' + p.name + ' ' + p.count + '架</button>';
-    }).join('');
-    container.querySelectorAll('.batch-btn').forEach(function(btn) {
-      btn.addEventListener('click', async function() {
-        var idx = parseInt(this.dataset.idx);
-        var resultEl = document.getElementById('gen-batch-result');
-        resultEl.textContent = '生成中 (#' + (idx + 1) + ')...';
-        var result = await apiPost('/api/data/batch', { config_index: idx });
-        if (result.success) {
-          resultEl.textContent = '完成: 预设 #' + (idx + 1);
-          addLog('批量预设 #' + (idx + 1) + ' 已生成');
-          refreshFileList();
-        } else {
-          resultEl.textContent = '失败: ' + (result.error || '');
-        }
-      });
-    });
-  } catch (e) {
-    container.innerHTML = '<div class="empty-hint">加载失败</div>';
-  }
-}
 
 // 一键全部预设
 var btnBatchAll = document.getElementById('btn-gen-batch-all');
@@ -1021,44 +955,12 @@ fetchConfig = async function() {
 
 
 
-// 更新 launchFromData 以使用选择的回放模式
-var _origLaunchFromData = launchFromData;
-launchFromData = async function() {
-  if (!selectedDataFile) {
-    addLog('请先在文件列表中选择一个数据文件');
-    return;
-  }
-  var launchMode = _getVal('launch-replay-mode', 'replay');
-  addLog('从 ' + selectedDataFile + ' 启动 ' + launchMode + '...');
-  try {
-    var result = await apiPost('/api/sim/start', {
-      mode: launchMode,
-      target_drones: 0,
-      nfz_enabled: false,
-      nfz_count: 0,
-      data_file: selectedDataFile,
-    });
-    if (result.success) {
-      addLog('已启动: ' + result.message);
-      setRunningState(true);
-      addHistory(true, launchMode + ' | ' + selectedDataFile);
-      document.querySelector('.tab-btn[data-tab="tab-config"]').click();
-    } else {
-      addLog('启动失败: ' + result.message);
-    }
-  } catch (e) {
-    addLog('异常: ' + e.message);
-  }
-};
-
 // 启动时初始化新功能
 var _origInit = init;
 init = function() {
   _origInit();
   initDataGenTabs();
   updateModeDescription();
-  // 加载文件列表到 reply selectors
-  refreshReplayFileList();
 };
 
 document.addEventListener('DOMContentLoaded', init);

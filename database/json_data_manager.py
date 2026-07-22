@@ -814,11 +814,11 @@ def _get_dm_client():
     if _dm_client is not None:
         return _dm_client, None
 
-    # 查找 dmdbclient.py 文件路径
+    # 查找 dmdbclient.py 文件路径（tools/ 目录）
     _db_dir = os.path.dirname(os.path.abspath(__file__))
+    _root_dir = os.path.abspath(os.path.join(_db_dir, ".."))
     _dm_paths = [
-        os.path.join(_db_dir, "..", "atc_api_autotest", "api_tools"),
-        os.path.join(_db_dir, "..", "atc_data_factory", "script"),
+        os.path.join(_root_dir, "tools"),
     ]
     _dm_file = None
     _dm_dir = None
@@ -837,10 +837,10 @@ def _get_dm_client():
 
     print(f"[json_data_manager] _get_dm_client: 加载 dmdbclient.py from {_dm_file}")
 
-    # 确保 dmdbclient.py 所在目录及其父目录在 sys.path 中
+    # 确保 dmdbclient.py 所在目录（tools/）和根目录在 sys.path 中
     # dmdbclient.py 需要: import dmPython; from env import ...
-    _parent = os.path.dirname(_dm_dir)  # atc_api_autotest/ 或 atc_data_factory/
-    for _p in (_dm_dir, _parent):
+    # env.py 位于项目根目录，包含 DB_HOST 等达梦配置
+    for _p in (_dm_dir, _root_dir):
         if _p not in _sys.path:
             _sys.path.insert(0, _p)
 
@@ -848,7 +848,7 @@ def _get_dm_client():
         # dmdbclient.py 内部执行 from env import ...，但 web_server.py 已
         # import env as _env（utm_simulator/env.py），导致 sys.modules['env']
         # 被缓存。临时清除该缓存，让 dmdbclient.py 能正确导入
-        # atc_api_autotest/env.py（含 DB_HOST 等达梦配置）。
+        # 根目录 env.py（含 DB_HOST 等达梦配置）。
         _cached_env = _sys.modules.pop("env", None)
         try:
             import importlib as _imlib

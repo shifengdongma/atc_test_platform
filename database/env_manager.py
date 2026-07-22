@@ -258,7 +258,7 @@ def _update_env_py(config: Dict[str, Any]) -> None:
             if field in ("redis_password",) and config.get("redis_pwd"):
                 val = config.get("redis_pwd", default)
             content = re.sub(
-                rf'{env_field}\s*=\s*"[^"]*"',
+                rf'{env_field}\s*=\s*(?:"[^"]*"|\w+)',
                 f'{env_field} = "{val}"',
                 content,
             )
@@ -267,7 +267,7 @@ def _update_env_py(config: Dict[str, Any]) -> None:
             env_field = _db_to_env.get(field, field)
             val = config.get(field, default)
             content = re.sub(
-                rf'{env_field}\s*=\s*\d+',
+                rf'{env_field}\s*=\s*\w+',
                 f'{env_field} = {val}',
                 content,
             )

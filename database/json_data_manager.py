@@ -657,6 +657,7 @@ def read_file_content_partial(file_id: int, max_chars: int = 102400) -> Dict[str
     Returns:
         {"content": "...", "truncated": bool, "total_size": int}
     """
+    _lazy_init()
     record = query_one(TABLE, file_id)
     if not record:
         return {"error": "文件不存在"}
@@ -751,9 +752,11 @@ _check_ssl11()
 
 
 def _get_dm_client():
-    """获取达梦数据库 DmDbClient 实例（懒加载 + 单例缓存 + 失败冷却）。
+    """获取达梦数据库 DmDbClient 实例（惰性初始化 + 配置变更检测 + 失败冷却）。
 
-    正确设置 sys.path 使 dmdbclient.py 能导入其依赖（dmPython + env.py）。
+    优先从 config.json（Web UI 激活环境时写入）读取达梦配置，
+    其次从 env.py 回退。配置变更时自动重连。
+
     返回 (client, error_msg)，client 可用时为 DmDbClient 实例，否则为 None。
 
     冷却机制：达梦连接失败后 60 秒内不再重试，避免每次 API 请求都触发
@@ -761,66 +764,120 @@ def _get_dm_client():
     """
     global _dm_client, _dm_available, _dm_last_fail_time
 
+    _db_dir = os.path.dirname(os.path.abspath(__file__))
+    _root_dir = os.path.abspath(os.path.join(_db_dir, ".."))
+
+    # ── 读取当前达梦配置（优先 config.json → env.py）─────────────
+    _config_json = os.path.join(_root_dir, "common", "config.json")
+    dm_host = None
+    dm_port = None
+    dm_user = None
+    dm_password = None
+    dm_schema = None
+
+    # 1. 尝试从 config.json 读取
+    try:
+        if os.path.exists(_config_json):
+            with open(_config_json, "r", encoding="utf-8") as _f:
+                _cj = json.load(_f)
+            if _cj.get("dm_host"):
+                dm_host = _cj["dm_host"]
+                dm_port = int(_cj.get("dm_port", 5236))
+                dm_user = _cj.get("dm_user", "SYSDBA")
+                dm_password = _cj.get("dm_password", "")
+                dm_schema = _cj.get("dm_schema", "")
+    except Exception:
+        pass
+
+    # 2. config.json 无达梦配置时，从 env.py 回退
+    if not dm_host:
+        try:
+            _cached_env = _sys.modules.pop("env", None)
+            try:
+                import env as _env_fallback
+            finally:
+                if _cached_env is not None:
+                    _sys.modules["env"] = _cached_env
+            dm_host = getattr(_env_fallback, "DB_HOST", "")
+            dm_port = int(getattr(_env_fallback, "DB_PORT", 5236))
+            dm_user = getattr(_env_fallback, "DB_USER", "SYSDBA")
+            dm_password = getattr(_env_fallback, "DB_PASSWORD", "")
+            dm_schema = getattr(_env_fallback, "DB_SCHEMA", "")
+        except Exception:
+            pass
+
+    if not dm_host:
+        return None, "达梦数据库未配置（config.json 和 env.py 均无 dm_host）"
+
+    _current_target = f"{dm_host}:{dm_port}/{dm_schema}"
+
     # ── 首次调用时打印诊断信息 ──
     if _dm_available is None and _dm_client is None:
         _ld_path = os.environ.get("LD_LIBRARY_PATH", "(未设置)")
-        print(f"[json_data_manager] _get_dm_client: 首次尝试达梦连接，LD_LIBRARY_PATH={_ld_path}")
+        print(f"[json_data_manager] _get_dm_client: 首次尝试达梦连接，"
+              f"目标={_current_target}, LD_LIBRARY_PATH={_ld_path}")
         if not _ssl11_available:
-            print(f"[json_data_manager] _get_dm_client: ⚠ OpenSSL 1.1 库不可用 ({_ssl11_detail})，达梦连接将失败")
+            print(f"[json_data_manager] _get_dm_client: ⚠ OpenSSL 1.1 库不可用"
+                  f" ({_ssl11_detail})，达梦连接将失败")
+
+    # ── 配置变更检测：目标变了就重置连接 ──────────────────────────
+    _current_cfg_key = f"{dm_host}:{dm_port}:{dm_user}:{dm_schema}"
+    if _dm_client is not None:
+        _old_cfg_key = getattr(_dm_client, "_cfg_key", "")
+        if _old_cfg_key != _current_cfg_key:
+            print(f"[json_data_manager] 达梦配置变更 ({_old_cfg_key} → {_current_cfg_key})，重置连接")
+            try:
+                _dm_client.close()
+            except Exception:
+                pass
+            _dm_client = None
+            _dm_available = None
 
     if _dm_available is False:
-        # 检查冷却期是否已过
         if time.time() - _dm_last_fail_time < _DM_RETRY_COOLDOWN:
-            return None, "达梦数据库不可用（已探测失败，冷却中）"
-        # 冷却期已过，允许重试一次
+            return None, f"达梦数据库不可用（已探测失败，冷却中）"
         _dm_available = None
         _dm_client = None
     if _dm_client is not None:
         return _dm_client, None
 
-    # 查找 dmdbclient.py 文件路径（tools/ 目录）
-    _db_dir = os.path.dirname(os.path.abspath(__file__))
-    _root_dir = os.path.abspath(os.path.join(_db_dir, ".."))
-    _dm_paths = [
-        os.path.join(_root_dir, "tools"),
-    ]
-    _dm_file = None
-    _dm_dir = None
-    for _d in _dm_paths:
-        _f = os.path.join(_d, "dmdbclient.py")
-        if os.path.exists(_f):
-            _dm_file = _f
-            _dm_dir = _d
-            break
+    # ── 加载 dmdbclient 模块 ─────────────────────────────────────
+    _dm_dir = os.path.join(_root_dir, "tools")
+    _dm_file = os.path.join(_dm_dir, "dmdbclient.py")
 
-    if _dm_file is None:
+    if not os.path.exists(_dm_file):
         _dm_available = False
         _dm_last_fail_time = time.time()
-        print(f"[json_data_manager] 未找到 dmdbclient.py，搜索路径: {_dm_paths}")
-        return None, "未找到 dmdbclient.py"
+        return None, f"未找到 dmdbclient.py ({_dm_file})"
 
-    print(f"[json_data_manager] _get_dm_client: 加载 dmdbclient.py from {_dm_file}")
+    print(f"[json_data_manager] _get_dm_client: 加载 dmdbclient.py "
+          f"目标={_current_target}")
 
-    # 确保 dmdbclient.py 所在目录（tools/）和根目录在 sys.path 中
-    # dmdbclient.py 需要: import dmPython; from env import ...
-    # env.py 位于项目根目录，包含 DB_HOST 等达梦配置
-    for _p in (_dm_dir, _root_dir):
+    for _p in (_dm_dir, os.path.abspath(os.path.join(_db_dir, ".."))):
         if _p not in _sys.path:
             _sys.path.insert(0, _p)
 
     try:
-        # dmdbclient.py 内部执行 from env import ...，但 web_server.py 已
-        # import env as _env（utm_simulator/env.py），导致 sys.modules['env']
-        # 被缓存。临时清除该缓存，让 dmdbclient.py 能正确导入
-        # 根目录 env.py（含 DB_HOST 等达梦配置）。
+        # 清除 env 和 dmdbclient 缓存，确保读取最新配置
         _cached_env = _sys.modules.pop("env", None)
+        _sys.modules.pop("dmdbclient", None)
         try:
             import importlib as _imlib
             _mod = _imlib.import_module("dmdbclient")
         finally:
             if _cached_env is not None:
                 _sys.modules["env"] = _cached_env
-        _client = _mod.DmDbClient()
+
+        # 显式传递配置，不依赖模块级默认值
+        _client = _mod.DmDbClient(
+            host=dm_host,
+            port=dm_port,
+            user=dm_user,
+            password=dm_password,
+            schema=dm_schema,
+        )
+        _client._cfg_key = _current_cfg_key
+
         if _client.connect():
             _dm_client = _client
             _dm_available = True
@@ -828,7 +885,7 @@ def _get_dm_client():
         else:
             _dm_available = False
             _dm_last_fail_time = time.time()
-            return None, "无法连接到达梦数据库 (10.165.32.32:5237)"
+            return None, f"无法连接到达梦数据库 ({_current_target})"
     except ImportError as e:
         _dm_available = False
         _dm_last_fail_time = time.time()

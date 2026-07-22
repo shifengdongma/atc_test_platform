@@ -120,6 +120,8 @@ def _create_pool():
             charset=cfg.charset,
             cursorclass=pymysql.cursors.DictCursor,
             connect_timeout=5,     # 连接超时 5 秒（从 10 秒降低）
+            read_timeout=10,       # 读超时 10 秒，防止远程 MySQL 不响应时挂死
+            write_timeout=10,      # 写超时 10 秒
             **ssl_args,
         )
         # 验证池可以创建连接
@@ -156,14 +158,26 @@ def _get_client():
         if _mysql_available is False:
             return None
 
-        # 首次或恢复后获取连接
+        pool = _get_or_create_pool()
+        if pool is None:
+            _mysql_available = False
+            _mysql_last_fail_time = time.time()
+            return None
+
+        # 已有缓存连接时，ping 验证有效性；失效则重新获取
+        if _mysql_client is not None:
+            try:
+                _mysql_client.ping(reconnect=False)
+            except Exception:
+                # 连接已断开，从池中获取新连接
+                try:
+                    _mysql_client.close()
+                except Exception:
+                    pass
+                _mysql_client = None
+
         if _mysql_client is None:
             try:
-                pool = _get_or_create_pool()
-                if pool is None:
-                    _mysql_available = False
-                    _mysql_last_fail_time = time.time()
-                    return None
                 _mysql_client = pool.connection()
                 _mysql_available = True
                 print(f"[mysql_db_manager] MySQL 连接成功 ({_mysql_conn_target})")
@@ -391,8 +405,12 @@ def _ensure_mysql_tables(client=None):
             existing_cols = {list(row.values())[0] for row in cur.fetchall()}
             missing = [(c, d) for c, d in columns if c not in existing_cols]
             if missing:
-                _p(f"[mysql_db_manager] {table_name} 缺失 {len(missing)} 列，"
-                   f"请运行 python database/migrate_schema.py 补全")
+                if table_name == "sim_env_config":
+                    _p(f"[mysql_db_manager] {table_name} 缺失 {len(missing)} 列 (旧表)，"
+                       f"请运行 python database/rebuild_sim_env_config.py 重建")
+                else:
+                    _p(f"[mysql_db_manager] {table_name} 缺失 {len(missing)} 列，"
+                       f"请运行 python database/migrate_schema.py 补全")
         except Exception as e:
             _p(f"[mysql_db_manager] 检查 {table_name} 列信息失败: {e}")
 

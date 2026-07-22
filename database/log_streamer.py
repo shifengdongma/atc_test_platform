@@ -296,11 +296,13 @@ class LogStreamer:
                         self._mysql_fail_count += 1
                         self._mysql_last_fail_time = time.time()
                         if self._mysql_fail_count >= 5:
-                            print("[LogStreamer] MySQL 连续写入失败超过5次，禁用持久化")
+                            print("[LogStreamer] MySQL 连续写入失败超过5次(lastrowid=0)，禁用持久化")
                             self._mysql_enabled = False
-            except Exception:
+            except Exception as e:
                 self._mysql_fail_count += 1
                 self._mysql_last_fail_time = time.time()
+                if self._mysql_fail_count == 1:
+                    print(f"[LogStreamer] MySQL 写入异常: {e}")
                 if self._mysql_fail_count >= 5:
                     print("[LogStreamer] MySQL 连续写入失败超过5次，禁用持久化")
                     self._mysql_enabled = False

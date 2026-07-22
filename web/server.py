@@ -2034,7 +2034,8 @@ def api_db_get_file(file_id):
             record["content"] = result.get("content", "")
             record["content_truncated"] = result.get("truncated", False)
             record["content_message"] = result.get("message", "")
-        return jsonify(record) if record else jsonify({"error": "文件不存在"}), 404
+            return jsonify(record)
+        return jsonify({"error": "文件不存在"}), 404
     record = mgr.get_file(file_id)
     if not record:
         return jsonify({"error": "文件不存在"}), 404

@@ -34,6 +34,26 @@ try:
 except ImportError:
     PooledDB = None
 
+# ── 限频日志（抑制 MySQL 不可用时的重复刷屏）──────────────────────────
+try:
+    from common.log_setup import RateLimitedPrinter
+except ImportError:
+    # 兜底
+    class RateLimitedPrinter:
+        def __init__(self, prefix, cooldown=60):
+            self._prefix = prefix
+            self._cooldown = cooldown
+            self._last = {}
+        def print(self, message, tag=""):
+            import time as _t
+            now = _t.time()
+            key = tag or message
+            if now - self._last.get(key, 0) >= self._cooldown:
+                self._last[key] = now
+                print(f"[{self._prefix}] {message}", flush=True)
+
+_rlp_unavailable = RateLimitedPrinter("mysql_db_manager", cooldown=60)
+
 _lock = threading.RLock()
 
 # ── MySQL 连接池 ────────────────────────────────────────────────────
@@ -430,7 +450,7 @@ def query_all(table: str, order_by: str = "id DESC") -> List[Dict[str, Any]]:
     with _lock:
         client = _get_client()
         if not client:
-            print(f"[mysql_db_manager] MySQL 不可用，query_all({table}) 返回空", flush=True)
+            _rlp_unavailable.print(f"MySQL 不可用，query_all({table}) 返回空", tag="unavailable_query_all")
             return []
         try:
             safe_order = order_by.replace("id", "`id`") if "id" in order_by and "`id`" not in order_by else order_by
@@ -447,7 +467,7 @@ def query_one(table: str, record_id: int) -> Optional[Dict[str, Any]]:
     with _lock:
         client = _get_client()
         if not client:
-            print(f"[mysql_db_manager] MySQL 不可用，query_one({table}) 返回 None", flush=True)
+            _rlp_unavailable.print(f"MySQL 不可用，query_one({table}) 返回 None", tag="unavailable_query_one")
             return None
         try:
             sql = f"SELECT * FROM `{table}` WHERE `id` = %s"
@@ -465,7 +485,7 @@ def query(table: str, where: str = "", params: tuple = (),
     with _lock:
         client = _get_client()
         if not client:
-            print(f"[mysql_db_manager] MySQL 不可用，query({table}) 返回空", flush=True)
+            _rlp_unavailable.print(f"MySQL 不可用，query({table}) 返回空", tag="unavailable_query")
             return []
         try:
             sql = f"SELECT * FROM `{table}`"
@@ -490,7 +510,7 @@ def query_count(table: str, where: str = "", params: tuple = ()) -> int:
     with _lock:
         client = _get_client()
         if not client:
-            print(f"[mysql_db_manager] MySQL 不可用，query_count({table}) 返回 0", flush=True)
+            _rlp_unavailable.print(f"MySQL 不可用，query_count({table}) 返回 0", tag="unavailable_query_count")
             return 0
         try:
             sql = f"SELECT COUNT(*) as cnt FROM `{table}`"
@@ -604,7 +624,7 @@ def query_distinct(table: str, column: str) -> List[str]:
     with _lock:
         client = _get_client()
         if not client:
-            print(f"[mysql_db_manager] MySQL 不可用，query_distinct({table}) 返回空", flush=True)
+            _rlp_unavailable.print(f"MySQL 不可用，query_distinct({table}) 返回空", tag="unavailable_query_distinct")
             return []
         try:
             cur = client.cursor()
@@ -619,7 +639,7 @@ def execute_raw(sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
     with _lock:
         client = _get_client()
         if not client:
-            print(f"[mysql_db_manager] MySQL 不可用，execute_raw 返回空", flush=True)
+            _rlp_unavailable.print(f"MySQL 不可用，execute_raw 返回空", tag="unavailable_execute_raw")
             return []
         try:
             cur = client.cursor()

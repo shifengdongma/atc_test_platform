@@ -5,6 +5,13 @@ from kafka import KafkaProducer, KafkaConsumer, TopicPartition
 from kafka.errors import KafkaTimeoutError
 from typing import List, Dict, Any, Optional, Tuple, Callable
 
+# 日志工具（抑制高频发送日志刷屏）
+try:
+    from common.log_setup import debug_print, error_print
+except ImportError:
+    def debug_print(prefix, message): pass
+    def error_print(prefix, message): print(f"[{prefix}] ❌ {message}")
+
 # 单次 flush 最大等待，避免副本集群不可达时仿真主线程永久阻塞（trace 消费线程仍会照常打印）
 _KAFKA_FLUSH_TIMEOUT_SEC = 1.0
 # 显式 close() 时使用；进程退出前须先关闭生产者以解除 kafka-python 注册的 atexit（否则会 timeout=0 flush）
@@ -100,7 +107,7 @@ class KafkaProducerClient:
                 print(f"[Kafka-Mirror] ❌ 副本集群 flush 超时 ({_flush_to}s): {e}")
         end = time.time()
         suffix = "（同步高可用集群）" if self.producer_secondary else "（仅主集群）"
-        print(f"[{topic}]: {int(end)} 发送 {len(objs)} 条{suffix}")
+        debug_print(topic, f"发送 {len(objs)} 条{suffix}")
 
     
     def send_message(self, topic: str, message: Dict[str, Any]) -> bool:

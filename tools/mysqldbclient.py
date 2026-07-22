@@ -18,6 +18,17 @@ MySQL 数据库连接客户端（纯客户端类，不包含项目配置）
 
 import pymysql
 
+# 导入日志工具
+try:
+    from common.log_setup import debug_print, info_print, warn_print, error_print
+except ImportError:
+    def debug_print(prefix, message): pass
+    def info_print(prefix, message): print(f"[{prefix}] {message}")
+    def warn_print(prefix, message): print(f"[{prefix}] ⚠ {message}")
+    def error_print(prefix, message): print(f"[{prefix}] ❌ {message}")
+
+PREFIX = "MysqlDbClient"
+
 # pymysql 2.x 有多个已知问题（latin-1 密码编码、ssl 参数格式变更），
 # 本模块仅兼容 1.x。requirements.txt 已锁定 pymysql>=1.1,<2.0
 _pymysql_ver = tuple(int(x) for x in pymysql.__version__.split(".")[:2])
@@ -104,10 +115,10 @@ class MysqlDbClient:
                 **ssl_args,
             )
             self.cursor = self.conn.cursor()
-            print(f"[MysqlDbClient] 成功连接到 MySQL {self.host}:{self.port}, 数据库: {self.database}")
+            info_print(PREFIX, f"成功连接到 MySQL {self.host}:{self.port}, 数据库: {self.database}")
             return True
         except Exception as e:
-            print(f"[MysqlDbClient] 数据库连接失败: {e}")
+            error_print(PREFIX, f"数据库连接失败: {e}")
             self.conn = None
             self.cursor = None
             return False
@@ -125,7 +136,7 @@ class MysqlDbClient:
             list[dict]: 查询结果，每条记录为一个字典，key 为字段名
         """
         if not self.cursor:
-            print("[MysqlDbClient] 数据库未连接，请先调用 connect()")
+            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
             return None
 
         # 处理字段
@@ -146,10 +157,10 @@ class MysqlDbClient:
         try:
             self.cursor.execute(sql)
             rows = self.cursor.fetchall()
-            print(f"[MysqlDbClient] 查询表: {table_name}, 返回 {len(rows)} 条记录")
+            debug_print(PREFIX, f"查询表: {table_name}, 返回 {len(rows)} 条记录")
             return rows
         except Exception as e:
-            print(f"[MysqlDbClient] 查询失败: {e}")
+            error_print(PREFIX, f"查询失败: {e}")
             return None
 
     def query_to_list(self, table_name, columns=None, where=None, limit=None):
@@ -165,7 +176,7 @@ class MysqlDbClient:
             list[tuple]: 查询结果列表
         """
         if not self.cursor:
-            print("[MysqlDbClient] 数据库未连接，请先调用 connect()")
+            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
             return None
 
         if columns is None:
@@ -187,10 +198,10 @@ class MysqlDbClient:
             # DictCursor 返回的是 dict，转为 tuple
             if rows and isinstance(rows[0], dict):
                 rows = [tuple(row.values()) for row in rows]
-            print(f"[MysqlDbClient] 查询表: {table_name}, 返回 {len(rows)} 条记录")
+            debug_print(PREFIX, f"查询表: {table_name}, 返回 {len(rows)} 条记录")
             return rows
         except Exception as e:
-            print(f"[MysqlDbClient] 查询失败: {e}")
+            error_print(PREFIX, f"查询失败: {e}")
             return None
 
     def get_table_columns(self, table_name):
@@ -203,7 +214,7 @@ class MysqlDbClient:
             list[str]: 字段名列表
         """
         if not self.cursor:
-            print("[MysqlDbClient] 数据库未连接，请先调用 connect()")
+            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
             return None
 
         try:
@@ -216,7 +227,7 @@ class MysqlDbClient:
             columns = [row['COLUMN_NAME'] for row in rows]
             return columns
         except Exception as e:
-            print(f"[MysqlDbClient] 获取表字段失败: {e}")
+            error_print(PREFIX, f"获取表字段失败: {e}")
             return None
 
     def print_table_schema(self, table_name):
@@ -226,7 +237,7 @@ class MysqlDbClient:
             table_name (str): 表名
         """
         if not self.cursor:
-            print("[MysqlDbClient] 数据库未连接，请先调用 connect()")
+            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
             return
 
         try:
@@ -252,7 +263,7 @@ class MysqlDbClient:
                 print(f"{col_name:<20} {data_type:<15} {str(max_len):<8} {nullable:<6} {str(default):<12} {comment}")
             print("-" * 90)
         except Exception as e:
-            print(f"[MysqlDbClient] 打印表结构失败: {e}")
+            error_print(PREFIX, f"打印表结构失败: {e}")
 
     def execute(self, sql):
         """执行自定义 SQL 语句
@@ -267,9 +278,8 @@ class MysqlDbClient:
             pymysql.err.OperationalError: 连接级别错误（超时、断连等）
             Exception: 其他 SQL 执行错误
         """
-        import sys as _sys
         if not self.cursor:
-            print("[MysqlDbClient] 数据库未连接，请先调用 connect()", file=_sys.stderr, flush=True)
+            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
             raise RuntimeError("数据库未连接")
 
         try:
@@ -277,15 +287,15 @@ class MysqlDbClient:
             desc = self.cursor.description
             if desc:
                 rows = self.cursor.fetchall()
-                print(f"[MysqlDbClient] 执行 SQL 成功，返回 {len(rows)} 条记录", file=_sys.stderr, flush=True)
+                debug_print(PREFIX, f"执行 SQL 成功，返回 {len(rows)} 条记录")
                 return rows
             else:
                 self.conn.commit()
-                print("[MysqlDbClient] 执行 SQL 成功", file=_sys.stderr, flush=True)
+                debug_print(PREFIX, "执行 SQL 成功")
                 return True  # DDL 成功返回 True 而非 None
         except Exception as e:
             err_msg = str(e)
-            print(f"[MysqlDbClient] SQL 执行失败: {e}", file=_sys.stderr, flush=True)
+            error_print(PREFIX, f"SQL 执行失败: {e}")
             # 连接级别错误：主动关闭损坏的连接
             if isinstance(e, pymysql.err.OperationalError) or \
                isinstance(e, pymysql.err.InterfaceError) or \
@@ -317,7 +327,7 @@ class MysqlDbClient:
             int / None: 插入成功的自增 ID，失败返回 None
         """
         if not self.cursor:
-            print("[MysqlDbClient] 数据库未连接，请先调用 connect()")
+            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
             return None
 
         columns = ", ".join(f"`{k}`" for k in data.keys())
@@ -329,11 +339,11 @@ class MysqlDbClient:
             self.cursor.execute(sql, values)
             self.conn.commit()
             last_id = self.cursor.lastrowid
-            print(f"[MysqlDbClient] 插入成功，自增 ID: {last_id}")
+            debug_print(PREFIX, f"插入成功，自增 ID: {last_id}")
             return last_id
         except Exception as e:
             self.conn.rollback()
-            print(f"[MysqlDbClient] 插入失败: {e}")
+            error_print(PREFIX, f"插入失败: {e}")
             return None
 
     def insert_many(self, table_name, data_list):
@@ -347,11 +357,11 @@ class MysqlDbClient:
             int / None: 插入成功的行数，失败返回 None
         """
         if not self.cursor:
-            print("[MysqlDbClient] 数据库未连接，请先调用 connect()")
+            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
             return None
 
         if not data_list:
-            print("[MysqlDbClient] 数据列表为空")
+            debug_print(PREFIX, "数据列表为空")
             return 0
 
         columns = ", ".join(f"`{k}`" for k in data_list[0].keys())
@@ -362,11 +372,11 @@ class MysqlDbClient:
         try:
             affected = self.cursor.executemany(sql, values)
             self.conn.commit()
-            print(f"[MysqlDbClient] 批量插入成功，影响行数: {affected}")
+            debug_print(PREFIX, f"批量插入成功，影响行数: {affected}")
             return affected
         except Exception as e:
             self.conn.rollback()
-            print(f"[MysqlDbClient] 批量插入失败: {e}")
+            error_print(PREFIX, f"批量插入失败: {e}")
             return None
 
     def update(self, table_name, data, where):
@@ -381,7 +391,7 @@ class MysqlDbClient:
             int / None: 影响行数，失败返回 None
         """
         if not self.cursor:
-            print("[MysqlDbClient] 数据库未连接，请先调用 connect()")
+            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
             return None
 
         set_clause = ", ".join(f"`{k}` = %s" for k in data.keys())
@@ -391,11 +401,11 @@ class MysqlDbClient:
         try:
             affected = self.cursor.execute(sql, values)
             self.conn.commit()
-            print(f"[MysqlDbClient] 更新成功，影响行数: {affected}")
+            debug_print(PREFIX, f"更新成功，影响行数: {affected}")
             return affected
         except Exception as e:
             self.conn.rollback()
-            print(f"[MysqlDbClient] 更新失败: {e}")
+            error_print(PREFIX, f"更新失败: {e}")
             return None
 
     def delete(self, table_name, where):
@@ -409,7 +419,7 @@ class MysqlDbClient:
             int / None: 影响行数，失败返回 None
         """
         if not self.cursor:
-            print("[MysqlDbClient] 数据库未连接，请先调用 connect()")
+            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
             return None
 
         sql = f"DELETE FROM `{table_name}` WHERE {where}"
@@ -417,11 +427,11 @@ class MysqlDbClient:
         try:
             affected = self.cursor.execute(sql)
             self.conn.commit()
-            print(f"[MysqlDbClient] 删除成功，影响行数: {affected}")
+            debug_print(PREFIX, f"删除成功，影响行数: {affected}")
             return affected
         except Exception as e:
             self.conn.rollback()
-            print(f"[MysqlDbClient] 删除失败: {e}")
+            error_print(PREFIX, f"删除失败: {e}")
             return None
 
     def show_tables(self):
@@ -431,7 +441,7 @@ class MysqlDbClient:
             list[str]: 表名列表
         """
         if not self.cursor:
-            print("[MysqlDbClient] 数据库未连接，请先调用 connect()")
+            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
             return None
 
         try:
@@ -439,10 +449,10 @@ class MysqlDbClient:
             self.cursor.execute(sql)
             rows = self.cursor.fetchall()
             tables = [list(row.values())[0] for row in rows]
-            print(f"[MysqlDbClient] 数据库 {self.database} 共 {len(tables)} 张表")
+            debug_print(PREFIX, f"数据库 {self.database} 共 {len(tables)} 张表")
             return tables
         except Exception as e:
-            print(f"[MysqlDbClient] 获取表列表失败: {e}")
+            error_print(PREFIX, f"获取表列表失败: {e}")
             return None
 
     def close(self):
@@ -453,7 +463,7 @@ class MysqlDbClient:
         if self.conn:
             self.conn.close()
             self.conn = None
-        print("[MysqlDbClient] 数据库连接已关闭")
+        debug_print(PREFIX, "数据库连接已关闭")
 
     def __enter__(self):
         """支持 with 语句"""

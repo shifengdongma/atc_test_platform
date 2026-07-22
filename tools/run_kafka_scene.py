@@ -43,6 +43,11 @@ if _root not in sys.path:
 from core.kafka_proc import KafkaProducerClient, KafkaConsumerClient
 import env as _env
 
+try:
+    from common.log_setup import debug_print
+except ImportError:
+    def debug_print(prefix, message): pass
+
 # 尝试导入 redis（写入航线用）
 try:
     import redis as _redis
@@ -381,9 +386,9 @@ class SceneEmitter:
                 if not self.quiet:
                     if self.debug_print_uav_ids:
                         uids = [r.get('uniqueProductIdentificationCode') for r in records]
-                        print(f"[uav_runtime_data]: {ts} 发送 {len(records)} 条 | {progress} | UAVs: {uids}")
+                        debug_print("uav_runtime_data", f"{ts} 发送 {len(records)} 条 | {progress} | UAVs: {uids}")
                     else:
-                        print(f"[uav_runtime_data]: {ts} 发送 {len(records)} 条 | {progress}")
+                        debug_print("uav_runtime_data", f"{ts} 发送 {len(records)} 条 | {progress}")
             except Exception as e:
                 print(f"❌ 发送失败: {e}")
 
@@ -525,7 +530,7 @@ class SceneEmitter:
                             "data": trace_data,
                         })
 
-                    print(f"\033[32m[uav_runtime_trace] {int(ts)} 收到 {data_count} 条\033[0m")
+                    debug_print("uav_runtime_trace", f"{int(ts)} 收到 {data_count} 条")
             except Exception as e:
                 print(f"[Trace] 消费异常: {e}")
             time.sleep(0.05)

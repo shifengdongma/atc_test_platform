@@ -1,6 +1,12 @@
 import json
 import redis
 
+try:
+    from common.log_setup import debug_print, error_print
+except ImportError:
+    def debug_print(prefix, message): pass
+    def error_print(prefix, message): print(f"[{prefix}] ❌ {message}")
+
 class RedisClient:
     """Redis客户端封装类"""
     
@@ -81,10 +87,10 @@ class RedisClient:
         
         try:
             self.client.sadd(key, value)
-            print(f"Redis SADD成功: {key}")
+            debug_print("Redis", f"SADD成功: {key}")
             return True
         except Exception as e:
-            print(f"Redis SADD失败: {e}")
+            error_print("Redis", f"SADD失败: {e}")
             return False
     
     def get(self, key: str) -> str:
@@ -121,10 +127,10 @@ class RedisClient:
         
         try:
             self.client.hset(key, field, value)
-            print(f"Redis HSET成功: {key}:{field}")
+            debug_print("Redis", f"HSET成功: {key}:{field}")
             return True
         except Exception as e:
-            print(f"Redis HSET失败: {e}")
+            error_print("Redis", f"HSET失败: {e}")
             return False
     
     def hgetall(self, key: str):

@@ -155,3 +155,61 @@ def reset_logging() -> None:
     root = logging.getLogger()
     root.handlers.clear()
     root.setLevel(logging.WARNING)
+
+
+# ── 限频打印工具（抑制重复刷屏日志）────────────────────────────────
+
+# 环境变量 UTM_VERBOSE=1 可恢复所有详细日志
+_VERBOSE = os.environ.get("UTM_VERBOSE", "").lower() in ("1", "true", "yes")
+
+
+class RateLimitedPrinter:
+    """限频打印器：相同前缀的消息在冷却时间内最多打印一次。
+
+    用法:
+        _rlp = RateLimitedPrinter("mysql_db_manager", cooldown=60)
+        _rlp.print("MySQL 不可用，query 返回空")  # 60s 内只打印一次
+    """
+
+    def __init__(self, prefix: str, cooldown: float = 60.0) -> None:
+        self._prefix = prefix
+        self._cooldown = cooldown
+        self._last_printed: dict[str, float] = {}
+        self._last_time: float = 0.0
+
+    def print(self, message: str, tag: str = "") -> None:
+        """限频打印消息。相同 tag 在冷却时间内只打印一次。"""
+        import time as _time
+        now = _time.time()
+        key = tag or message
+        last = self._last_printed.get(key, 0.0)
+        if now - last >= self._cooldown:
+            self._last_printed[key] = now
+            # 如果冷却期内被抑制过，打印抑制次数
+            print(f"[{self._prefix}] {message}", flush=True)
+
+
+def debug_print(prefix: str, message: str) -> None:
+    """DEBUG 级别打印：仅在 UTM_VERBOSE=1 时输出。
+
+    用法:
+        from log_setup import debug_print
+        debug_print("DmDbClient", f"查询表: {table}, 返回 {len(rows)} 条记录")
+    """
+    if _VERBOSE:
+        print(f"[{prefix}] {message}", flush=True)
+
+
+def info_print(prefix: str, message: str) -> None:
+    """INFO 级别打印：常规信息（始终输出）。"""
+    print(f"[{prefix}] {message}", flush=True)
+
+
+def warn_print(prefix: str, message: str) -> None:
+    """WARNING 级别打印（始终输出）。"""
+    print(f"[{prefix}] ⚠ {message}", flush=True)
+
+
+def error_print(prefix: str, message: str) -> None:
+    """ERROR 级别打印（始终输出）。"""
+    print(f"[{prefix}] ❌ {message}", flush=True)

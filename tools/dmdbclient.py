@@ -11,6 +11,18 @@ import sys
 
 # 将项目根目录加入 sys.path，确保能导入 env.py
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# 导入日志工具
+try:
+    from common.log_setup import debug_print, info_print, warn_print, error_print
+except ImportError:
+    # 兜底：如果导入失败，退化为普通 print
+    def debug_print(prefix, message): pass  # DEBUG 默认不输出
+    def info_print(prefix, message): print(f"[{prefix}] {message}")
+    def warn_print(prefix, message): print(f"[{prefix}] ⚠ {message}")
+    def error_print(prefix, message): print(f"[{prefix}] ❌ {message}")
+
+PREFIX = "DmDbClient"
 try:
     from env import DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_SCHEMA
 except ImportError:
@@ -53,14 +65,14 @@ class DmDbClient:
                 schema=self.schema
             )
             self.cursor = self.conn.cursor()
-            print(f"[DmDbClient] 成功连接到达梦数据库 {self.host}:{self.port}, 模式: {self.schema}")
+            info_print(PREFIX, f"成功连接到达梦数据库 {self.host}:{self.port}, 模式: {self.schema}")
             return True
         except Exception as e:
             err_msg = str(e)
-            print(f"[DmDbClient] 数据库连接失败: {e}")
+            error_print(PREFIX, f"数据库连接失败: {e}")
             if "-70089" in err_msg or "Encryption module" in err_msg:
-                print("[DmDbClient] 提示: 达梦加密模块需要 libssl.so.1.1 (OpenSSL 1.1)，"
-                      "请确保 Docker 镜像已安装 libssl1.1 兼容库")
+                error_print(PREFIX, "达梦加密模块需要 libssl.so.1.1 (OpenSSL 1.1)，"
+                          "请确保 Docker 镜像已安装 libssl1.1 兼容库")
             return False
 
     def query(self, table_name, columns=None, where=None, limit=None):
@@ -77,7 +89,7 @@ class DmDbClient:
             list[dict]: 查询结果，每条记录为一个字典，key 为字段名
         """
         if not self.cursor:
-            print("[DmDbClient] 数据库未连接，请先调用 connect()")
+            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
             return None
 
         # 处理字段
@@ -106,12 +118,11 @@ class DmDbClient:
             # 转换为字典列表
             result = [dict(zip(col_names, row)) for row in rows]
 
-            print(f"[DmDbClient] 查询表: {self.schema}.{table_name}")
-            print(f"[DmDbClient] 返回 {len(result)} 条记录")
+            debug_print(PREFIX, f"查询表: {self.schema}.{table_name} → {len(result)} 条记录")
 
             return result
         except Exception as e:
-            print(f"[DmDbClient] 查询失败: {e}")
+            error_print(PREFIX, f"查询失败: {e}")
             return None
 
     def query_to_list(self, table_name, columns=None, where=None, limit=None):
@@ -127,7 +138,7 @@ class DmDbClient:
             list[tuple]: 查询结果列表
         """
         if not self.cursor:
-            print("[DmDbClient] 数据库未连接，请先调用 connect()")
+            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
             return None
 
         if columns is None:
@@ -146,10 +157,10 @@ class DmDbClient:
         try:
             self.cursor.execute(sql)
             rows = self.cursor.fetchall()
-            print(f"[DmDbClient] 查询表: {self.schema}.{table_name}, 返回 {len(rows)} 条记录")
+            debug_print(PREFIX, f"查询表: {self.schema}.{table_name} → {len(rows)} 条记录")
             return rows
         except Exception as e:
-            print(f"[DmDbClient] 查询失败: {e}")
+            error_print(PREFIX, f"查询失败: {e}")
             return None
 
     def get_table_columns(self, table_name):
@@ -162,7 +173,7 @@ class DmDbClient:
             list[str]: 字段名列表
         """
         if not self.cursor:
-            print("[DmDbClient] 数据库未连接，请先调用 connect()")
+            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
             return None
 
         try:
@@ -175,7 +186,7 @@ class DmDbClient:
             columns = [row[0] for row in rows]
             return columns
         except Exception as e:
-            print(f"[DmDbClient] 获取表字段失败: {e}")
+            error_print(PREFIX, f"获取表字段失败: {e}")
             return None
 
     def print_table_schema(self, table_name):
@@ -185,7 +196,7 @@ class DmDbClient:
             table_name (str): 表名
         """
         if not self.cursor:
-            print("[DmDbClient] 数据库未连接，请先调用 connect()")
+            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
             return
 
         try:
@@ -196,7 +207,7 @@ class DmDbClient:
             self.cursor.execute(sql)
             rows = self.cursor.fetchall()
 
-            print(f"\n--- 表 {self.schema}.{table_name} 的结构 ---")
+            info_print(PREFIX, f"表 {self.schema}.{table_name} 的结构")
             print(f"{'字段名':<20} {'类型':<15} {'长度':<8} {'可空':<6} {'注释'}")
             print("-" * 70)
             for row in rows:
@@ -205,7 +216,7 @@ class DmDbClient:
                 print(f"{col_name:<20} {data_type:<15} {data_length:<8} {nullable:<6} {comments}")
             print("-" * 70)
         except Exception as e:
-            print(f"[DmDbClient] 打印表结构失败: {e}")
+            error_print(PREFIX, f"打印表结构失败: {e}")
 
     def execute(self, sql):
         """执行自定义 SQL 语句
@@ -217,7 +228,7 @@ class DmDbClient:
             list[dict] / None: 查询结果字典列表，非查询语句返回 None
         """
         if not self.cursor:
-            print("[DmDbClient] 数据库未连接，请先调用 connect()")
+            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
             return None
 
         try:
@@ -227,14 +238,14 @@ class DmDbClient:
                 col_names = [d[0] for d in desc]
                 rows = self.cursor.fetchall()
                 result = [dict(zip(col_names, row)) for row in rows]
-                print(f"[DmDbClient] 执行 SQL 成功，返回 {len(result)} 条记录")
+                debug_print(PREFIX, f"执行 SQL 成功，返回 {len(result)} 条记录")
                 return result
             else:
                 self.conn.commit()
-                print("[DmDbClient] 执行 SQL 成功")
+                debug_print(PREFIX, "执行 SQL 成功")
                 return None
         except Exception as e:
-            print(f"[DmDbClient] SQL 执行失败: {e}")
+            error_print(PREFIX, f"SQL 执行失败: {e}")
             return None
 
     def close(self):
@@ -245,7 +256,7 @@ class DmDbClient:
         if self.conn:
             self.conn.close()
             self.conn = None
-        print("[DmDbClient] 数据库连接已关闭")
+        debug_print(PREFIX, "数据库连接已关闭")
 
     def __enter__(self):
         """支持 with 语句"""

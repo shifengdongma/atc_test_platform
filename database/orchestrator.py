@@ -132,9 +132,9 @@ class SceneOrchestrator:
             except Exception as e:
                 print(f"[Orchestrator] 检查异常: {e}")
             self._loop_count += 1
-            # 每 10 个循环（约 5 分钟）输出一次心跳，证明调度器存活
-            if self._loop_count % 10 == 0:
-                print(f"[Orchestrator] 心跳 #{self._loop_count // 10} — "
+            # 每 30 个循环（约 15 分钟）输出一次心跳，证明调度器存活
+            if self._loop_count % 30 == 0:
+                print(f"[Orchestrator] 心跳 #{self._loop_count // 30} — "
                       f"活跃执行: {len(self._active_executions)}, "
                       f"上次检查: {self._last_check_at.strftime('%H:%M:%S') if self._last_check_at else 'N/A'}")
             time.sleep(30)
@@ -149,10 +149,10 @@ class SceneOrchestrator:
             print(f"[Orchestrator] 查询场景失败 (MySQL 可能不可用): {e}")
             return
 
-        # 始终输出检查日志（每 10 个循环降频一次完整日志，其他循环仅在匹配时输出）
+        # 降频日志：仅在心跳周期输出详细检查信息
         matched_any = False
         enabled_count = len(scenes)
-        if self._loop_count % 10 == 0 and enabled_count > 0:
+        if self._loop_count % 30 == 0 and enabled_count > 0:
             print(f"[Orchestrator] Cron 检查: {now.strftime('%Y-%m-%d %H:%M')}, "
                   f"已启用场景数={enabled_count}")
 
@@ -180,8 +180,8 @@ class SceneOrchestrator:
                   f"(id={scene_id}) cron='{cron_expr}' at {now.strftime('%H:%M:%S')}")
             self._trigger_scene(scene)
 
-        # 降频日志：仅在匹配或心跳周期输出
-        if not matched_any and self._loop_count % 20 == 0:
+        # 降频日志：仅在心跳周期输出无匹配信息
+        if not matched_any and self._loop_count % 30 == 0:
             print(f"[Orchestrator] Cron 检查: {now.strftime('%H:%M')} — "
                   f"{enabled_count} 个启用场景，无匹配")
 

@@ -61,6 +61,9 @@ def _get_bridge():
     return _data_gen_bridge
 
 # ── 常量 ──────────────────────────────────────────────────────────
+# 项目根目录（用于 send_from_directory 绝对路径，避免 CWD 依赖）
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_WEB_PAGES_DIR = os.path.join(_PROJECT_ROOT, "web", "pages")
 REDIS_FLIGHT_PLAN_KEY = "BIZ_DATA:UAV_ROUTE"
 REDIS_AIRSPACE_KEY = "BIZ_DATA:AIRSPACE"
 KAFKA_UAV_DATA_TOPIC = "uav_runtime_data"
@@ -68,7 +71,7 @@ KAFKA_TRACE_TOPIC = "uav_runtime_trace"
 DEFAULT_TARGET_DRONES = 1
 
 # ── Flask 应用初始化 ───────────────────────────────────────────────
-app = Flask(__name__, static_folder="static", static_url_path="/static")
+app = Flask(__name__, static_folder=os.path.join(_PROJECT_ROOT, "web", "static"), static_url_path="/static")
 app.config["SECRET_KEY"] = "utm_moc52_web_secret"
 # WebSocket 异步模式选择：
 # - Windows: threading 模式 + simple-websocket（eventlet monkey_patch 会破坏 C++ Simulator 线程）
@@ -956,13 +959,13 @@ def page_config():
 @app.route("/run")
 def page_run():
     """仿真执行页（合并配置+监控+地图）。"""
-    return send_from_directory("../web/pages", "run.html")
+    return send_from_directory(_WEB_PAGES_DIR, "run.html")
 
 
 @app.route("/scene")
 def page_scene():
     """场景编排管理页。"""
-    return send_from_directory("../web/pages", "scene.html")
+    return send_from_directory(_WEB_PAGES_DIR, "scene.html")
 
 
 @app.route("/schedule")
@@ -975,43 +978,43 @@ def page_schedule():
 @app.route("/generate")
 def page_generate():
     """模拟数据生成页。"""
-    return send_from_directory("../web/pages", "generate.html")
+    return send_from_directory(_WEB_PAGES_DIR, "generate.html")
 
 
 @app.route("/data")
 def page_data():
     """JSON 数据管理页。"""
-    return send_from_directory("../web/pages", "data.html")
+    return send_from_directory(_WEB_PAGES_DIR, "data.html")
 
 
 @app.route("/env")
 def page_env():
     """环境变量管理页。"""
-    return send_from_directory("../web/pages", "env.html")
+    return send_from_directory(_WEB_PAGES_DIR, "env.html")
 
 
 @app.route("/logs")
 def page_logs():
     """系统日志页。"""
-    return send_from_directory("../web/pages", "logs.html")
+    return send_from_directory(_WEB_PAGES_DIR, "logs.html")
 
 
 @app.route("/performance")
 def page_performance():
     """性能监控页（占位）。"""
-    return send_from_directory("../web/pages", "performance.html")
+    return send_from_directory(_WEB_PAGES_DIR, "performance.html")
 
 
 @app.route("/ha")
 def page_ha():
     """高可用管理页（占位）。"""
-    return send_from_directory("../web/pages", "ha.html")
+    return send_from_directory(_WEB_PAGES_DIR, "ha.html")
 
 
 @app.route("/basicdata")
 def page_basicdata():
     """基础数据管理页（占位）。"""
-    return send_from_directory("../web/pages", "basicdata.html")
+    return send_from_directory(_WEB_PAGES_DIR, "basicdata.html")
 
 
 @app.route("/api/sim/status", methods=["GET"])
@@ -2440,16 +2443,30 @@ def _get_orchestrator():
     return _orchestrator
 
 
-# 在模块加载时立即初始化编排器，确保 cron 调度线程在服务启动时就运行
-# （解决 Bug: 延迟初始化导致进程重启后定时任务失效）
+# 在后台线程中延迟初始化编排器，避免 MySQL 连接阻塞 Flask 服务启动
+# （启动后台线程 2 秒后初始化，确保 Flask 先绑定端口响应 HTTP 请求）
 _init_orch_done = False
-if not _init_orch_done:
+
+
+def _init_orchestrator_deferred() -> None:
+    """后台线程：延迟初始化场景编排调度器。"""
+    global _init_orch_done
+    import time as _time
+    _time.sleep(2.0)  # 等待 Flask 端口绑定后再连接数据库
     try:
         _get_orchestrator()
         _init_orch_done = True
-        print("[web_server] 场景编排调度器已在启动时初始化", flush=True)
+        print("[web_server] 场景编排调度器已在后台初始化", flush=True)
     except Exception as _orch_init_err:
         print(f"[web_server] 场景编排调度器初始化失败（DB 可能未就绪）: {_orch_init_err}", flush=True)
+
+
+_init_orch_thread = threading.Thread(
+    target=_init_orchestrator_deferred,
+    daemon=True,
+    name="orch-deferred-init",
+)
+_init_orch_thread.start()
 
 
 # ── 辅助装饰器 ──────────────────────────────────────────────────────

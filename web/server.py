@@ -137,7 +137,7 @@ _runtime_state: Dict[str, Any] = {
     "running": False,
     "mode": "",
     "active_drones": 0,
-    "kafka_msg_per_sec": 0,
+    "redis_msg_per_sec": 0,
     "uptime_sec": 0,
     "errors": 0,
     "redis_connected": False,
@@ -467,7 +467,7 @@ class SimulationRunner:
 
         # 先加载航线文件写入 Redis（PlanRunner 依赖 Redis 中已有飞行计划）
         route_file = self.config.get("plan_route_file", "redis_route.json")
-        mock_dir = os.path.join(_root, "..", "data", "mock")
+        mock_dir = os.path.join(_root, "data", "mock")
         route_path = os.path.join(mock_dir, route_file) if not os.path.isabs(route_file) else route_file
 
         if os.path.exists(route_path):
@@ -556,7 +556,7 @@ class SimulationRunner:
                     with _lock:
                         _runtime_state.update({
                             "active_drones": status["active_drones"],
-                            "kafka_msg_per_sec": status["kafka_msg_per_sec"],
+                            "redis_msg_per_sec": status["redis_msg_per_sec"],
                             "uptime_sec": status["uptime_sec"],
                             "errors": status["errors"],
                         })
@@ -601,7 +601,7 @@ class SimulationRunner:
                     with _lock:
                         _runtime_state.update({
                             "active_drones": status["active_drones"],
-                            "kafka_msg_per_sec": status["kafka_msg_per_sec"],
+                            "redis_msg_per_sec": status["redis_msg_per_sec"],
                             "uptime_sec": status["uptime_sec"],
                             "errors": status["errors"],
                         })
@@ -628,7 +628,7 @@ class SimulationRunner:
             data_file = self.config.get("data_file", "kafka_data.json")
             route_file = self.config.get("route_file", "redis_route.json")
             try:
-                mock_dir = os.path.join(_root, "..", "data", "mock")
+                mock_dir = os.path.join(_root, "data", "mock")
                 _rk.KAFKA_DATA_JSON_PATH = os.path.join(mock_dir, data_file)
                 _rk.REDIS_ROUTE_JSON_PATH = os.path.join(mock_dir, route_file)
                 ds = _rk.DataSource(kafka_url=self.config.get("kafka_url"))
@@ -651,7 +651,7 @@ class SimulationRunner:
                             _add_log(f"Kafka 发送失败: {e}")
                         with _lock:
                             _runtime_state["active_drones"] = len(ds.allowed_uav_uids)
-                            _runtime_state["kafka_msg_per_sec"] = len(batch)
+                            _runtime_state["redis_msg_per_sec"] = len(batch)
                             if self._start_time:
                                 _runtime_state["uptime_sec"] = int(time.time() - self._start_time)
                     # 桥接触发数据到前端 Layer 2（运行日志-轨迹预测）
@@ -672,7 +672,7 @@ class SimulationRunner:
 
         elif self.mode == "scene":
             # 场景文件注入：使用 run_kafka_scene.py 的 SceneEmitter
-            mock_dir = os.path.join(_root, "..", "data", "mock")
+            mock_dir = os.path.join(_root, "data", "mock")
             scene_files = [os.path.join(mock_dir, f) for f in self.config.get("scene_files", []) if f]
             scene_dir = self.config.get("scene_dir", None)
             scene_interval = self.config.get("scene_interval", 1000)
@@ -683,62 +683,80 @@ class SimulationRunner:
                 _add_log("scene 模式需要指定场景文件或目录，请先选择文件")
                 self._running = False
             else:
-                _add_log(f"启动场景文件注入模式: {len(scene_files)} 个文件, 间隔={scene_interval}ms, 时间戳={scene_timestamp_mode}")
-                from tools.run_kafka_scene import SceneEmitter
-                try:
-                    emitter = SceneEmitter(
-                        files=scene_files,
-                        scene_dir=scene_dir,
-                        kafka_url=self.config.get("kafka_url"),
-                        topic=KAFKA_UAV_DATA_TOPIC,
-                        interval_ms=scene_interval,
-                        timestamp_mode=scene_timestamp_mode,
-                        loop=scene_loop,
-                        consume_trace=True,
-                    )
-                    self._emitter = emitter  # 保存引用供 _cleanup() 使用
-                    emitter.start()
-                    with _lock:
-                        _runtime_state["active_drones"] = len(emitter.uav_data_list)
+                # 诊断：检查哪些文件实际存在于磁盘
+                _missing = [os.path.basename(f) for f in scene_files if not os.path.exists(f)]
+                _existing = [f for f in scene_files if os.path.exists(f)]
+                if _missing:
+                    _add_log(f"⚠ 以下文件在磁盘上不存在: {_missing}")
+                if not _existing and not scene_dir:
+                    _add_log("❌ 所有选定文件均不存在于磁盘，请先在数据管理页面点击'全部导出到磁盘'")
+                    self._running = False
+                else:
+                    # 打印文件大小信息用于诊断
+                    for _f in _existing:
+                        _size_mb = os.path.getsize(_f) / (1024 * 1024)
+                        _add_log(f"  📁 {os.path.basename(_f)} ({_size_mb:.1f}MB)")
+                    _add_log(f"启动场景文件注入模式: {len(_existing or scene_files)} 个文件, 间隔={scene_interval}ms, 时间戳={scene_timestamp_mode}")
+                    from tools.run_kafka_scene import SceneEmitter
+                    try:
+                        emitter = SceneEmitter(
+                            files=scene_files,
+                            scene_dir=scene_dir,
+                            kafka_url=self.config.get("kafka_url"),
+                            topic=KAFKA_UAV_DATA_TOPIC,
+                            interval_ms=scene_interval,
+                            timestamp_mode=scene_timestamp_mode,
+                            loop=scene_loop,
+                            consume_trace=True,
+                        )
+                        self._emitter = emitter
+                        # 诊断：报告加载结果
+                        _uav_count = len(emitter.uav_data_list)
+                        if _uav_count == 0:
+                            _add_log("❌ SceneEmitter 未加载到任何 UAV 数据 — 可能 JSON 格式不兼容或文件为空")
+                        else:
+                            _total_records = sum(u.total for u in emitter.uav_data_list)
+                            _add_log(f"✅ 已加载 {_uav_count} 架 UAV, 共 {_total_records} 条记录")
+                        emitter.start()
+                        with _lock:
+                            _runtime_state["active_drones"] = len(emitter.uav_data_list)
 
-                    _prev_scene_sent = 0
-                    _prev_scene_trace = 0
-                    while self._running and emitter.running:
-                        try:
-                            # 桥接场景遥测计数到前端 Layer 1（运行日志-遥测）
-                            current_sent = emitter.stats.get('sent', 0)
-                            if current_sent > _prev_scene_sent:
-                                count = current_sent - _prev_scene_sent
-                                _prev_scene_sent = current_sent
-                                _get_streamer().report_kafka_telemetry(count)
-                                socketio.emit("telemetry_data", {
-                                    "records": [], "count": count,
-                                    "mode": "scene",
-                                    "message": f"场景注入 {count} 条遥测记录"
-                                })
-                            # 桥接场景 trace 数据到前端 Layer 2（运行日志-轨迹预测）
-                            if emitter.consume_trace and emitter.trace_stats:
-                                current_trace = emitter.trace_stats.get('received', 0)
-                                if current_trace > _prev_scene_trace and current_trace > 0:
-                                    _prev_scene_trace = current_trace
-                                    socketio.emit("trace_data", {
-                                        "count": current_trace,
-                                        "data": list(emitter.trace_records[-50:]),
-                                        "key": "scene",
+                        _prev_scene_sent = 0
+                        _prev_scene_trace = 0
+                        while self._running and emitter.running:
+                            try:
+                                current_sent = emitter.stats.get('sent', 0)
+                                if current_sent > _prev_scene_sent:
+                                    count = current_sent - _prev_scene_sent
+                                    _prev_scene_sent = current_sent
+                                    _get_streamer().report_redis_telemetry(count)
+                                    socketio.emit("telemetry_data", {
+                                        "records": [], "count": count,
+                                        "mode": "scene",
+                                        "message": f"场景注入 {count} 条遥测记录"
                                     })
-                            with _lock:
-                                if self._start_time:
-                                    _runtime_state["uptime_sec"] = int(time.time() - self._start_time)
-                        except Exception:
-                            pass
-                        self._push_status()
-                        time.sleep(1.0)
+                                if emitter.consume_trace and emitter.trace_stats:
+                                    current_trace = emitter.trace_stats.get('received', 0)
+                                    if current_trace > _prev_scene_trace and current_trace > 0:
+                                        _prev_scene_trace = current_trace
+                                        socketio.emit("trace_data", {
+                                            "count": current_trace,
+                                            "data": list(emitter.trace_records[-50:]),
+                                            "key": "scene",
+                                        })
+                                with _lock:
+                                    if self._start_time:
+                                        _runtime_state["uptime_sec"] = int(time.time() - self._start_time)
+                            except Exception:
+                                pass
+                            self._push_status()
+                            time.sleep(1.0)
 
-                    emitter.stop()
-                    _add_log("场景文件注入完成")
-                except Exception as e:
-                    _add_log(f"scene 模式异常: {e}")
-                    traceback.print_exc()
+                        emitter.stop()
+                        _add_log("场景文件注入完成")
+                    except Exception as e:
+                        _add_log(f"scene 模式异常: {e}")
+                        traceback.print_exc()
 
         elif self.mode == "plan":
             # Plan 模式：PlanRunner 有自己的独立线程
@@ -748,7 +766,7 @@ class SimulationRunner:
                     plan_count = len(self._plan_runner._plans) if self._plan_runner else 0
                     with _lock:
                         _runtime_state["active_drones"] = plan_count
-                        _runtime_state["kafka_msg_per_sec"] = plan_count
+                        _runtime_state["redis_msg_per_sec"] = plan_count
                         if self._start_time:
                             _runtime_state["uptime_sec"] = int(time.time() - self._start_time)
                 except Exception:
@@ -758,7 +776,7 @@ class SimulationRunner:
 
         self._cleanup()
 
-    _last_reported_kafka = 0
+    _last_reported_redis = 0
 
     def _push_status(self) -> None:
         """推送运行时状态到所有 WebSocket 客户端。"""
@@ -766,15 +784,15 @@ class SimulationRunner:
             if self._start_time:
                 _runtime_state["uptime_sec"] = int(time.time() - self._start_time)
             status = dict(_runtime_state)
-            kafka_tp = status.get("kafka_msg_per_sec", 0)
+            redis_tp = status.get("redis_msg_per_sec", 0)
         socketio.emit("status", status)
-        # 每 5 秒报告一次 Kafka 遥测吞吐量
-        if kafka_tp > 0 and kafka_tp != self._last_reported_kafka:
+        # 每 5 秒报告一次 Redis 遥测吞吐量
+        if redis_tp > 0 and redis_tp != self._last_reported_redis:
             try:
-                _get_streamer().report_kafka_telemetry(kafka_tp)
+                _get_streamer().report_redis_telemetry(redis_tp)
             except Exception:
                 pass
-            self._last_reported_kafka = kafka_tp
+            self._last_reported_redis = redis_tp
 
     def _cleanup(self) -> None:
         """清理资源。"""
@@ -840,7 +858,7 @@ class SimulationRunner:
             _runtime_state["running"] = True
             _runtime_state["mode"] = self.mode
             _runtime_state["active_drones"] = 0
-            _runtime_state["kafka_msg_per_sec"] = 0
+            _runtime_state["redis_msg_per_sec"] = 0
             _runtime_state["uptime_sec"] = 0
             _runtime_state["errors"] = 0
             _runtime_state["logs"] = []
@@ -1252,7 +1270,7 @@ def api_save_config():
 
     # 写入 config.json
     try:
-        cfg_path = os.path.join(_root, "..", "common", "config.json")
+        cfg_path = os.path.join(_root, "common", "config.json")
         cfg_data = {
             "redis_ip": _current_config["redis_ip"],
             "redis_port": _current_config["redis_port"],
@@ -1334,7 +1352,7 @@ def _detect_file_format(content_str: str) -> Dict[str, Any]:
 @app.route("/api/data/files", methods=["GET"])
 def api_list_data_files():
     """列出 mock/ 目录下可用的 JSON 数据文件。"""
-    mock_dir = os.path.join(_root, "..", "data", "mock")
+    mock_dir = os.path.join(_root, "data", "mock")
     if not os.path.exists(mock_dir):
         return jsonify({"files": [], "error": "mock/ 目录不存在"})
 
@@ -1387,7 +1405,7 @@ def api_list_data_files():
 @app.route("/api/data/files/<filename>", methods=["GET"])
 def api_get_data_file(filename: str):
     """查看 JSON 文件内容（分页）。"""
-    mock_dir = os.path.join(_root, "..", "data", "mock")
+    mock_dir = os.path.join(_root, "data", "mock")
     path = os.path.join(mock_dir, filename)
 
     # 安全检查：禁止路径穿越
@@ -1593,7 +1611,7 @@ def api_generate_data():
             })
 
         # 保存遥测轨迹文件（Kafka 格式，用于 scene/replay 模式）
-        mock_dir = os.path.join(_root, "..", "data", "mock")
+        mock_dir = os.path.join(_root, "data", "mock")
         os.makedirs(mock_dir, exist_ok=True)
         ts = int(time.time())
 
@@ -1642,7 +1660,7 @@ def api_upload_data():
         return jsonify({"success": False, "error": "仅支持 .json 文件"}), 400
 
     try:
-        mock_dir = os.path.join(_root, "..", "data", "mock")
+        mock_dir = os.path.join(_root, "data", "mock")
         os.makedirs(mock_dir, exist_ok=True)
         save_path = os.path.join(mock_dir, file.filename)
         file.save(save_path)
@@ -1671,7 +1689,7 @@ def api_launch_replay():
     route_file = data.get("route_file", "redis_route.json")
     target_drones = data.get("target_drones", None)
 
-    mock_dir = os.path.join(_root, "..", "data", "mock")
+    mock_dir = os.path.join(_root, "data", "mock")
     data_path = os.path.join(mock_dir, data_file)
     route_path = os.path.join(mock_dir, route_file)
 
@@ -2161,6 +2179,20 @@ def api_db_delete_file(file_id):
     mgr = _get_json_mgr()
     mgr.delete_file(file_id)
     return jsonify({"success": True, "message": "已删除"})
+
+
+@app.route("/api/data/db/files/batch-delete", methods=["POST"])
+@_safe_json
+def api_db_batch_delete():
+    """批量删除文件。"""
+    data = request.get_json(silent=True) or {}
+    file_ids = data.get("ids", [])
+    if not file_ids:
+        return jsonify({"success": 0, "total": 0, "message": "未选择文件"})
+    mgr = _get_json_mgr()
+    result = mgr.delete_files_batch(file_ids)
+    _add_log(f"批量删除: {result.get('message', '')}")
+    return jsonify(result)
 
 
 @app.route("/api/data/db/files/<int:file_id>/download", methods=["GET"])

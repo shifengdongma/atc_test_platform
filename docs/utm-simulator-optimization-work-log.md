@@ -90,3 +90,51 @@
 
 - 新建文件：0
 - 修改文件：5
+
+---
+
+## 2026-07-23 — scene 模式仿真数据发送修复 + flight_data 格式兼容 + 批量操作 + 监控指标重命名
+
+### 修改清单
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-23 | `web/server.py` | 修改 | ✅ | mock_dir 路径修复 + scene 诊断日志 + config.json 路径修复 |
+| 2026-07-23 | `core/sim_manager.py` | 修改 | ✅ | mock_dir 路径修复 |
+| 2026-07-23 | `core/kafka_proc.py` | 修改 | ✅ | null UID 保护 + max_request_size(10MB) + flush 超时(10s) |
+| 2026-07-23 | `tools/run_kafka_scene.py` | 修改 | ✅ | flight_data 格式识别 + `_normalize_flight_data()` 转换 + Redis 航线格式完善 |
+| 2026-07-23 | `database/json_data_manager.py` | 修改 | ✅ | `delete_files_batch()` + `export_all_to_mock()` + 文件截断保护 |
+| 2026-07-23 | `database/log_streamer.py` | 修改 | ✅ | `report_kafka_telemetry` → `report_redis_telemetry` |
+| 2026-07-23 | `common/schemas.py` | 修改 | ✅ | `kafka_msg_per_sec` → `redis_msg_per_sec` |
+| 2026-07-23 | `web/pages/data.html` | 修改 | ✅ | 批量上传/删除按钮 + 复选框列 |
+| 2026-07-23 | `web/pages/run.html` | 修改 | ✅ | canvas id + 卡片标签改为 Redis |
+| 2026-07-23 | `web/index.html` | 修改 | ✅ | 同上 |
+| 2026-07-23 | `web/static/js/data.js` | 修改 | ✅ | 批量上传/删除逻辑 + 文件截断保护 |
+| 2026-07-23 | `web/static/js/run.js` | 修改 | ✅ | `kafka_msg_per_sec` → `redis_msg_per_sec` |
+| 2026-07-23 | `web/static/js/app.js` | 修改 | ✅ | 同上 |
+| 2026-07-23 | `web/static/js/charts.js` | 修改 | ✅ | `kafkaData` → `redisData` 全部重命名 |
+| 2026-07-23 | `tests/test_schemas.py` | 修改 | ✅ | 同步字段重命名 |
+| 2026-07-23 | `README.md` | 修改 | ✅ | 文档同步 |
+
+### 核心修复
+
+1. **mock_dir 路径修复（11 处）**：`os.path.join(_root, "..", "data", "mock")` → `os.path.join(_root, "data", "mock")`，`_root` 已是项目根目录，多余的 `".."` 跳到父目录导致 SceneEmitter 找不到文件；同时修复 `config.json` 写入路径。
+
+2. **flight_data 格式兼容**：新增 `_normalize_flight_data()` 将 flight_data 格式 `{"data": [{uav_id, position:{lat,lon,alt}, track_angle, status:{ground_speed}}]}` 完整转换为 ATC 遥测格式（23+ 字段，含 `coordinateSystemType`/`rpsLocationType`/`pressureAltitude` 等全部必填字段），5360 个坐标点逐条发送而非整体打包。
+
+3. **Kafka 生产者健壮性**：null UID 兜底 `or 'UNKNOWN'`；`max_request_size` 1MB→10MB 支持大消息；flush 超时 1s→10s 避免 KafkaTimeoutError。
+
+4. **Redis 航线格式完善**：`segmentProtectHeight`(0→50)、`segmentProtectHeightType`(0→1)、`segmentWidth`(0→100) 匹配标准 ATC 格式；航段数限制 ≤200 段防止下游因过多航段拒绝；补齐 `realNameRegistrationSign` 字段。
+
+5. **批量操作**：上传支持 `multiple` 多文件选择并逐个上传显示进度；删除支持勾选多行 → 批量删除确认 → `POST /api/data/db/files/batch-delete` → 汇总结果。
+
+6. **文件截断保护**：编辑 >100KB 文件时仅加载前 100KB（预览），保存时不发送 content 防止截断覆盖原文件；后端 `save_file()` 检测新内容 < 原文件 80% 时拒绝覆盖。
+
+7. **监控指标重命名**：卡片、图表、JS 变量/ID、服务端状态 key、日志函数 全部 `Kafka` → `Redis`（`kafka_msg_per_sec` → `redis_msg_per_sec`，`chart-kafka` → `chart-redis`，`#kafka-tp` → `#redis-tp` 等）。
+
+8. **scene 模式诊断日志**：启动前检查文件存在性并记录到 Web UI 运行日志；创建 SceneEmitter 后报告加载的 UAV 数量和记录数。
+
+### 汇总
+
+- 新建文件：0
+- 修改文件：16

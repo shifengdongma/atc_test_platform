@@ -204,7 +204,14 @@ class SceneEmitter:
             self._load_json_file(path)
 
     def _load_json_file(self, path: str):
-        """加载单个 JSON 文件，按 uid 分组"""
+        """加载单个 JSON 文件，按 uid 分组。
+
+        支持三种 JSON 格式：
+        1. 列表: [{telemetry}, ...] — ATC 遥测记录数组
+        2. dict + records 键: {"records": [{telemetry}, ...]}
+        3. dict + data 键: {"data": [{flight_data_point}, ...]} — flight_data 格式，
+           每个元素是坐标点(uav_id/lat/lon/alt/timestamp)，自动转为 ATC 遥测格式
+        """
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -213,6 +220,10 @@ class SceneEmitter:
                 records = data
             elif isinstance(data, dict) and 'records' in data:
                 records = data['records']
+            elif isinstance(data, dict) and 'data' in data:
+                # flight_data 格式：{"data": [{uav_id, position:{lat,lon,alt}, ...}]}
+                records = [self._normalize_flight_data(r) for r in data['data']]
+                print(f"  📋 flight_data 格式: {len(records)} 个坐标点 ({os.path.basename(path)})")
             else:
                 records = [data]
 
@@ -228,6 +239,52 @@ class SceneEmitter:
 
         except Exception as e:
             print(f"  ❌ 加载失败 {path}: {e}")
+
+    @staticmethod
+    def _normalize_flight_data(pt: Dict) -> Dict:
+        """将 flight_data 格式坐标点转为 ATC 遥测格式。
+
+        flight_data:                   → ATC telemetry:
+          uav_id                       → uniqueProductIdentificationCode
+          position.lat                 → latitude
+          position.lon                 → longitude
+          position.alt                 → geodeticAltitude
+          position.alt_relative        → relativeAltitude
+          timestamp                    → timestamp
+          track_angle                  → trackAngle
+          vertical_speed               → verticalSpeed
+          status.ground_speed          → speed
+          classification / mav_type    保持
+        """
+        pos = pt.get("position", {}) or {}
+        status = pt.get("status", {}) or {}
+        return {
+            "uniqueProductIdentificationCode": pt.get("uav_id", "UNKNOWN"),
+            "realNameRegistrationSign": pt.get("realNameRegistrationSign", pt.get("uav_id", "")),
+            "longitude": pos.get("lon", 0),
+            "latitude": pos.get("lat", 0),
+            "geodeticAltitude": pos.get("alt", 0),
+            "relativeAltitude": pos.get("alt_relative", 0),
+            "timestamp": pt.get("timestamp", 0),
+            "trackAngle": pt.get("track_angle", 0),
+            "verticalSpeed": pt.get("vertical_speed", 0),
+            "speed": status.get("ground_speed", 0),
+            "operatingStatus": 2,
+            "classification": pt.get("classification", 3),
+            "uasOperationCategory": pt.get("mav_type", 1),
+            "coordinateSystemType": 0,
+            "horizontalAccuracy": 1,
+            "verticalAccuracy": 0,
+            "speedAccuracy": 0,
+            "timestampAccuracy": 0,
+            "sourceType": 1,
+            "rpsLocationType": 1,
+            "rpsLongitude": 0.0,
+            "rpsLatitude": 0.0,
+            "rpsAltitude": 0.0,
+            "pressureAltitude": 0.0,
+            "addInf": {},
+        }
 
     def _process_timestamp(self, record: Dict, now_ms: int) -> int:
         """处理时间戳"""
@@ -542,25 +599,32 @@ class SceneEmitter:
             return None
         records = uav.records
 
-        # 单记录场景：构造一个悬停点航线，确保下游也能识别该 UAV
+        # 注册号：优先用 realNameRegistrationSign，否则用 UID
+        reg_code = records[0].get("realNameRegistrationSign", uav.uid)
+
+        def _make_segment(seq, p0, p1):
+            return {
+                "sequence": seq,
+                "type": 2,
+                "segmentStartLon": p0.get("longitude", 0),
+                "segmentStartLat": p0.get("latitude", 0),
+                "segmentEndLon": p1.get("longitude", 0),
+                "segmentEndLat": p1.get("latitude", 0),
+                "segmentStartHeight": p0.get("geodeticAltitude", 0),
+                "segmentEndHeight": p1.get("geodeticAltitude", 0),
+                "segmentProtectHeight": 50.0,
+                "segmentProtectHeightType": 1,
+                "segmentWidth": 100.0,
+            }
+
+        # 单记录场景：构造一个悬停点航线
         if len(records) == 1:
             p = records[0]
             now = time.time()
-            route_list = [{
-                "sequence": 0,
-                "type": 2,
-                "segmentStartLon": p.get("longitude", 0),
-                "segmentStartLat": p.get("latitude", 0),
-                "segmentEndLon": p.get("longitude", 0),
-                "segmentEndLat": p.get("latitude", 0),
-                "segmentStartHeight": p.get("geodeticAltitude", 0),
-                "segmentEndHeight": p.get("geodeticAltitude", 0),
-                "segmentProtectHeight": 0,
-                "segmentProtectHeightType": 0,
-                "segmentWidth": 0,
-            }]
+            route_list = [_make_segment(0, p, p)]
             return {
                 "uniqueProductIdentificationCode": uav.uid,
+                "realNameRegistrationSign": reg_code,
                 "flightPlanList": [{
                     "flightPlanId": 1,
                     "planTakeoffTime": now,
@@ -571,24 +635,25 @@ class SceneEmitter:
                 }],
             }
 
-        # 多记录场景：按原有逻辑构建完整的折线航线
+        # 多记录场景：降采样构建折线（最多 200 段，避免下游因过多航段拒绝）
+        _MAX_SEGMENTS = 200
+        _step = max(1, (len(records) - 1) // _MAX_SEGMENTS)
         route_list = []
-        for i in range(len(records) - 1):
+        seq = 0
+        for i in range(0, len(records) - 1, _step):
             p0 = records[i]
-            p1 = records[i + 1]
-            route_list.append({
-                "sequence": i,
-                "type": 2,
-                "segmentStartLon": p0.get("longitude", 0),
-                "segmentStartLat": p0.get("latitude", 0),
-                "segmentEndLon": p1.get("longitude", 0),
-                "segmentEndLat": p1.get("latitude", 0),
-                "segmentStartHeight": p0.get("geodeticAltitude", 0),
-                "segmentEndHeight": p1.get("geodeticAltitude", 0),
-                "segmentProtectHeight": 0,
-                "segmentProtectHeightType": 0,
-                "segmentWidth": 0,
-            })
+            p1 = records[min(i + _step, len(records) - 1)]
+            route_list.append(_make_segment(seq, p0, p1))
+            seq += 1
+        # 确保末点被覆盖
+        if len(records) > 1:
+            last = records[-1]
+            prev = records[-2]
+            if len(route_list) > 0:
+                route_list[-1]["segmentEndLon"] = last.get("longitude", 0)
+                route_list[-1]["segmentEndLat"] = last.get("latitude", 0)
+                route_list[-1]["segmentEndHeight"] = last.get("geodeticAltitude", 0)
+
         # 计算原始飞行时长，再将起降时间平移到当前时刻
         start_ts = records[0].get("timestamp", int(time.time()))
         end_ts = records[-1].get("timestamp", start_ts + 600)
@@ -596,10 +661,11 @@ class SceneEmitter:
             start_ts = start_ts / 1000.0
         if end_ts > 1e10:
             end_ts = end_ts / 1000.0
-        duration = max(end_ts - start_ts, 60)  # 至少保底 60 秒
+        duration = max(end_ts - start_ts, 60)
         now = time.time()
         return {
             "uniqueProductIdentificationCode": uav.uid,
+            "realNameRegistrationSign": reg_code,
             "flightPlanList": [
                 {
                     "flightPlanId": 1,

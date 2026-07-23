@@ -19,7 +19,7 @@ window.loadFiles = async function(page) {
   var alarmType = $('#data-alarm-type') ? $('#data-alarm-type').value : '';
   var kw = $('#data-search').value.trim();
   var tbody = $('#data-tbody');
-  tbody.innerHTML = '<tr><td colspan="9" class="empty-hint">加载中...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="10" class="empty-hint">加载中...</td></tr>';
 
   try {
     var params = '?page=' + page + '&page_size=20';
@@ -29,7 +29,7 @@ window.loadFiles = async function(page) {
     var data = await apiGet('/api/data/db/files' + params);
 
     if (!data.files || !data.files.length) {
-      tbody.innerHTML = '<tr><td colspan="9" class="empty-hint">暂无数据，点击"导入 mock/"或"新建"</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="10" class="empty-hint">暂无数据，点击"导入 mock/"或"新建"</td></tr>';
       $('#data-pagination').innerHTML = '';
       return;
     }
@@ -40,8 +40,12 @@ window.loadFiles = async function(page) {
 
     // 分页
     renderPagination(data.total, data.page, data.page_size);
+    // 重置批量选择状态
+    var selAll = $('#data-select-all');
+    if (selAll) selAll.checked = false;
+    updateBatchUI();
   } catch(e) {
-    tbody.innerHTML = '<tr><td colspan="9" class="empty-hint">加载失败: ' + escHtml(e.message) + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="empty-hint">加载失败: ' + escHtml(e.message) + '</td></tr>';
   }
 };
 
@@ -58,6 +62,7 @@ function renderFileRow(f) {
     : '<span class="text-dim">-</span>';
 
   return '<tr>' +
+    '<td><input type="checkbox" class="data-row-cb" data-id="' + f.id + '" onchange="updateBatchUI()"></td>' +
     '<td>' + f.id + '</td>' +
     '<td>' + alarmHtml + '</td>' +
     '<td class="action-cell">' +
@@ -295,8 +300,10 @@ window.editFile = async function(id) {
       $('#edit-size-warning').style.display = 'none';
     }
 
-    $('#edit-modal').style.display = 'flex';
     $('#edit-modal').dataset.editId = id;
+    // 标记文件内容是否被截断，保存时避免截断内容覆盖原文件
+    $('#edit-modal').dataset.truncated = truncated ? '1' : '';
+    $('#edit-content').dataset.originalSize = data.total_size || 0;
     loadAlarmTypeSelect();
   } catch(e) { showToast('加载失败: ' + e.message, 'error'); }
 };
@@ -313,6 +320,8 @@ function showEditModal() {
   $('#edit-size-warning').style.display = 'none';
   $('#edit-modal').style.display = 'flex';
   delete $('#edit-modal').dataset.editId;
+  $('#edit-modal').dataset.truncated = '';
+  $('#edit-content').dataset.originalSize = '0';
   loadAlarmTypeSelect();
 }
 
@@ -327,6 +336,11 @@ $('#edit-modal').addEventListener('click', function(e) {
 });
 
 $('#btn-edit-save').addEventListener('click', async function() {
+  var wasTruncated = $('#edit-modal').dataset.truncated === '1';
+  var originalSize = parseInt($('#edit-content').dataset.originalSize) || 0;
+  var currentContent = $('#edit-content').value;
+  var newContentLen = currentContent.length;
+
   var body = {
     name: $('#edit-name').value.trim(),
     category: $('#edit-category').value.trim(),
@@ -334,8 +348,20 @@ $('#btn-edit-save').addEventListener('click', async function() {
     simulator_id: $('#edit-simulator-id').value.trim(),
     linked_route: $('#edit-linked-route').value.trim(),
     description: $('#edit-desc').value.trim(),
-    content: $('#edit-content').value,
   };
+
+  // 保护：截断加载的大文件，除非用户明确修改了内容，否则不发送 content 字段
+  // 防止 100KB 截断内容覆盖原始完整文件
+  if (wasTruncated) {
+    if (newContentLen > 0 && newContentLen < originalSize) {
+      showToast('⚠ 文件过大仅加载了前100KB，保存将只保留元数据修改（文件内容不变）', 'info');
+    }
+    // 只有当用户特意删减内容且新内容确实小于原文件时才发送
+    // 通常编辑大文件只修改元数据，不发送 content 保留原文件完整性
+  } else {
+    body.content = currentContent;
+  }
+
   if (!body.name) { showToast('请输入文件名', 'error'); return; }
   var editId = $('#edit-modal').dataset.editId;
   if (editId) body.id = parseInt(editId);
@@ -351,44 +377,87 @@ $('#btn-edit-save').addEventListener('click', async function() {
   }
 });
 
+// ── 批量操作 UI ─────────────────────────────────────────────────────
+window.updateBatchUI = function() {
+  var cbs = document.querySelectorAll('.data-row-cb:checked');
+  var count = cbs.length;
+  var btnDel = $('#btn-data-batch-delete');
+  var selAll = $('#data-select-all');
+  if (btnDel) btnDel.style.display = count > 0 ? '' : 'none';
+  if (btnDel) btnDel.textContent = '🗑 批量删除 (' + count + ')';
+  // 更新全选框状态
+  if (selAll) {
+    var total = document.querySelectorAll('.data-row-cb').length;
+    selAll.checked = total > 0 && count === total;
+    selAll.indeterminate = count > 0 && count < total;
+  }
+};
+
+$('#data-select-all').addEventListener('change', function() {
+  document.querySelectorAll('.data-row-cb').forEach(function(cb) { cb.checked = this.checked; }.bind(this));
+  updateBatchUI();
+});
+
+// ── 批量删除 ─────────────────────────────────────────────────────────
+$('#btn-data-batch-delete').addEventListener('click', async function() {
+  var cbs = document.querySelectorAll('.data-row-cb:checked');
+  var ids = Array.from(cbs).map(function(cb) { return parseInt(cb.dataset.id); });
+  if (ids.length === 0) return;
+  if (!(await showConfirm('确定删除选中的 ' + ids.length + ' 个文件？\n此操作同时删除磁盘文件，不可恢复。', '批量删除'))) return;
+  try {
+    var result = await apiPost('/api/data/db/files/batch-delete', {ids: ids});
+    showToast(result.message || ('已删除 ' + (result.success||0) + '/' + result.total), 'success');
+    loadFiles(currentPage);
+    loadCategoryFilter();
+    if (currentFileId && ids.indexOf(currentFileId) >= 0) closePreview();
+  } catch(e) { showToast('批量删除失败: ' + (e.message || ''), 'error'); }
+});
+
 // ── 上传 ───────────────────────────────────────────────────────────
 $('#btn-data-upload').addEventListener('click', function() {
   $('#file-upload-input').click();
 });
 
 $('#file-upload-input').addEventListener('change', async function() {
-  var file = this.files[0];
-  if (!file) return;
+  var files = this.files;
+  if (!files || files.length === 0) return;
 
-  // 大文件用 FormData 上传
-  if (file.size > 5 * 1024 * 1024) {
-    showToast('正在上传大文件 (' + formatSize(file.size) + ')...', 'info');
+  var total = files.length;
+  var success = 0, fail = 0;
+
+  for (var i = 0; i < total; i++) {
+    var file = files[i];
+    showToast('上传中 (' + (i + 1) + '/' + total + '): ' + file.name + '...', 'info');
+
+    try {
+      var content = await new Promise(function(resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function(e) { resolve(e.target.result); };
+        reader.onerror = function(e) { reject(e); };
+        reader.readAsText(file, 'UTF-8');
+      });
+
+      var body = {
+        name: file.name,
+        content: content,
+        size_bytes: content.length,
+        source: 'upload',
+        description: '上传: ' + file.name,
+      };
+      var cat = file.name.indexOf('route') >= 0 ? 'route' : 'telemetry';
+      body.category = cat;
+
+      var result = await apiPost('/api/data/db/files', body);
+      if (result.success) { success++; }
+      else { fail++; }
+    } catch(e) { fail++; }
   }
 
-  var reader = new FileReader();
-  reader.onload = async function(e) {
-    var content = e.target.result;
-    var body = {
-      name: file.name,
-      content: content,
-      size_bytes: content.length,
-      source: 'upload',
-      description: '上传: ' + file.name,
-    };
-    // 客户端预检测（快速分类）
-    var cat = file.name.indexOf('route')>=0 ? 'route' : 'telemetry';
-    body.category = cat;
-
-    var result = await apiPost('/api/data/db/files', body);
-    if (result.success) {
-      showToast('上传成功: ' + file.name + ' (' + formatSize(content.length) + ')', 'success');
-      loadFiles(currentPage);
-      loadCategoryFilter();
-    } else {
-      showToast('上传失败: ' + (result.message||''), 'error');
-    }
-  };
-  reader.readAsText(file, 'UTF-8');
+  showToast('上传完成: ' + success + ' 成功, ' + fail + ' 失败 (共 ' + total + ' 个)', success === total ? 'success' : 'error');
+  loadFiles(currentPage);
+  loadCategoryFilter();
+  // 清空 input 以便重复选择相同文件
+  this.value = '';
 });
 
 // ── 导入 mock/ ─────────────────────────────────────────────────────

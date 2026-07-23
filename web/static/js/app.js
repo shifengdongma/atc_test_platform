@@ -43,7 +43,7 @@ const dom = {
   indKafka: $('#ind-kafka'),
   kafkaStatus: $('#kafka-status'),
   dronesCount: $('#drones-count'),
-  kafkaTp: $('#kafka-tp'),
+  redisTp: $('#redis-tp'),
   uptime: $('#uptime'),
   errorCount: $('#error-count'),
   logStream: $('#log-stream'),
@@ -151,9 +151,9 @@ function updateMonitor(data) {
     dom.dronesCount.textContent = data.active_drones;
     addChartData('drones', data.active_drones);
   }
-  if (data.kafka_msg_per_sec !== undefined) {
-    dom.kafkaTp.innerHTML = `${data.kafka_msg_per_sec} <small>条/秒</small>`;
-    addChartData('kafka', data.kafka_msg_per_sec);
+  if (data.redis_msg_per_sec !== undefined) {
+    dom.redisTp.innerHTML = `${data.redis_msg_per_sec} <small>条/秒</small>`;
+    addChartData('redis', data.redis_msg_per_sec);
   }
   if (data.uptime_sec !== undefined) {
     dom.uptime.textContent = formatDuration(data.uptime_sec);

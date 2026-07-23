@@ -13,7 +13,7 @@ except ImportError:
     def error_print(prefix, message): print(f"[{prefix}] ❌ {message}")
 
 # 单次 flush 最大等待，避免副本集群不可达时仿真主线程永久阻塞（trace 消费线程仍会照常打印）
-_KAFKA_FLUSH_TIMEOUT_SEC = 1.0
+_KAFKA_FLUSH_TIMEOUT_SEC = 10.0
 # 显式 close() 时使用；进程退出前须先关闭生产者以解除 kafka-python 注册的 atexit（否则会 timeout=0 flush）
 _KAFKA_PRODUCER_CLOSE_TIMEOUT_SEC = 5.0
 
@@ -49,6 +49,7 @@ class KafkaProducerClient:
             config = {
                 'bootstrap_servers': self.bootstrap_servers,
                 'value_serializer': lambda v: json.dumps(v).encode('utf-8'),
+                'max_request_size': 10485760,  # 10MB，避免大消息被拒绝
             }
             # 用用户传入的配置覆盖/扩展默认配置
             config.update(self.producer_config)
@@ -66,6 +67,7 @@ class KafkaProducerClient:
                 self.producer_secondary = KafkaProducer(
                     bootstrap_servers=self.bootstrap_servers_mirror,
                     value_serializer=lambda v: json.dumps(v).encode('utf-8'),
+                    max_request_size=10485760,
                 )
                 print(f"[Kafka-Mirror] ✅ 高可用集群生产者初始化成功: {self.bootstrap_servers_mirror}")
             except Exception as e:
@@ -91,7 +93,7 @@ class KafkaProducerClient:
             print(f"[Kafka-Mirror] ⚠️ 高可用集群生产者未初始化，本次仅发送主集群")
         _flush_to = self.flush_timeout_sec if self.flush_timeout_sec is not None else _KAFKA_FLUSH_TIMEOUT_SEC
         start = time.time()
-        key_fn = lambda it: it.get("uniqueProductIdentificationCode").encode('utf-8')
+        key_fn = lambda it: (it.get("uniqueProductIdentificationCode") or 'UNKNOWN').encode('utf-8')
         for item in objs:
             self.producer.send(topic, item, key_fn(item))
             if self.producer_secondary:

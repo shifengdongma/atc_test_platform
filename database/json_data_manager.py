@@ -415,12 +415,31 @@ def save_file(data: Dict[str, Any]) -> int:
         name = data.get("name", f"file_{int(time.time())}.json")
         storage_dir = _get_storage_dir()
         fpath = os.path.join(storage_dir, name)
-        with open(fpath, "w", encoding="utf-8") as f:
-            f.write(content)
-        # 数据库中仅存文件名，运行时通过 _resolve_path() 拼接 MOCK_DIR
-        # 避免跨平台（Windows/Linux Docker）绝对路径不兼容
-        data["file_path"] = name
-        data["size_bytes"] = len(content.encode("utf-8"))
+        new_size = len(content.encode("utf-8"))
+
+        # 保护：更新已有文件时，如果新内容远小于磁盘现有文件（可能是截断加载导致），
+        # 拒绝覆盖，保留原文件内容，仅更新元数据
+        if file_id:
+            existing = query_one(TABLE, int(file_id))
+            if existing:
+                old_fpath = _resolve_path(existing)
+                if old_fpath and os.path.exists(old_fpath):
+                    old_size = os.path.getsize(old_fpath)
+                    # 如果新内容不到旧文件的 80%，且旧文件 > 100KB，判定为截断
+                    if old_size > 102400 and new_size < old_size * 0.8:
+                        print(f"[json_data_manager] ⚠ 拒绝截断覆盖: "
+                              f"{name} 新内容 {new_size}B < 旧文件 {old_size}B ({(new_size/old_size)*100:.0f}%)，"
+                              f"仅更新元数据，保留原文件")
+                        content = None  # 不覆盖磁盘文件
+                        data["size_bytes"] = old_size  # 保留原始大小
+                        # 恢复 file_path 为原有值
+                        data["file_path"] = existing.get("file_path", name)
+
+        if content is not None:
+            with open(fpath, "w", encoding="utf-8") as f:
+                f.write(content)
+            data["file_path"] = name
+            data["size_bytes"] = new_size
 
         # 自动检测元数据（仅在未显式提供时）
         if "alarm_type" not in data or not data.get("alarm_type"):
@@ -468,6 +487,25 @@ def delete_file(file_id: int) -> bool:
             except OSError:
                 pass
     return delete(TABLE, file_id)
+
+
+def delete_files_batch(file_ids: List[int]) -> Dict[str, Any]:
+    """批量删除文件记录（同时删除磁盘文件）。"""
+    _lazy_init()
+    results = []
+    for fid in file_ids:
+        try:
+            ok = delete_file(fid)
+            results.append({"id": fid, "success": ok})
+        except Exception as e:
+            results.append({"id": fid, "success": False, "error": str(e)})
+    success_count = sum(1 for r in results if r.get("success"))
+    return {
+        "success": success_count,
+        "total": len(file_ids),
+        "message": f"已删除 {success_count}/{len(file_ids)} 个文件",
+        "results": results,
+    }
 
 
 def update_file(file_id: int, data: Dict[str, Any]) -> bool:

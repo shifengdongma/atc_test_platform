@@ -39,8 +39,9 @@
           <button id="btn-data-upload" class="btn btn-small">📤 上传 JSON</button>
           <button id="btn-data-import" class="btn btn-small">📥 导入 mock/</button>
           <button id="btn-data-export-all" class="btn btn-small">💾 全部导出到磁盘</button>
+          <button id="btn-data-batch-delete" class="btn btn-small" style="background:#c0392b;color:#fff;display:none;">🗑 批量删除</button>
           <button id="btn-data-new" class="btn btn-small">➕ 新建</button>
-          <input type="file" id="file-upload-input" accept=".json" style="display:none;">
+          <input type="file" id="file-upload-input" accept=".json" multiple style="display:none;">
         </div>
 
         <!-- 文件列表 — 新列顺序 -->
@@ -48,6 +49,7 @@
           <table class="data-table" style="width:100%;font-size:12px;">
             <thead>
               <tr>
+                <th style="width:32px;"><input type="checkbox" id="data-select-all" title="全选/取消全选"></th>
                 <th style="width:50px;">ID</th>
                 <th style="width:90px;">告警类型</th>
                 <th style="width:110px;">操作</th>
@@ -59,7 +61,7 @@
                 <th style="width:85px;">更新时间</th>
               </tr>
             </thead>
-            <tbody id="data-tbody"><tr><td colspan="9" class="empty-hint">加载中...</td></tr></tbody>
+            <tbody id="data-tbody"><tr><td colspan="10" class="empty-hint">加载中...</td></tr></tbody>
           </table>
         </div>
 

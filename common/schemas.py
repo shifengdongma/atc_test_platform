@@ -136,7 +136,7 @@ class SimulationStatusDict(TypedDict, total=False):
     running: bool                        # 是否运行中
     mode: str                            # 运行模式 (dynamic/replay/plan)
     active_drones: int                   # 活跃无人机数量
-    kafka_msg_per_sec: int               # Kafka 每秒发送消息数
+    redis_msg_per_sec: int               # Redis 每秒发送消息数
     uptime_sec: int                      # 运行时长 (秒)
     errors: int                          # 累计错误数
     redis_connected: bool                # Redis 连接状态

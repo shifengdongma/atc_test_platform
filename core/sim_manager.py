@@ -357,7 +357,7 @@ class SimulationManager:
                 "running": self._running,
                 "mode": self.mode,
                 "active_drones": active_drones,
-                "kafka_msg_per_sec": kafka_ps,
+                "redis_msg_per_sec": kafka_ps,
                 "uptime_sec": int(time.time() - self._start_time) if self._start_time else 0,
                 "errors": self._errors,
                 "redis_connected": self.redis.client is not None,
@@ -437,7 +437,7 @@ class SimulationManager:
         route_file: Optional[str] = None,
     ) -> None:
         """预生成注入模式初始化：加载 JSON 数据文件，写入 Redis 航线。"""
-        mock_dir = os.path.join(_root, "..", "data", "mock")
+        mock_dir = os.path.join(_root, "data", "mock")
         # 拼接完整路径：若传入的是纯文件名则拼接 mock_dir，绝对路径则直接使用
         if data_file:
             data_path = data_file if os.path.isabs(data_file) else os.path.join(mock_dir, data_file)
@@ -502,7 +502,7 @@ class SimulationManager:
         PlanRunner 依赖 Redis 中已有飞行计划，因此需要先播种数据。
         """
         # 先尝试加载默认航线文件写入 Redis
-        mock_dir = os.path.join(_root, "..", "data", "mock")
+        mock_dir = os.path.join(_root, "data", "mock")
         default_route = os.path.join(mock_dir, "redis_route.json")
         if os.path.exists(default_route):
             try:

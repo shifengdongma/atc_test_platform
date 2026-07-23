@@ -58,7 +58,7 @@ var elHistory = $('#history-list');
 var dom = {
   indRedis: $('#ind-redis'), redisStatus: $('#redis-status'),
   indKafka: $('#ind-kafka'), kafkaStatus: $('#kafka-status'),
-  dronesCount: $('#drones-count'), kafkaTp: $('#kafka-tp'),
+  dronesCount: $('#drones-count'), redisTp: $('#redis-tp'),
   uptime: $('#uptime'), errorCount: $('#error-count'),
   logStream: $('#log-stream'), btnExport: $('#btn-export-log'),
   btnClearLog: $('#btn-clear-log'),
@@ -353,13 +353,13 @@ function updateMonitor(data) {
     if (dom.kafkaStatus) dom.kafkaStatus.textContent = '未连接';
   }
   if (dom.dronesCount) dom.dronesCount.textContent = data.active_drones || 0;
-  if (dom.kafkaTp) dom.kafkaTp.innerHTML = (data.kafka_msg_per_sec || 0) + ' <small>条/秒</small>';
+  if (dom.redisTp) dom.redisTp.innerHTML = (data.redis_msg_per_sec || 0) + ' <small>条/秒</small>';
   if (dom.uptime) dom.uptime.textContent = formatDuration(data.uptime_sec || 0);
   if (dom.errorCount) dom.errorCount.textContent = data.errors || 0;
 
   if (typeof addChartData === 'function') {
     addChartData('drones', data.active_drones || 0);
-    addChartData('kafka', data.kafka_msg_per_sec || 0);
+    addChartData('redis', data.redis_msg_per_sec || 0);
   }
 }
 

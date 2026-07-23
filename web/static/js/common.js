@@ -228,6 +228,41 @@ window.showToast = function(msg, type) {
   setTimeout(function() { t.remove(); }, 3300);
 };
 
+// ── 系统风格确认弹窗（替代浏览器 confirm()）──────────────────────
+window.showConfirm = function(message, title, confirmLabel, cancelLabel) {
+  title = title || '确认操作';
+  confirmLabel = confirmLabel || '确认';
+  cancelLabel = cancelLabel || '取消';
+  return new Promise(function(resolve) {
+    // 移除已有弹窗
+    var old = document.querySelector('.sys-confirm-overlay');
+    if (old) old.remove();
+    var overlay = document.createElement('div');
+    overlay.className = 'sys-confirm-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;' +
+      'background:rgba(0,0,0,0.55);z-index:10000;display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML =
+      '<div style="background:#1a2736;border:1px solid #2a3f56;border-radius:8px;' +
+      'padding:24px 28px;min-width:340px;max-width:460px;box-shadow:0 8px 32px rgba(0,0,0,0.5);">' +
+        '<h3 style="color:#e0e8f0;margin:0 0 12px;font-size:15px;font-weight:600;">' + title + '</h3>' +
+        '<p style="color:#8899aa;margin:0 0 22px;font-size:13px;line-height:1.6;white-space:pre-wrap;">' + message + '</p>' +
+        '<div style="display:flex;gap:10px;justify-content:flex-end;">' +
+          '<button class="sys-confirm-cancel" style="background:#2a3f56;color:#8899aa;border:none;' +
+          'padding:8px 22px;border-radius:4px;cursor:pointer;font-size:13px;">' + cancelLabel + '</button>' +
+          '<button class="sys-confirm-ok" style="background:#e74c3c;color:#fff;border:none;' +
+          'padding:8px 22px;border-radius:4px;cursor:pointer;font-size:13px;">' + confirmLabel + '</button>' +
+        '</div></div>';
+    document.body.appendChild(overlay);
+    var btns = overlay.querySelectorAll('button');
+    btns[0].addEventListener('click', function() { overlay.remove(); resolve(false); });
+    btns[1].addEventListener('click', function() { overlay.remove(); resolve(true); });
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) { overlay.remove(); resolve(false); } });
+    // 键盘 ESC 取消
+    var onKey = function(e) { if (e.key === 'Escape') { overlay.remove(); resolve(false); document.removeEventListener('keydown', onKey); } };
+    document.addEventListener('keydown', onKey);
+  });
+};
+
 // ── 初始化 WebSocket 连接 ─────────────────────────────────────────
 // ── Plan 模式：航线选择列表（跨页面共享）────────────────────────
 window.populatePlanRouteList = function(plans) {

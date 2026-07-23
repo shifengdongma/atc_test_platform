@@ -254,7 +254,7 @@ window.executeFile = async function(id) {
 
 // ── 删除 ───────────────────────────────────────────────────────────
 window.deleteDbFile = async function(id) {
-  if (!confirm('确定删除该文件？此操作同时删除磁盘文件。')) return;
+  if (!(await showConfirm('确定删除该文件？此操作同时删除磁盘文件。', '删除文件'))) return;
   try {
     await fetch('/api/data/db/files/' + id, { method: 'DELETE' });
     showToast('已删除', 'success');
@@ -530,7 +530,7 @@ async function loadCategoryList() {
       btn.addEventListener('click', async function() {
         var row = btn.closest('div');
         var name = row.querySelector('.cat-name').textContent.trim();
-        if (!confirm('确定删除分类 "' + name + '"？\n关联文件的分类将被清空。')) return;
+        if (!(await showConfirm('确定删除分类 "' + name + '"？\n关联文件的分类将被清空。', '删除分类'))) return;
         try {
           var resp = await fetch('/api/data/db/categories/' + encodeURIComponent(name), { method: 'DELETE' });
           var result = await resp.json();
@@ -693,7 +693,7 @@ async function loadAlarmTypeList() {
         var idx = Array.from(el.children).indexOf(row);
         var t = types[idx];
         if (!t) return;
-        if (!confirm('确定删除告警类型 "' + t.name + '"？')) return;
+        if (!(await showConfirm('确定删除告警类型 "' + t.name + '"？', '删除告警类型'))) return;
         var resp = await fetch('/api/data/db/alarm-types/' + t.id, { method: 'DELETE' });
         var result = await resp.json();
         showToast(result.message, result.success ? 'success' : 'error');

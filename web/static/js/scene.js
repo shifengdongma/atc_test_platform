@@ -175,7 +175,7 @@ function renderMultiFiles() {
 }
 
 window._selectMTask = function(i) { saveMultiTaskEditor(); mActiveTask = i; renderMultiTabs(); };
-window._delMTask = function(i) { if(!confirm('删除此任务？'))return; mTasks.splice(i,1); if(mActiveTask>=mTasks.length)mActiveTask=mTasks.length-1; renderMultiTabs(); };
+window._delMTask = async function(i) { if(!(await showConfirm('删除此任务？', '删除任务')))return; mTasks.splice(i,1); if(mActiveTask>=mTasks.length)mActiveTask=mTasks.length-1; renderMultiTabs(); };
 window._updateMFileId = function(i,v) { mTasks[mActiveTask].files[i].file_id=parseInt(v)||0; };
 window._updateMFileInterval = function(i,v) { mTasks[mActiveTask].files[i].interval_sec=parseInt(v)||0; };
 window._delMFile = function(i) { mTasks[mActiveTask].files.splice(i,1); renderMultiFiles(); };
@@ -333,7 +333,7 @@ async function loadTaskList() {
 window._toggleScene = async function(id) { await apiPost('/api/scenes/'+id+'/toggle'); showToast('已切换','success'); loadTaskList(); };
 window._runScene = async function(id) { var r = await apiPost('/api/scenes/'+id+'/run-now'); showToast(r.message||'已触发',r.success?'success':'error'); };
 window._stopScene = async function(id) { var r = await apiPost('/api/scenes/'+id+'/stop'); showToast(r.message||'已发送停止信号',r.success?'success':'error'); if(r.success) loadTaskList(); };
-window._delScene = async function(id) { if(!confirm('确定删除此场景？'))return; await fetch('/api/scenes/'+id,{method:'DELETE'}); showToast('已删除','success'); loadTaskList(); };
+window._delScene = async function(id) { if(!(await showConfirm('确定删除此场景？', '删除场景')))return; try { var resp = await fetch('/api/scenes/'+id,{method:'DELETE'}); if(!resp.ok)throw new Error('HTTP '+resp.status); showToast('已删除','success'); loadTaskList(); } catch(e) { showToast('删除失败: '+(e.message||''),'error'); } };
 window._viewHistory = async function(id) {
   document.querySelector('.tab-btn[data-tab="tab-multi"]').click();
   showHistory(id, 'multi-history');

@@ -152,12 +152,18 @@ window.activateEnv = async function(id) {
 
 // ── 删除 ───────────────────────────────────────────────────────────
 window.deleteEnv = async function(id) {
-  if (!confirm('确定删除该环境配置？')) return;
+  if (!(await showConfirm('确定删除该环境配置？', '删除环境'))) return;
   try {
-    await fetch(API_BASE + '/api/env/' + id, { method: 'DELETE' });
-    showToast('已删除', 'success');
-    loadEnvList();
-  } catch(e) { showToast('删除失败', 'error'); }
+    var resp = await fetch(API_BASE + '/api/env/' + id, { method: 'DELETE' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var result = await resp.json();
+    if (result.success) {
+      showToast('已删除', 'success');
+      loadEnvList();
+    } else {
+      showToast(result.message || '删除失败', 'error');
+    }
+  } catch(e) { showToast('删除失败: ' + (e.message || '网络错误'), 'error'); }
 };
 
 // ── 新建 ───────────────────────────────────────────────────────────

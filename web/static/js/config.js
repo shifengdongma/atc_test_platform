@@ -261,7 +261,7 @@ async function loadTaskHistory(taskId) {
 window.pauseTask = async function(id) { await apiPost('/api/schedule/tasks/'+id+'/pause'); showToast('已暂停','success'); loadTaskList(); };
 window.resumeTask = async function(id) { await apiPost('/api/schedule/tasks/'+id+'/resume'); showToast('已恢复','success'); loadTaskList(); };
 window.runTaskNow = async function(id) { var r=await apiPost('/api/schedule/tasks/'+id+'/run-now'); showToast(r.message||'已触发',r.success?'success':'error'); };
-window.deleteTask = async function(id) { if(!confirm('确定删除？'))return; await fetch('/api/schedule/tasks/'+id,{method:'DELETE'}); showToast('已删除','success'); loadTaskList(); };
+window.deleteTask = async function(id) { if(!(await showConfirm('确定删除此定时任务？', '删除任务')))return; try { var resp = await fetch('/api/schedule/tasks/'+id,{method:'DELETE'}); if(!resp.ok)throw new Error('HTTP '+resp.status); showToast('已删除','success'); loadTaskList(); } catch(e) { showToast('删除失败: '+(e.message||''),'error'); } };
 
 window.editTask = async function(id) {
   try {

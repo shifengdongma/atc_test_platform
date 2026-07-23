@@ -565,6 +565,23 @@ def export_to_mock_batch(file_ids: List[int]) -> Dict[str, Any]:
     return {"success": success, "total": len(file_ids), "results": results}
 
 
+def export_all_to_mock() -> Dict[str, Any]:
+    """从数据库导出所有文件到 mock/ 目录。用于 Docker 重建后恢复磁盘文件。"""
+    _lazy_init()
+    all_files = query_all(TABLE)
+    file_ids = [f["id"] for f in all_files if "id" in f]
+    if not file_ids:
+        return {"success": 0, "total": 0, "message": "数据库中无文件记录"}
+    results = [export_to_mock(fid) for fid in file_ids]
+    success_count = sum(1 for r in results if r.get("success"))
+    return {
+        "success": success_count,
+        "total": len(file_ids),
+        "message": f"已导出 {success_count}/{len(file_ids)} 个文件到 mock/ 目录",
+        "results": results,
+    }
+
+
 def download_file(file_id: int) -> Optional[Dict[str, Any]]:
     """获取文件信息用于下载（从磁盘读取内容）。"""
     record = query_one(TABLE, file_id)

@@ -61,3 +61,32 @@
 - 新建文件：0
 - 修改文件：7
 - 重写文件：1
+
+---
+
+## 2026-07-23 — 环境删除修复 + DELETE 路由异常保护 + 全部导出到磁盘
+
+### 修改清单
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-23 | `web/static/js/env.js` | 修改 | ✅ | 环境删除不再报 `API_BASE is not defined` |
+| 2026-07-23 | `web/server.py` | 修改 | ✅ | 4 个 DELETE 路由异常返回 JSON 而非 werkzeug 崩溃 |
+| 2026-07-23 | `database/json_data_manager.py` | 修改 | ✅ | `export_all_to_mock()` 批量导出全部文件到磁盘 |
+| 2026-07-23 | `web/pages/data.html` | 修改 | ✅ | "全部导出到磁盘"按钮可用 |
+| 2026-07-23 | `web/static/js/data.js` | 修改 | ✅ | 导出按钮事件处理正常 |
+
+### 核心修复
+
+1. **环境删除 API_BASE 作用域错误**：`env.js` `deleteEnv()` 中 `fetch(API_BASE + '/api/env/' + id)` 的 `API_BASE` 是 `common.js` IIFE 内部 `const`，`env.js` 的 IIFE 不可访问，导致 `ReferenceError` 删除失败。改为直接使用 `'/api/env/' + id`（与 `data.js`、`scene.js` 等所有其他 DELETE 调用一致）。
+
+2. **4 个 DELETE 路由添加 @_safe_json 装饰器**：`api_env_delete`、`api_db_delete_file`、`api_db_delete_category`、`api_db_alarm_types_delete` 添加 `@_safe_json` 异常保护。此前这些路由无任何 try/except，MySQL 不可用时异常传播至 werkzeug 触发 `AssertionError: write() before start_response`。`@_safe_json` 装饰器已存在于场景 CRUD 路由，现统一应用到所有 DELETE 路由。
+
+3. **@_safe_json 装饰器前移**：装饰器原定义在场景路由段（~2530行），早于多个使用它的路由。将定义移至环境管理 API 段之前（~1910行），解决 `NameError: name '_safe_json' is not defined` 启动错误。
+
+4. **新增全部导出到磁盘功能**：新增 `POST /api/data/db/export-all` 端点 + `export_all_to_mock()` 后端函数 + "💾 全部导出到磁盘"前端按钮。Docker 重建后可通过此按钮一键将 MySQL 中所有文件记录恢复到 `data/mock/`，解决磁盘文件丢失导致预览显示"(- 估, 0 行)"的问题。
+
+### 汇总
+
+- 新建文件：0
+- 修改文件：5

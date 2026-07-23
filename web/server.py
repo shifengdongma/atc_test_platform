@@ -1907,6 +1907,24 @@ def api_batch_presets():
     return jsonify({"presets": bridge.BATCH_PRESETS})
 
 
+# ==================== 辅助装饰器 =====================================
+
+
+def _safe_json(fn):
+    """装饰器：为 API 添加 JSON 格式异常处理。"""
+    from functools import wraps as _wraps
+    @_wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            # 用 print 而非 traceback.print_exc，避免在 response 写入阶段触发
+            # Werkzeug "write() before start_response" 断言错误
+            print(f"[web_server] API 异常 ({fn.__name__}): {e}", flush=True)
+            return jsonify({"success": False, "message": f"操作失败: {e}"}), 500
+    return wrapper
+
+
 # ==================== 环境管理 API ==================================
 
 @app.route("/api/env/list", methods=["GET"])
@@ -1940,6 +1958,7 @@ def api_env_save():
 
 
 @app.route("/api/env/<int:env_id>", methods=["DELETE"])
+@_safe_json
 def api_env_delete(env_id):
     """删除环境配置。"""
     mgr = _get_env_mgr()
@@ -2136,6 +2155,7 @@ def api_db_update_file(file_id):
 
 
 @app.route("/api/data/db/files/<int:file_id>", methods=["DELETE"])
+@_safe_json
 def api_db_delete_file(file_id):
     """删除文件。"""
     mgr = _get_json_mgr()
@@ -2191,6 +2211,16 @@ def api_db_export_batch():
     return jsonify(result)
 
 
+@app.route("/api/data/db/export-all", methods=["POST"])
+@_safe_json
+def api_db_export_all():
+    """从数据库导出所有文件到 mock/ 目录（Docker 重建后恢复用）。"""
+    mgr = _get_json_mgr()
+    result = mgr.export_all_to_mock()
+    _add_log(f"全部导出: {result.get('message', '')}")
+    return jsonify(result)
+
+
 @app.route("/api/data/db/categories", methods=["GET"])
 def api_db_categories():
     """获取所有分类和告警类型。"""
@@ -2213,6 +2243,7 @@ def api_db_rename_category():
 
 
 @app.route("/api/data/db/categories/<name>", methods=["DELETE"])
+@_safe_json
 def api_db_delete_category(name):
     """删除分类（清空关联文件的分类字段）。"""
     mgr = _get_json_mgr()
@@ -2253,6 +2284,7 @@ def api_db_alarm_types_update(type_id):
 
 
 @app.route("/api/data/db/alarm-types/<int:type_id>", methods=["DELETE"])
+@_safe_json
 def api_db_alarm_types_delete(type_id):
     """删除告警类型（内置类型不可删除）。"""
     mgr = _get_json_mgr()
@@ -2513,23 +2545,6 @@ _init_orch_thread = threading.Thread(
     name="orch-deferred-init",
 )
 _init_orch_thread.start()
-
-
-# ── 辅助装饰器 ──────────────────────────────────────────────────────
-
-def _safe_json(fn):
-    """装饰器：为 API 添加 JSON 格式异常处理。"""
-    from functools import wraps as _wraps
-    @_wraps(fn)
-    def wrapper(*args, **kwargs):
-        try:
-            return fn(*args, **kwargs)
-        except Exception as e:
-            # 用 print 而非 traceback.print_exc，避免在 response 写入阶段触发
-            # Werkzeug "write() before start_response" 断言错误
-            print(f"[web_server] API 异常 ({fn.__name__}): {e}", flush=True)
-            return jsonify({"success": False, "message": f"操作失败: {e}"}), 500
-    return wrapper
 
 
 # ── 场景 CRUD ───────────────────────────────────────────────────────

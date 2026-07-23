@@ -154,7 +154,7 @@ window.activateEnv = async function(id) {
 window.deleteEnv = async function(id) {
   if (!(await showConfirm('确定删除该环境配置？', '删除环境'))) return;
   try {
-    var resp = await fetch(API_BASE + '/api/env/' + id, { method: 'DELETE' });
+    var resp = await fetch('/api/env/' + id, { method: 'DELETE' });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     var result = await resp.json();
     if (result.success) {

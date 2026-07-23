@@ -402,6 +402,20 @@ $('#btn-data-import').addEventListener('click', async function() {
   loadCategoryFilter();
 });
 
+// ── 全部导出到磁盘（Docker 重建后恢复用）───────────────────────────────
+$('#btn-data-export-all').addEventListener('click', async function() {
+  if (!(await showConfirm('将数据库中所有文件导出到 data/mock/ 目录？\n已有同名文件将被跳过。', '全部导出'))) return;
+  showToast('正在导出全部文件到磁盘...', 'info');
+  try {
+    var result = await apiPost('/api/data/db/export-all');
+    var msg = result.message || ('导出完成: ' + result.success + '/' + result.total);
+    showToast(msg, 'success');
+    loadFiles(currentPage);
+  } catch(e) {
+    showToast('导出失败: ' + (e.message || ''), 'error');
+  }
+});
+
 // ── 分类过滤下拉框加载 ──────────────────────────────────────────────
 window.loadCategoryFilter = async function() {
   try {

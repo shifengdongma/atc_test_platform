@@ -257,6 +257,11 @@ def _update_env_py(config: Dict[str, Any]) -> None:
             # 同时尝试 db 列名（如 redis_password → redis_pwd）
             if field in ("redis_password",) and config.get("redis_pwd"):
                 val = config.get("redis_pwd", default)
+            # 保护已有配置：如果新值为空，保留 env.py 中已有的非空值
+            if not val or val == "":
+                exist_match = re.search(rf'{env_field}\s*=\s*"([^"]*)"', content)
+                if exist_match and exist_match.group(1):
+                    continue  # 不覆盖已有的有效值
             content = re.sub(
                 rf'{env_field}\s*=\s*(?:"[^"]*"|\w+)',
                 f'{env_field} = "{val}"',

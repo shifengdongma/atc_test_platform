@@ -1971,13 +1971,15 @@ def api_env_activate(env_id):
             _current_config["mysql_user"] = cfg.get("mysql_user", "")
             _current_config["mysql_password"] = cfg.get("mysql_password", "")
             _current_config["mysql_database"] = cfg.get("mysql_database", "")
-        # 重置 MySQL 连接池，使其下次请求时使用新配置连接新数据库
-        try:
-            from database.mysql_db_manager import reset_mysql_connection
-            reset_mysql_connection()
-        except Exception as e:
-            print(f"[web_server] MySQL 连接重置失败: {e}", flush=True)
-        _add_log(f"已切换环境配置: Redis={cfg.get('redis_ip')}:{cfg.get('redis_port')}, Kafka={cfg.get('kafka_url')}, 达梦={cfg.get('dm_host')}, MySQL={cfg.get('mysql_host')}/{cfg.get('mysql_database')}")
+        # 仅当新环境配置了有效 MySQL 地址时才重置连接池
+        if cfg.get("mysql_host"):
+            try:
+                from database.mysql_db_manager import reset_mysql_connection
+                reset_mysql_connection()
+            except Exception as e:
+                print(f"[web_server] MySQL 连接重置失败: {e}", flush=True)
+        mysql_info = f"{cfg.get('mysql_host')}/{cfg.get('mysql_database')}" if cfg.get("mysql_host") else "未配置(保持现有连接)"
+        _add_log(f"已切换环境配置: Redis={cfg.get('redis_ip')}:{cfg.get('redis_port')}, Kafka={cfg.get('kafka_url')}, 达梦={cfg.get('dm_host')}, MySQL={mysql_info}")
     return jsonify(result)
 
 

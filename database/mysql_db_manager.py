@@ -393,6 +393,9 @@ def _ensure_mysql_tables(client=None):
             ("created_at", "DATETIME DEFAULT CURRENT_TIMESTAMP"),
             ("updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
         ],
+        "sim_system_logs": [
+            ("updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
+        ],
     }
     # 仅检测缺失列（不自动 ALTER，避免 DDL 阻塞启动）
     # 使用 migrate_schema() 独立函数执行实际的 DDL 迁移
@@ -452,6 +455,9 @@ def migrate_schema():
         ],
         "sim_task_logs": [
             ("created_at", "DATETIME DEFAULT CURRENT_TIMESTAMP"),
+            ("updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
+        ],
+        "sim_system_logs": [
             ("updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
         ],
     }

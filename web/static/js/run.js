@@ -29,10 +29,6 @@ var _urlParams = {};
 })();
 var _presetFileName = _urlParams['preset_file'] || null;
 var _presetMode = _urlParams['preset_mode'] || null;
-// 文件格式缓存: filename → {format, compatible_modes}
-var _fileFormats = {};
-// 所有模式选项（备份，用于恢复）
-var _allModeOptions = [];
 
 // ── 模式描述 ────────────────────────────────────────────────────────
 var modeDescriptions = {
@@ -95,72 +91,6 @@ function setRunningState(running) {
   }
 }
 
-// ── 文件→模式绑定 ────────────────────────────────────────────────────
-var _bindingInProgress = false;  // 防止递归切换
-
-function bindModeToFile() {
-  if (_bindingInProgress) return;
-  // 保存所有模式选项（首次调用时）
-  if (_allModeOptions.length === 0 && elMode) {
-    for (var i = 0; i < elMode.options.length; i++) {
-      _allModeOptions.push({ value: elMode.options[i].value, text: elMode.options[i].text });
-    }
-  }
-  if (!elMode) return;
-
-  // 获取当前活跃面板中选中的文件
-  var selectedFile = null;
-  var sceneSel = document.getElementById('scene-file-select');
-  var planSel = document.getElementById('plan-route-file');
-  var activeMode = elMode.value;
-
-  if (activeMode === 'scene' && sceneSel) selectedFile = sceneSel.value;
-  else if (activeMode === 'plan' && planSel) selectedFile = planSel.value;
-
-  if (!selectedFile) {
-    // 无选中文件 → 恢复全部模式
-    _restoreAllModes();
-    return;
-  }
-
-  var fmt = _fileFormats[selectedFile];
-  if (!fmt || !fmt.compatible_modes || fmt.compatible_modes.length === 0) {
-    _restoreAllModes();
-    return;
-  }
-
-  var compatible = fmt.compatible_modes;
-  // 如果当前模式不在兼容列表中，切换到第一个兼容模式
-  if (compatible.indexOf(activeMode) === -1) {
-    _bindingInProgress = true;
-    elMode.innerHTML = _allModeOptions.filter(function(o) {
-      return compatible.indexOf(o.value) !== -1;
-    }).map(function(o) {
-      return '<option value="' + o.value + '">' + o.text + '</option>';
-    }).join('');
-    elMode.value = compatible[0];
-    updateMode();
-    _bindingInProgress = false;
-  } else {
-    // 当前模式兼容 → 仅显示兼容模式
-    elMode.innerHTML = _allModeOptions.filter(function(o) {
-      return compatible.indexOf(o.value) !== -1;
-    }).map(function(o) {
-      var sel = o.value === activeMode ? ' selected' : '';
-      return '<option value="' + o.value + '"' + sel + '>' + o.text + '</option>';
-    }).join('');
-  }
-}
-
-function _restoreAllModes() {
-  if (!elMode || _allModeOptions.length === 0) return;
-  var current = elMode.value;
-  elMode.innerHTML = _allModeOptions.map(function(o) {
-    var sel = o.value === current ? ' selected' : '';
-    return '<option value="' + o.value + '"' + sel + '>' + o.text + '</option>';
-  }).join('');
-}
-
 // ── 模式切换 ────────────────────────────────────────────────────────
 function updateMode() {
   if (elDesc) elDesc.textContent = modeDescriptions[elMode.value] || '';
@@ -181,37 +111,37 @@ function updateMode() {
   }
 }
 
-// ── 文件列表加载（含格式缓存，供模式绑定） ──────────────────────────────
-async function _loadFileListWithFormats(selId) {
-  var sel = document.getElementById(selId);
-  if (!sel) return;
-  try {
-    var data = await apiGet('/api/data/files');
-    if (data.files) {
-      _fileFormats = {};  // 重建缓存
-      data.files.forEach(function(f) {
-        _fileFormats[f.name] = { format: f.format, compatible_modes: f.compatible_modes || [] };
-      });
-      return data.files;
-    }
-  } catch(e) {}
-  return [];
+// ── 文件列表加载（从数据库读取，缓存 60 秒）────────────────────────
+// 缓存文件名 → 数据库 ID 映射，用于启动前导出文件到磁盘
+var _fileIdByName = {};
+
+async function _loadCachedFileList() {
+  return cacheGet('scene_file_list', async function() {
+    try {
+      var data = await apiGet('/api/data/db/files?page_size=500');
+      var files = data.files || [];
+      _fileIdByName = {};
+      files.forEach(function(f) { _fileIdByName[f.name] = f.id; });
+      return files;
+    } catch(e) { return []; }
+  }, 60);
 }
 
 async function refreshSceneFileList() {
   var sel = document.getElementById('scene-file-select');
   if (!sel) return;
-  var files = await _loadFileListWithFormats('scene-file-select');
+  var files = await _loadCachedFileList();
   sel.innerHTML = files.map(function(f) {
-    return '<option value="' + f.name + '">' + f.name + ' (' + f.records + '条)</option>';
+    var info = f.size_bytes ? ' (' + (f.size_bytes / 1024).toFixed(1) + 'KB' : '';
+    info += f.category ? ', ' + f.category : '';
+    info += ')';
+    return '<option value="' + f.name + '">' + f.name + info + '</option>';
   }).join('');
   if (_presetFileName) {
     for (var i = 0; i < sel.options.length; i++) {
       if (sel.options[i].value === _presetFileName) { sel.options[i].selected = true; break; }
     }
   }
-  sel.onchange = bindModeToFile;
-  bindModeToFile();  // 初始绑定
 }
 
 async function loadPlanRouteList() {
@@ -232,7 +162,7 @@ async function loadPlanRouteList() {
 async function refreshPlanFileList() {
   var sel = document.getElementById('plan-route-file');
   if (!sel) return;
-  var files = await _loadFileListWithFormats('plan-route-file');
+  var files = await _loadCachedFileList();
   sel.innerHTML = '<option value="">— 不加载文件，直接从 Redis 读取 —</option>' + files.map(function(f) {
     return '<option value="' + f.name + '"' + (f.name.indexOf('redis_route') >= 0 ? ' selected' : '') + '>' + f.name + '</option>';
   }).join('');
@@ -241,8 +171,6 @@ async function refreshPlanFileList() {
       if (sel.options[i].value === _presetFileName) { sel.options[i].selected = true; break; }
     }
   }
-  sel.onchange = bindModeToFile;
-  bindModeToFile();
 }
 
 // ── 加载配置 ────────────────────────────────────────────────────────
@@ -305,7 +233,26 @@ if (elBtnStart) elBtnStart.addEventListener('click', async function() {
   };
   if (mode === 'scene') {
     var sfSel = document.getElementById('scene-file-select');
-    body.scene_files = sfSel ? Array.from(sfSel.selectedOptions).map(function(o) { return o.value; }) : [];
+    var selectedFiles = sfSel ? Array.from(sfSel.selectedOptions).map(function(o) { return o.value; }) : [];
+    if (selectedFiles.length === 0) {
+      showToast('请选择至少一个场景文件', 'error');
+      return;
+    }
+    // 自动导出选中的文件到 mock/ 目录（后端脚本从磁盘读取）
+    var fileIds = selectedFiles.map(function(name) { return _fileIdByName[name]; }).filter(Boolean);
+    if (fileIds.length > 0) {
+      try {
+        var exportResult = await apiPost('/api/data/db/export-batch', { file_ids: fileIds });
+        var ok = exportResult.success || 0;
+        if (ok < fileIds.length) {
+          showToast('部分文件导出失败 (' + ok + '/' + fileIds.length + ')，可能无法正常仿真', 'error');
+        }
+      } catch(e) {
+        showToast('文件导出失败，请稍后重试', 'error');
+        return;
+      }
+    }
+    body.scene_files = selectedFiles;
     body.scene_interval = parseInt((document.getElementById('scene-interval')||{}).value || 1000);
     body.timestamp_mode = (document.getElementById('scene-timestamp-mode')||{}).value || 'replace';
     body.scene_loop = (document.getElementById('scene-loop')||{}).checked || false;
@@ -316,7 +263,16 @@ if (elBtnStart) elBtnStart.addEventListener('click', async function() {
       body.plan_selected_uids = window.getSelectedPlanUids();
     }
     var planFile = (document.getElementById('plan-route-file')||{}).value;
-    if (planFile) body.plan_route_file = planFile;
+    if (planFile) {
+      // 自动导出选中的航线文件到 mock/ 目录
+      var planFileId = _fileIdByName[planFile];
+      if (planFileId) {
+        try {
+          await apiPost('/api/data/db/export/' + planFileId, {});
+        } catch(e) {}
+      }
+      body.plan_route_file = planFile;
+    }
     // 不发送 plan_route_file 时后端跳过文件加载，直接从 Redis 读取
   }
   var result = await apiPost('/api/sim/start', body);
@@ -368,11 +324,17 @@ if (btnPlanRefresh) btnPlanRefresh.addEventListener('click', loadPlanRouteList);
 
 // Plan 文件列表刷新按钮
 var btnPlanFileRefresh = document.getElementById('btn-refresh-plan-files');
-if (btnPlanFileRefresh) btnPlanFileRefresh.addEventListener('click', refreshPlanFileList);
+if (btnPlanFileRefresh) btnPlanFileRefresh.addEventListener('click', function() {
+  cacheClear('scene_file_list');
+  refreshPlanFileList();
+});
 
-// Scene 刷新按钮
+// Scene 刷新按钮 — 清除缓存后重新加载
 var btnRefScene = document.getElementById('btn-refresh-scene-files');
-if (btnRefScene) btnRefScene.addEventListener('click', refreshSceneFileList);
+if (btnRefScene) btnRefScene.addEventListener('click', function() {
+  cacheClear('scene_file_list');
+  refreshSceneFileList();
+});
 
 // ── 监控更新 ────────────────────────────────────────────────────────
 function updateMonitor(data) {

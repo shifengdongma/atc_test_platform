@@ -2165,6 +2165,18 @@ def api_db_export_mock(file_id):
     return jsonify(result)
 
 
+@app.route("/api/data/db/export-batch", methods=["POST"])
+def api_db_export_batch():
+    """批量从数据库导出到 mock/ 目录。"""
+    data = request.get_json(silent=True) or {}
+    file_ids = data.get("file_ids", [])
+    if not file_ids:
+        return jsonify({"success": 0, "total": 0, "results": []})
+    mgr = _get_json_mgr()
+    result = mgr.export_to_mock_batch(file_ids)
+    return jsonify(result)
+
+
 @app.route("/api/data/db/categories", methods=["GET"])
 def api_db_categories():
     """获取所有分类和告警类型。"""

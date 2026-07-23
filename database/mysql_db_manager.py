@@ -190,6 +190,40 @@ def _get_client():
         return _mysql_client
 
 
+def reset_mysql_connection() -> None:
+    """重置 MySQL 连接——关闭池、清除所有缓存状态。
+
+    环境切换时调用，强制下次 _get_client() 时：
+    1. 重新调用 load_mysql_config() 读取新 env.py 配置
+    2. 重新创建连接池连接到新数据库
+    3. 新数据库上 init_tables() 自动建表
+    """
+    global _pool, _mysql_client, _mysql_available, _mysql_last_fail_time, _mysql_conn_target
+    from common.config import clear_mysql_config_cache
+    with _lock:
+        # 1. 清除配置缓存（在 common/config.py 中）
+        clear_mysql_config_cache()
+        # 2. 关闭现有连接池（所有连接释放）
+        if _pool is not None:
+            try:
+                _pool.close()
+            except Exception:
+                pass
+            _pool = None
+        # 3. 清除缓存的活跃连接
+        if _mysql_client is not None:
+            try:
+                _mysql_client.close()
+            except Exception:
+                pass
+            _mysql_client = None
+        # 4. 重置状态标志
+        _mysql_available = None
+        _mysql_last_fail_time = 0.0
+        _mysql_conn_target = ""
+        print("[mysql_db_manager] MySQL 连接已重置（环境切换），下次连接将使用新配置")
+
+
 # ── MySQL DDL ──────────────────────────────────────────────────────
 
 _MYSQL_TABLE_DDL = {

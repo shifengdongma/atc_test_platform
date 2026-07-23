@@ -343,6 +343,18 @@ def load_mysql_config() -> MysqlConfig:
 _cached_mysql_config: Optional[MysqlConfig] = None
 
 
+def clear_mysql_config_cache() -> None:
+    """清除 MySQL 配置缓存。
+
+    环境切换时调用，强制 load_mysql_config() 下次重新读取 env.py，
+    确保新环境的 MySQL 地址/库名生效。
+    """
+    global _cached_mysql_config
+    if _cached_mysql_config is not None:
+        print("[config] MySQL 配置缓存已清除")
+    _cached_mysql_config = None
+
+
 def load_config(env_name: Optional[str] = None) -> AppConfig:
     """加载应用配置。
 

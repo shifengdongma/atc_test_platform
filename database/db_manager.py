@@ -37,16 +37,6 @@ _TABLE_DDL = {
             dm_user     TEXT DEFAULT 'SYSDBA',
             dm_password TEXT DEFAULT '',
             dm_schema   TEXT DEFAULT '',
-            mysql_host     TEXT DEFAULT '',
-            mysql_port     INTEGER DEFAULT 3306,
-            mysql_user     TEXT DEFAULT '',
-            mysql_password TEXT DEFAULT '',
-            mysql_database TEXT DEFAULT '',
-            atc_cluster_api TEXT DEFAULT '',
-            atc_vip      TEXT DEFAULT '',
-            atc_node_a   TEXT DEFAULT '',
-            atc_node_b   TEXT DEFAULT '',
-            es_hosts     TEXT DEFAULT '',
             created_at  TEXT DEFAULT '',
             updated_at  TEXT DEFAULT ''
         )
@@ -186,16 +176,8 @@ def init_tables() -> None:
             _migrate_add_column(conn, "sim_env_config", "dm_user", "TEXT DEFAULT 'SYSDBA'")
             _migrate_add_column(conn, "sim_env_config", "dm_password", "TEXT DEFAULT ''")
             _migrate_add_column(conn, "sim_env_config", "dm_schema", "TEXT DEFAULT ''")
-            _migrate_add_column(conn, "sim_env_config", "mysql_host", "TEXT DEFAULT ''")
-            _migrate_add_column(conn, "sim_env_config", "mysql_port", "INTEGER DEFAULT 3306")
-            _migrate_add_column(conn, "sim_env_config", "mysql_user", "TEXT DEFAULT ''")
-            _migrate_add_column(conn, "sim_env_config", "mysql_password", "TEXT DEFAULT ''")
-            _migrate_add_column(conn, "sim_env_config", "mysql_database", "TEXT DEFAULT ''")
-            _migrate_add_column(conn, "sim_env_config", "atc_cluster_api", "TEXT DEFAULT ''")
-            _migrate_add_column(conn, "sim_env_config", "atc_vip", "TEXT DEFAULT ''")
-            _migrate_add_column(conn, "sim_env_config", "atc_node_a", "TEXT DEFAULT ''")
-            _migrate_add_column(conn, "sim_env_config", "atc_node_b", "TEXT DEFAULT ''")
-            _migrate_add_column(conn, "sim_env_config", "es_hosts", "TEXT DEFAULT ''")
+            # 迁移：移除已废弃的 MySQL / ATC 集群 / ES 列（表重建）
+            _migrate_drop_env_config_columns(conn)
             conn.commit()
         finally:
             conn.close()
@@ -208,6 +190,70 @@ def _migrate_add_column(conn, table: str, column: str, col_def: str) -> None:
         print(f"[DB] 迁移: {table}.{column} 列已添加")
     except Exception:
         pass  # 列已存在，忽略
+
+
+def _migrate_drop_env_config_columns(conn) -> None:
+    """迁移：删除 sim_env_config 表中已废弃的 MySQL / ATC 集群 / ES 列。
+
+    通过检测旧列是否存在，若存在则通过表重建方式移除这些列。
+    保留数据：id, name, redis_ip, redis_port, redis_pwd, kafka_url, kafka_url2,
+              is_default, dm_host, dm_port, dm_user, dm_password, dm_schema,
+              created_at, updated_at
+    """
+    try:
+        # 检测旧列是否存在
+        cur = conn.execute("PRAGMA table_info(sim_env_config)")
+        columns = {row[1] for row in cur.fetchall()}
+        obsolete_cols = {"mysql_host", "atc_cluster_api", "es_hosts"}
+        if not (obsolete_cols & columns):
+            return  # 已经是新表结构，无需迁移
+
+        print("[DB] 迁移: 检测到 sim_env_config 含废弃列 (MySQL/ATC/ES)，执行表重建...")
+
+        # 保留的列（按新表顺序）
+        keep_cols = [
+            "id", "name",
+            "redis_ip", "redis_port", "redis_pwd",
+            "kafka_url", "kafka_url2",
+            "is_default",
+            "dm_host", "dm_port", "dm_user", "dm_password", "dm_schema",
+            "created_at", "updated_at",
+        ]
+        # 只复制旧表中实际存在的列
+        existing_keep = [c for c in keep_cols if c in columns]
+        col_list = ", ".join(existing_keep)
+
+        # 1. 创建新表
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sim_env_config_new (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT NOT NULL,
+                redis_ip    TEXT DEFAULT '',
+                redis_port  TEXT DEFAULT '6379',
+                redis_pwd   TEXT DEFAULT '',
+                kafka_url   TEXT DEFAULT '',
+                kafka_url2  TEXT DEFAULT '',
+                is_default  INTEGER DEFAULT 0,
+                dm_host     TEXT DEFAULT '',
+                dm_port     INTEGER DEFAULT 5236,
+                dm_user     TEXT DEFAULT 'SYSDBA',
+                dm_password TEXT DEFAULT '',
+                dm_schema   TEXT DEFAULT '',
+                created_at  TEXT DEFAULT '',
+                updated_at  TEXT DEFAULT ''
+            )
+        """)
+
+        # 2. 复制数据
+        conn.execute(f"INSERT INTO sim_env_config_new ({col_list}) SELECT {col_list} FROM sim_env_config")
+
+        # 3. 删除旧表，重命名新表
+        conn.execute("DROP TABLE sim_env_config")
+        conn.execute("ALTER TABLE sim_env_config_new RENAME TO sim_env_config")
+
+        print("[DB] 迁移: sim_env_config 表重建完成，已移除 MySQL/ATC/ES 列")
+    except Exception as e:
+        print(f"[DB] 迁移 sim_env_config 表重建失败: {e}")
 
 
 # ── 通用 CRUD ───────────────────────────────────────────────────────

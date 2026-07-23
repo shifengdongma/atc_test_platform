@@ -5,12 +5,12 @@
 
 // ── 图表实例 ──────────────────────────────────────────────────────
 let chartDrones = null;
-let chartRedis = null;
+let chartKafka = null;
 
 // ── 数据缓冲区（最多保留 60 个采样点 = 1 分钟） ─────────────────
 const MAX_POINTS = 60;
 const dronesData = [];
-const redisData = [];
+const kafkaData = [];
 const timeLabels = [];
 
 // ── 初始化图表 ────────────────────────────────────────────────────
@@ -70,16 +70,16 @@ function initCharts() {
     });
   }
 
-  // Redis 吞吐量图表
-  const ctx2 = document.getElementById('chart-redis');
+  // Kafka 吞吐量图表
+  const ctx2 = document.getElementById('chart-kafka');
   if (ctx2) {
-    chartRedis = new Chart(ctx2, {
+    chartKafka = new Chart(ctx2, {
       type: 'line',
       data: {
         labels: timeLabels,
         datasets: [{
-          label: 'Redis 吞吐 (条/秒)',
-          data: redisData,
+          label: 'Kafka 吞吐 (条/秒)',
+          data: kafkaData,
           borderColor: '#2ecc71',
           backgroundColor: 'rgba(46,204,113,0.1)',
           fill: true,
@@ -94,7 +94,7 @@ function initCharts() {
           ...commonOpts.plugins,
           title: {
             display: true,
-            text: 'Redis 消息吞吐量',
+            text: 'Kafka 消息吞吐量',
             color: '#7a93a8',
             font: { size: 11 },
           },
@@ -119,13 +119,13 @@ function addChartData(type, value) {
       if (chartDrones.data.labels.length > MAX_POINTS) chartDrones.data.labels.shift();
       chartDrones.update('none');
     }
-  } else if (type === 'redis') {
-    redisData.push(value);
-    if (redisData.length > MAX_POINTS) redisData.shift();
-    if (chartRedis) {
-      chartRedis.data.labels.push(label);
-      if (chartRedis.data.labels.length > MAX_POINTS) chartRedis.data.labels.shift();
-      chartRedis.update('none');
+  } else if (type === 'kafka') {
+    kafkaData.push(value);
+    if (kafkaData.length > MAX_POINTS) kafkaData.shift();
+    if (chartKafka) {
+      chartKafka.data.labels.push(label);
+      if (chartKafka.data.labels.length > MAX_POINTS) chartKafka.data.labels.shift();
+      chartKafka.update('none');
     }
   }
 

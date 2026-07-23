@@ -137,7 +137,7 @@ _runtime_state: Dict[str, Any] = {
     "running": False,
     "mode": "",
     "active_drones": 0,
-    "redis_msg_per_sec": 0,
+    "kafka_msg_per_sec": 0,
     "uptime_sec": 0,
     "errors": 0,
     "redis_connected": False,
@@ -556,7 +556,7 @@ class SimulationRunner:
                     with _lock:
                         _runtime_state.update({
                             "active_drones": status["active_drones"],
-                            "redis_msg_per_sec": status["redis_msg_per_sec"],
+                            "kafka_msg_per_sec": status["kafka_msg_per_sec"],
                             "uptime_sec": status["uptime_sec"],
                             "errors": status["errors"],
                         })
@@ -601,7 +601,7 @@ class SimulationRunner:
                     with _lock:
                         _runtime_state.update({
                             "active_drones": status["active_drones"],
-                            "redis_msg_per_sec": status["redis_msg_per_sec"],
+                            "kafka_msg_per_sec": status["kafka_msg_per_sec"],
                             "uptime_sec": status["uptime_sec"],
                             "errors": status["errors"],
                         })
@@ -651,7 +651,7 @@ class SimulationRunner:
                             _add_log(f"Kafka 发送失败: {e}")
                         with _lock:
                             _runtime_state["active_drones"] = len(ds.allowed_uav_uids)
-                            _runtime_state["redis_msg_per_sec"] = len(batch)
+                            _runtime_state["kafka_msg_per_sec"] = len(batch)
                             if self._start_time:
                                 _runtime_state["uptime_sec"] = int(time.time() - self._start_time)
                     # 桥接触发数据到前端 Layer 2（运行日志-轨迹预测）
@@ -766,7 +766,7 @@ class SimulationRunner:
                     plan_count = len(self._plan_runner._plans) if self._plan_runner else 0
                     with _lock:
                         _runtime_state["active_drones"] = plan_count
-                        _runtime_state["redis_msg_per_sec"] = plan_count
+                        _runtime_state["kafka_msg_per_sec"] = plan_count
                         if self._start_time:
                             _runtime_state["uptime_sec"] = int(time.time() - self._start_time)
                 except Exception:
@@ -776,7 +776,7 @@ class SimulationRunner:
 
         self._cleanup()
 
-    _last_reported_redis = 0
+    _last_reported_kafka = 0
 
     def _push_status(self) -> None:
         """推送运行时状态到所有 WebSocket 客户端。"""
@@ -784,15 +784,15 @@ class SimulationRunner:
             if self._start_time:
                 _runtime_state["uptime_sec"] = int(time.time() - self._start_time)
             status = dict(_runtime_state)
-            redis_tp = status.get("redis_msg_per_sec", 0)
+            kafka_tp = status.get("kafka_msg_per_sec", 0)
         socketio.emit("status", status)
         # 每 5 秒报告一次 Redis 遥测吞吐量
-        if redis_tp > 0 and redis_tp != self._last_reported_redis:
+        if kafka_tp > 0 and kafka_tp != self._last_reported_kafka:
             try:
-                _get_streamer().report_redis_telemetry(redis_tp)
+                _get_streamer().report_redis_telemetry(kafka_tp)
             except Exception:
                 pass
-            self._last_reported_redis = redis_tp
+            self._last_reported_kafka = kafka_tp
 
     def _cleanup(self) -> None:
         """清理资源。"""
@@ -858,7 +858,7 @@ class SimulationRunner:
             _runtime_state["running"] = True
             _runtime_state["mode"] = self.mode
             _runtime_state["active_drones"] = 0
-            _runtime_state["redis_msg_per_sec"] = 0
+            _runtime_state["kafka_msg_per_sec"] = 0
             _runtime_state["uptime_sec"] = 0
             _runtime_state["errors"] = 0
             _runtime_state["logs"] = []
@@ -2002,21 +2002,7 @@ def api_env_activate(env_id):
             _current_config["dm_user"] = cfg.get("dm_user", "SYSDBA")
             _current_config["dm_password"] = cfg.get("dm_password", "")
             _current_config["dm_schema"] = cfg.get("dm_schema", "")
-            # 同步 MySQL 配置（环境切换时生效）
-            _current_config["mysql_host"] = cfg.get("mysql_host", "")
-            _current_config["mysql_port"] = cfg.get("mysql_port", 3306)
-            _current_config["mysql_user"] = cfg.get("mysql_user", "")
-            _current_config["mysql_password"] = cfg.get("mysql_password", "")
-            _current_config["mysql_database"] = cfg.get("mysql_database", "")
-        # 仅当新环境配置了有效 MySQL 地址时才重置连接池
-        if cfg.get("mysql_host"):
-            try:
-                from database.mysql_db_manager import reset_mysql_connection
-                reset_mysql_connection()
-            except Exception as e:
-                print(f"[web_server] MySQL 连接重置失败: {e}", flush=True)
-        mysql_info = f"{cfg.get('mysql_host')}/{cfg.get('mysql_database')}" if cfg.get("mysql_host") else "未配置(保持现有连接)"
-        _add_log(f"已切换环境配置: Redis={cfg.get('redis_ip')}:{cfg.get('redis_port')}, Kafka={cfg.get('kafka_url')}, 达梦={cfg.get('dm_host')}, MySQL={mysql_info}")
+        _add_log(f"已切换环境配置: Redis={cfg.get('redis_ip')}:{cfg.get('redis_port')}, Kafka={cfg.get('kafka_url')}, 达梦={cfg.get('dm_host')}")
     return jsonify(result)
 
 

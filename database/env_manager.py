@@ -103,16 +103,6 @@ def activate_env(env_id: int) -> Dict[str, Any]:
         "dm_user": env.get("dm_user", "SYSDBA"),
         "dm_password": env.get("dm_password", ""),
         "dm_schema": env.get("dm_schema", ""),
-        "mysql_host": env.get("mysql_host", ""),
-        "mysql_port": env.get("mysql_port", 3306),
-        "mysql_user": env.get("mysql_user", ""),
-        "mysql_password": env.get("mysql_password", ""),
-        "mysql_database": env.get("mysql_database", ""),
-        "atc_cluster_api": env.get("atc_cluster_api", ""),
-        "atc_vip": env.get("atc_vip", ""),
-        "atc_node_a": env.get("atc_node_a", ""),
-        "atc_node_b": env.get("atc_node_b", ""),
-        "es_hosts": env.get("es_hosts", ""),
     }
     try:
         with open(_CONFIG_JSON, "w", encoding="utf-8") as f:
@@ -136,10 +126,6 @@ def get_current_config() -> Dict[str, Any]:
         "kafka_url2": "",
         "dm_host": "", "dm_port": 5236, "dm_user": "SYSDBA",
         "dm_password": "", "dm_schema": "",
-        "mysql_host": "", "mysql_port": 3306, "mysql_user": "",
-        "mysql_password": "", "mysql_database": "",
-        "atc_cluster_api": "", "atc_vip": "", "atc_node_a": "", "atc_node_b": "",
-        "es_hosts": "",
     }
     try:
         if os.path.exists(_CONFIG_JSON):
@@ -169,19 +155,6 @@ def import_from_env_py() -> Dict[str, Any]:
             "dm_user": getattr(_env, "DB_USER", getattr(_env, "dm_a_user", "SYSDBA")),
             "dm_password": getattr(_env, "DB_PASSWORD", getattr(_env, "dm_a_password", "")),
             "dm_schema": getattr(_env, "DB_SCHEMA", getattr(_env, "dm_a_schema", "")),
-            # MySQL
-            "mysql_host": getattr(_env, "MYSQL_HOST", ""),
-            "mysql_port": getattr(_env, "MYSQL_PORT", 3306),
-            "mysql_user": getattr(_env, "MYSQL_USER", ""),
-            "mysql_password": getattr(_env, "MYSQL_PASSWORD", ""),
-            "mysql_database": getattr(_env, "MYSQL_DATABASE", ""),
-            # ATC 集群
-            "atc_cluster_api": getattr(_env, "cluster_api", ""),
-            "atc_vip": getattr(_env, "atc_vip", ""),
-            "atc_node_a": getattr(_env, "atc_a", ""),
-            "atc_node_b": getattr(_env, "atc_b", ""),
-            # ES
-            "es_hosts": str(getattr(_env, "es_hosts", "")),
         }
         env_id = save_env(data)
         data["id"] = env_id
@@ -213,8 +186,6 @@ def _update_env_py(config: Dict[str, Any]) -> None:
             ("dm_b_host", ""), ("dm_b_user", "SYSDBA"), ("dm_b_password", ""), ("dm_b_schema", ""),
             ("dm_vip", ""),
             ("DB_HOST", ""), ("DB_USER", "SYSDBA"), ("DB_PASSWORD", ""), ("DB_SCHEMA", ""),
-            ("MYSQL_HOST", ""), ("MYSQL_USER", ""), ("MYSQL_PASSWORD", ""), ("MYSQL_DATABASE", ""),
-            ("cluster_api", ""), ("atc_vip", ""), ("atc_a", ""), ("atc_b", ""),
             ("ACCESS_KEY_a", ""), ("ACCESS_KEY_b", ""),
             ("dops_a", ""), ("dops_b", ""),
             ("kafka_url_a", ""), ("kafka_url_b", ""),
@@ -223,14 +194,12 @@ def _update_env_py(config: Dict[str, Any]) -> None:
         ]
         # 整数值字段 (key = 1234)
         _int_fields = [
-            ("MYSQL_PORT", 3306),
             ("dm_a_port", 5236), ("dm_b_port", 5236),
             ("DB_PORT", 5236),
             ("iomp_port_a", 8801), ("iomp_port_b", 8801),
         ]
         # 列表值字段 (key = [...])
         _list_fields = [
-            ("es_hosts", '["10.165.26.119:29200", "10.165.26.139:29200"]'),
         ]
 
         # 从数据库字段映射到 env.py 字段名
@@ -241,14 +210,6 @@ def _update_env_py(config: Dict[str, Any]) -> None:
             "dm_user": "DB_USER",
             "dm_password": "DB_PASSWORD",
             "dm_schema": "DB_SCHEMA",
-            "mysql_host": "MYSQL_HOST",
-            "mysql_port": "MYSQL_PORT",
-            "mysql_user": "MYSQL_USER",
-            "mysql_password": "MYSQL_PASSWORD",
-            "mysql_database": "MYSQL_DATABASE",
-            "atc_cluster_api": "cluster_api",
-            "atc_node_a": "atc_a",
-            "atc_node_b": "atc_b",
         }
 
         for field, default in _str_fields:

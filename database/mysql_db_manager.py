@@ -242,16 +242,6 @@ _MYSQL_TABLE_DDL = {
             `dm_user`     VARCHAR(128) DEFAULT 'SYSDBA' COMMENT '达梦用户名',
             `dm_password` VARCHAR(128) DEFAULT '' COMMENT '达梦密码',
             `dm_schema`   VARCHAR(128) DEFAULT '' COMMENT '达梦模式名',
-            `mysql_host`     VARCHAR(128) DEFAULT '' COMMENT 'MySQL地址',
-            `mysql_port`     INT DEFAULT 3306 COMMENT 'MySQL端口',
-            `mysql_user`     VARCHAR(128) DEFAULT '' COMMENT 'MySQL用户',
-            `mysql_password` VARCHAR(128) DEFAULT '' COMMENT 'MySQL密码',
-            `mysql_database` VARCHAR(128) DEFAULT '' COMMENT 'MySQL数据库名',
-            `atc_cluster_api` VARCHAR(256) DEFAULT '' COMMENT '集群API地址',
-            `atc_vip`      VARCHAR(128) DEFAULT '' COMMENT 'ATC VIP地址',
-            `atc_node_a`   VARCHAR(128) DEFAULT '' COMMENT 'ATC A节点',
-            `atc_node_b`   VARCHAR(128) DEFAULT '' COMMENT 'ATC B节点',
-            `es_hosts`     VARCHAR(512) DEFAULT '' COMMENT 'ES地址(JSON)',
             `created_at`  DATETIME DEFAULT CURRENT_TIMESTAMP,
             `updated_at`  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='仿真环境配置表'
@@ -400,23 +390,6 @@ def _ensure_mysql_tables(client=None):
                 _try_reset_broken_connection()
 
     _ALTER_COLUMNS = {
-        "sim_env_config": [
-            ("dm_host",     "VARCHAR(128) DEFAULT '' COMMENT '达梦数据库地址'"),
-            ("dm_port",     "INT DEFAULT 5236 COMMENT '达梦数据库端口'"),
-            ("dm_user",     "VARCHAR(128) DEFAULT 'SYSDBA' COMMENT '达梦用户名'"),
-            ("dm_password", "VARCHAR(128) DEFAULT '' COMMENT '达梦密码'"),
-            ("dm_schema",   "VARCHAR(128) DEFAULT '' COMMENT '达梦模式名'"),
-            ("mysql_host",     "VARCHAR(128) DEFAULT '' COMMENT 'MySQL地址'"),
-            ("mysql_port",     "INT DEFAULT 3306 COMMENT 'MySQL端口'"),
-            ("mysql_user",     "VARCHAR(128) DEFAULT '' COMMENT 'MySQL用户'"),
-            ("mysql_password", "VARCHAR(128) DEFAULT '' COMMENT 'MySQL密码'"),
-            ("mysql_database", "VARCHAR(128) DEFAULT '' COMMENT 'MySQL数据库名'"),
-            ("atc_cluster_api", "VARCHAR(256) DEFAULT '' COMMENT '集群API'"),
-            ("atc_vip",      "VARCHAR(128) DEFAULT '' COMMENT 'ATC VIP'"),
-            ("atc_node_a",   "VARCHAR(128) DEFAULT '' COMMENT 'ATC A节点'"),
-            ("atc_node_b",   "VARCHAR(128) DEFAULT '' COMMENT 'ATC B节点'"),
-            ("es_hosts",     "VARCHAR(512) DEFAULT '' COMMENT 'ES地址(JSON)'"),
-        ],
         "sim_scene_tasks": [
             ("updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
         ],
@@ -431,6 +404,9 @@ def _ensure_mysql_tables(client=None):
             ("updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
         ],
     }
+    # 检测 sim_env_config 是否含废弃列（MySQL/ATC/ES），若是则执行表重建
+    if "sim_env_config" in existing_tables:
+        _migrate_mysql_drop_env_config_columns(client)
     # 仅检测缺失列（不自动 ALTER，避免 DDL 阻塞启动）
     # 使用 migrate_schema() 独立函数执行实际的 DDL 迁移
     for table_name, columns in _ALTER_COLUMNS.items():
@@ -442,14 +418,78 @@ def _ensure_mysql_tables(client=None):
             existing_cols = {list(row.values())[0] for row in cur.fetchall()}
             missing = [(c, d) for c, d in columns if c not in existing_cols]
             if missing:
-                if table_name == "sim_env_config":
-                    _p(f"[mysql_db_manager] {table_name} 缺失 {len(missing)} 列 (旧表)，"
-                       f"请运行 python database/rebuild_sim_env_config.py 重建")
-                else:
-                    _p(f"[mysql_db_manager] {table_name} 缺失 {len(missing)} 列，"
-                       f"请运行 python database/migrate_schema.py 补全")
+                _p(f"[mysql_db_manager] {table_name} 缺失 {len(missing)} 列，"
+                   f"请运行 python database/migrate_schema.py 补全")
         except Exception as e:
             _p(f"[mysql_db_manager] 检查 {table_name} 列信息失败: {e}")
+
+
+def _migrate_mysql_drop_env_config_columns(client) -> None:
+    """迁移：删除 sim_env_config 表中已废弃的 MySQL / ATC 集群 / ES 列。
+
+    通过检测旧列是否存在，若存在则通过表重建方式移除这些列。
+    """
+    try:
+        cur = client.cursor()
+        cur.execute("SHOW COLUMNS FROM `sim_env_config`")
+        columns = {list(row.values())[0] for row in cur.fetchall()}
+        obsolete_cols = {"mysql_host", "atc_cluster_api", "es_hosts"}
+        if not (obsolete_cols & columns):
+            return  # 已经是新表结构
+
+        print("[mysql_db_manager] 检测到 sim_env_config 含废弃列 (MySQL/ATC/ES)，执行表重建...")
+
+        keep_cols = [
+            "id", "name",
+            "redis_ip", "redis_port", "redis_pwd",
+            "kafka_url", "kafka_url2",
+            "is_default",
+            "dm_host", "dm_port", "dm_user", "dm_password", "dm_schema",
+            "created_at", "updated_at",
+        ]
+        existing_keep = [c for c in keep_cols if c in columns]
+        col_list = ", ".join(f"`{c}`" for c in existing_keep)
+
+        # 1. 重命名旧表
+        cur.execute("RENAME TABLE `sim_env_config` TO `sim_env_config_old`")
+        client.commit()
+
+        # 2. 创建新表
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS `sim_env_config` (
+                `id`          INT AUTO_INCREMENT PRIMARY KEY,
+                `name`        VARCHAR(128) NOT NULL,
+                `redis_ip`    VARCHAR(128) DEFAULT '',
+                `redis_port`  VARCHAR(16) DEFAULT '6379',
+                `redis_pwd`   VARCHAR(128) DEFAULT '',
+                `kafka_url`   VARCHAR(256) DEFAULT '',
+                `kafka_url2`  VARCHAR(256) DEFAULT '',
+                `is_default`  TINYINT DEFAULT 0,
+                `dm_host`     VARCHAR(128) DEFAULT '' COMMENT '达梦数据库地址',
+                `dm_port`     INT DEFAULT 5236 COMMENT '达梦数据库端口',
+                `dm_user`     VARCHAR(128) DEFAULT 'SYSDBA' COMMENT '达梦用户名',
+                `dm_password` VARCHAR(128) DEFAULT '' COMMENT '达梦密码',
+                `dm_schema`   VARCHAR(128) DEFAULT '' COMMENT '达梦模式名',
+                `created_at`  DATETIME DEFAULT CURRENT_TIMESTAMP,
+                `updated_at`  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='仿真环境配置表'
+        """)
+
+        # 3. 复制数据
+        cur.execute(f"INSERT INTO `sim_env_config` ({col_list}) SELECT {col_list} FROM `sim_env_config_old`")
+        client.commit()
+
+        # 4. 删除旧表
+        cur.execute("DROP TABLE `sim_env_config_old`")
+        client.commit()
+
+        print("[mysql_db_manager] sim_env_config 表重建完成，已移除 MySQL/ATC/ES 列")
+    except Exception as e:
+        print(f"[mysql_db_manager] sim_env_config 表重建失败: {e}")
+        try:
+            client.rollback()
+        except Exception:
+            pass
 
 
 def migrate_schema():
@@ -464,23 +504,6 @@ def migrate_schema():
         return {"success": False, "message": "MySQL 不可用"}
 
     _ALTER_COLUMNS = {
-        "sim_env_config": [
-            ("dm_host",     "VARCHAR(128) DEFAULT '' COMMENT '达梦数据库地址'"),
-            ("dm_port",     "INT DEFAULT 5236 COMMENT '达梦数据库端口'"),
-            ("dm_user",     "VARCHAR(128) DEFAULT 'SYSDBA' COMMENT '达梦用户名'"),
-            ("dm_password", "VARCHAR(128) DEFAULT '' COMMENT '达梦密码'"),
-            ("dm_schema",   "VARCHAR(128) DEFAULT '' COMMENT '达梦模式名'"),
-            ("mysql_host",     "VARCHAR(128) DEFAULT '' COMMENT 'MySQL地址'"),
-            ("mysql_port",     "INT DEFAULT 3306 COMMENT 'MySQL端口'"),
-            ("mysql_user",     "VARCHAR(128) DEFAULT '' COMMENT 'MySQL用户'"),
-            ("mysql_password", "VARCHAR(128) DEFAULT '' COMMENT 'MySQL密码'"),
-            ("mysql_database", "VARCHAR(128) DEFAULT '' COMMENT 'MySQL数据库名'"),
-            ("atc_cluster_api", "VARCHAR(256) DEFAULT '' COMMENT '集群API'"),
-            ("atc_vip",      "VARCHAR(128) DEFAULT '' COMMENT 'ATC VIP'"),
-            ("atc_node_a",   "VARCHAR(128) DEFAULT '' COMMENT 'ATC A节点'"),
-            ("atc_node_b",   "VARCHAR(128) DEFAULT '' COMMENT 'ATC B节点'"),
-            ("es_hosts",     "VARCHAR(512) DEFAULT '' COMMENT 'ES地址(JSON)'"),
-        ],
         "sim_scene_tasks": [
             ("updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
         ],

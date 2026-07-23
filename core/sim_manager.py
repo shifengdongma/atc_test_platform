@@ -357,7 +357,7 @@ class SimulationManager:
                 "running": self._running,
                 "mode": self.mode,
                 "active_drones": active_drones,
-                "redis_msg_per_sec": kafka_ps,
+                "kafka_msg_per_sec": kafka_ps,
                 "uptime_sec": int(time.time() - self._start_time) if self._start_time else 0,
                 "errors": self._errors,
                 "redis_connected": self.redis.client is not None,

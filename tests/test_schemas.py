@@ -79,7 +79,7 @@ class TestSimulationStatusDict:
             "running": True,
             "mode": "dynamic",
             "active_drones": 100,
-            "redis_msg_per_sec": 100,
+            "kafka_msg_per_sec": 100,
             "uptime_sec": 3600,
             "errors": 0,
             "redis_connected": True,

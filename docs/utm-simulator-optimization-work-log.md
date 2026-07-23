@@ -138,3 +138,65 @@
 
 - 新建文件：0
 - 修改文件：16
+
+---
+
+## 2026-07-23 — 监控页面 Redis→Kafka 标签修正 + 错误计数字号修复
+
+### 修改清单
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-23 | `web/pages/run.html` | 修改 | ✅ | 卡片和图表标签显示"Kafka 吞吐" |
+| 2026-07-23 | `web/index.html` | 修改 | ✅ | 同上，旧版页面同步修正 |
+| 2026-07-23 | `web/static/js/run.js` | 修改 | ✅ | DOM 引用/变量 `redisTp`→`kafkaTp` |
+| 2026-07-23 | `web/static/js/app.js` | 修改 | ✅ | 同上，旧版 JS 同步修正 |
+| 2026-07-23 | `web/static/js/charts.js` | 修改 | ✅ | 图表变量/label/title 全部改为 Kafka |
+| 2026-07-23 | `web/server.py` | 修改 | ✅ | 状态字段 `redis_msg_per_sec`→`kafka_msg_per_sec`（7处） |
+| 2026-07-23 | `core/sim_manager.py` | 修改 | ✅ | 返回字段名同步为 `kafka_msg_per_sec` |
+| 2026-07-23 | `common/schemas.py` | 修改 | ✅ | Schema 字段名+注释同步 |
+| 2026-07-23 | `tests/test_schemas.py` | 修改 | ✅ | 测试数据字段名同步 |
+
+### 核心修复
+
+1. **监控标签回正：Redis→Kafka**：上轮优化错误地将监控卡片"Kafka 吞吐"改为"Redis 吞吐"，但该指标实际统计的是 `kafka_ps`（Kafka 消息发送速率），并非 Redis 吞吐量。本次将所有前端标签、JS 变量名（`redisTp`→`kafkaTp`、`chartRedis`→`chartKafka`、`redisData`→`kafkaData`）、后端字段名（`redis_msg_per_sec`→`kafka_msg_per_sec`）全部改回 Kafka 命名，与数据来源一致。
+
+2. **错误计数字号统一**：`#error-count` 卡片缺少 `big` CSS 类，字号仅 14px，而其余三个数值卡片（活跃无人机、Kafka 吞吐、运行时长）均为 22px。添加 `class="card-value big"` 后字号一致。
+
+3. **全链路同步**：HTML→JS→WebSocket 服务端→仿真核心→Schema 定义→单元测试，6 层全部同步，`grep` 确认无 `redis_msg_per_sec` / `redis-tp` / `chart-redis` / `chartRedis` 残留引用。
+
+### 汇总
+
+- 新建文件：0
+- 修改文件：9
+
+---
+
+## 2026-07-23 — 环境管理精简：移除 MySQL + ATC 集群/ES 环境配置
+
+### 修改清单
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-23 | `web/pages/env.html` | 修改 | ✅ | 编辑弹窗仅保留 Redis/Kafka/达梦 三个分组 |
+| 2026-07-23 | `web/static/js/env.js` | 修改 | ✅ | 移除 MySQL/ATC/ES 字段读写和当前激活信息展示 |
+| 2026-07-23 | `database/env_manager.py` | 修改 | ✅ | `activate_env`/`get_current_config`/`import_from_env_py`/`_update_env_py` 全部移除 10 个废弃字段 |
+| 2026-07-23 | `web/server.py` | 修改 | ✅ | `api_env_activate` 移除 MySQL 配置同步和连接重置逻辑 |
+| 2026-07-23 | `database/db_manager.py` | 修改 | ✅ | SQLite DDL 删除 MySQL/ATC/ES 10列；移除迁移行；新增 `_migrate_drop_env_config_columns()` 表重建迁移 |
+| 2026-07-23 | `database/mysql_db_manager.py` | 修改 | ✅ | MySQL DDL 删除 10 列；移除 `_ALTER_COLUMNS` 中 sim_env_config 条目；新增 `_migrate_mysql_drop_env_config_columns()` 表重建迁移 |
+| 2026-07-23 | `common/config.json` | 修改 | ✅ | 清理 MySQL/ATC/ES 字段，仅保留 Redis/Kafka/达梦 |
+
+### 核心修复
+
+1. **环境配置职责分离**：MySQL 数据库连接（平台自身存储）和 ATC 集群/ES 配置不再作为"可切换环境"的一部分。这些配置由 `env.py` / 环境变量统一管理，切换环境仅影响 Redis / Kafka / 达梦数据库三个外部依赖。避免因环境切换导致平台自身 MySQL 连接跳变。
+
+2. **sim_env_config 表精简**：从 24 列缩减为 14 列（id, name, redis_ip/port/pwd, kafka_url/url2, is_default, dm_host/port/user/password/schema, created_at, updated_at），移除 10 个废弃列（mysql_*×5, atc_*×4, es_hosts×1）。
+
+3. **平滑迁移**：SQLite 和 MySQL 均通过检测旧列→创建新表→复制数据→删旧表→重命名的方式完成表重建，保留已有的 Redis/Kafka/达梦环境配置数据不丢失。
+
+4. **系统 MySQL 连接不受影响**：`common/config.py` 的 `MysqlConfig` 数据类和 `_load_mysql_config()` / `database/mysql_db_manager.py` 连接池逻辑完全保留，平台持久化功能正常。
+
+### 汇总
+
+- 新建文件：0
+- 修改文件：7

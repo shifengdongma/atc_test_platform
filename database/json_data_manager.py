@@ -598,8 +598,10 @@ def preview_file(file_id: int, offset: int = 0, limit: int = 500) -> Dict[str, A
 
     fpath = _resolve_path(record)
     if not fpath or not os.path.exists(fpath):
-        return {"content": "", "truncated": False, "total_size": 0,
-                "message": "文件内容在磁盘上不可用（可从数据管理页面重新上传）"}
+        return {"id": record.get("id"), "name": record.get("name", ""),
+                "total_lines": 0, "offset": 0, "limit": 0,
+                "lines": [], "has_more": False,
+                "message": "文件内容在磁盘上不可用（可从数据管理页面导出以恢复磁盘文件）"}
 
     lines = []
     total_lines = 0
@@ -665,7 +667,7 @@ def read_file_content_partial(file_id: int, max_chars: int = 102400) -> Dict[str
     fpath = _resolve_path(record)
     if not fpath or not os.path.exists(fpath):
         return {"content": "", "truncated": False, "total_size": 0,
-                "message": "文件内容在磁盘上不可用（可从数据管理页面重新上传）"}
+                "message": "文件内容在磁盘上不可用（可从数据管理页面导出以恢复磁盘文件）"}
 
     total_size = os.path.getsize(fpath)
     truncated = total_size > max_chars

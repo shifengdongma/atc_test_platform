@@ -515,15 +515,95 @@ window.loadCategoryFilter = async function() {
       alarmSel.value = alarmVal;
     }
 
-    // 更新编辑弹窗的 datalist
-    var dl = $('#category-datalist');
-    if (dl) {
-      dl.innerHTML = cats.map(function(c) {
-        return '<option value="' + escHtml(c) + '">';
-      }).join('');
+    // 更新编辑弹窗的分类下拉
+    var dd = $('#category-dropdown');
+    if (dd) {
+      window._categoryList = cats;
+      renderCategoryDropdown(cats, $('#edit-category').value);
     }
   } catch(e) {}
 };
+
+// ── 分类自定义下拉渲染 ──────────────────────────────────────────────
+// showDropdown: 仅用户交互（focus/input）时显示下拉面板，编程调用（loadCategoryFilter）时仅更新 HTML 不弹出
+function renderCategoryDropdown(cats, filterText, showDropdown) {
+  var dd = $('#category-dropdown');
+  if (!dd) return;
+  filterText = (filterText || '').toLowerCase();
+  var filtered = filterText
+    ? cats.filter(function(c) { return c.toLowerCase().indexOf(filterText) >= 0; })
+    : cats;
+  var html = filtered.map(function(c) {
+    return '<div class="category-dropdown-item" data-val="' + escHtml(c) + '">' + escHtml(c) + '</div>';
+  }).join('');
+  // 用户输入的内容不在已有列表中时（忽略大小写），提示可新建
+  var exactMatch = cats.some(function(c) { return c.toLowerCase() === filterText; });
+  if (filterText && !exactMatch) {
+    html += '<div class="category-dropdown-item new-cat" data-val="' + escHtml(filterText) + '">➕ 新建 "' + escHtml(filterText) + '"</div>';
+  }
+  dd.innerHTML = html;
+  if (showDropdown && html) { dd.classList.add('show'); }
+  else if (!showDropdown) { /* 保持当前显示状态 */ }
+  else { dd.classList.remove('show'); }
+  // 绑定点击事件
+  dd.querySelectorAll('.category-dropdown-item').forEach(function(item) {
+    item.addEventListener('mousedown', function(e) {
+      e.preventDefault(); // 阻止 blur 先触发
+      $('#edit-category').value = item.dataset.val;
+      dd.classList.remove('show');
+    });
+  });
+}
+
+function initCategoryDropdown() {
+  var input = $('#edit-category');
+  var dd = $('#category-dropdown');
+  if (!input || !dd) return;
+
+  input.addEventListener('focus', function() {
+    renderCategoryDropdown(window._categoryList || [], input.value, true);
+  });
+
+  input.addEventListener('input', function() {
+    renderCategoryDropdown(window._categoryList || [], input.value, true);
+  });
+
+  input.addEventListener('keydown', function(e) {
+    if (!dd.classList.contains('show')) return;
+    var items = dd.querySelectorAll('.category-dropdown-item');
+    if (!items.length) return;
+    var active = dd.querySelector('.category-dropdown-item.active');
+    var idx = Array.from(items).indexOf(active);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (active) active.classList.remove('active');
+      var next = (idx + 1) % items.length;
+      items[next].classList.add('active');
+      items[next].scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (active) active.classList.remove('active');
+      var prev = (idx - 1 + items.length) % items.length;
+      items[prev].classList.add('active');
+      items[prev].scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (active) {
+        input.value = active.dataset.val;
+      }
+      dd.classList.remove('show');
+    } else if (e.key === 'Escape') {
+      dd.classList.remove('show');
+    }
+  });
+
+  // 点击外部关闭
+  document.addEventListener('click', function(e) {
+    if (!input.contains(e.target) && !dd.contains(e.target)) {
+      dd.classList.remove('show');
+    }
+  });
+}
 
 // ── 分类管理弹窗 ──────────────────────────────────────────────────
 var categoryModal = $('#category-modal');
@@ -657,8 +737,12 @@ $('#btn-category-add').addEventListener('click', async function() {
   }
   if (!exists) {
     sel.appendChild(new Option(name, name));
-    var dl = $('#category-datalist');
-    if (dl) dl.appendChild(new Option(name, ''));
+    // 同步追加到自定义下拉
+    if (window._categoryList && window._categoryList.indexOf(name) < 0) {
+      window._categoryList.push(name);
+    }
+    var dd = $('#category-dropdown');
+    if (dd) renderCategoryDropdown(window._categoryList || [name], $('#edit-category').value);
   }
   input.value = '';
   showToast('分类 "' + name + '" 已就绪，保存文件时即可使用', 'success');
@@ -909,5 +993,6 @@ function formatSize(bytes) {
 // ── 初始化 ─────────────────────────────────────────────────────────
 loadCategoryFilter();
 loadFiles(1);
+initCategoryDropdown();
 })();
 initCommon('/data');

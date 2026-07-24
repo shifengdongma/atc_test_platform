@@ -6,6 +6,31 @@
   <title>数据管理 — UTM 模拟器</title>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js" async></script>
   <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    /* ── 分类自定义下拉 ── */
+    .category-dropdown-wrap { position: relative; flex: 1; }
+    .category-dropdown {
+      position: absolute; top: 100%; left: 0; right: 0;
+      max-height: 180px; overflow-y: auto;
+      background: #0d1b2a; border: 1px solid var(--accent);
+      border-top: none; border-radius: 0 0 4px 4px;
+      z-index: 200; display: none;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    .category-dropdown.show { display: block; }
+    .category-dropdown-item {
+      padding: 6px 10px; font-size: 13px; color: var(--text);
+      cursor: pointer; transition: background 0.1s;
+    }
+    .category-dropdown-item:hover,
+    .category-dropdown-item.active {
+      background: rgba(0,180,216,0.15); color: var(--accent-bright);
+    }
+    .category-dropdown-item.new-cat {
+      border-top: 1px solid var(--border); color: var(--accent);
+      font-style: italic;
+    }
+  </style>
 </head>
 <body class="page-data">
   <header class="topbar">
@@ -128,7 +153,7 @@
       <h3 id="edit-modal-title">新建 JSON 文件</h3>
       <div style="margin-bottom:10px;"><label style="font-size:12px;color:var(--text-dim);">文件名 *</label><input type="text" id="edit-name" style="width:100%;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:13px;"></div>
       <div style="display:flex;gap:10px;margin-bottom:10px;">
-        <div style="flex:1;"><label style="font-size:12px;color:var(--text-dim);">分类</label><input type="text" id="edit-category" list="category-datalist" style="width:100%;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:13px;" placeholder="输入或选择分类"><datalist id="category-datalist"></datalist></div>
+        <div class="category-dropdown-wrap"><label style="font-size:12px;color:var(--text-dim);">分类</label><input type="text" id="edit-category" autocomplete="off" style="width:100%;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:13px;" placeholder="输入或选择分类"><div id="category-dropdown" class="category-dropdown"></div></div>
         <div style="flex:1;"><label style="font-size:12px;color:var(--text-dim);">告警类型</label><select id="edit-alarm-type" style="width:100%;padding:6px 8px;background:#0d1b2a;border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:13px;"><option value="">自动检测</option></select></div>
       </div>
       <div style="display:flex;gap:10px;margin-bottom:10px;">

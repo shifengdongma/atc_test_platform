@@ -306,6 +306,7 @@ window.editFile = async function(id) {
     $('#edit-modal').dataset.truncated = truncated ? '1' : '';
     $('#edit-content').dataset.originalSize = data.total_size || 0;
     loadAlarmTypeSelect();
+    loadCategoryFilter();
   } catch(e) { showToast('加载失败: ' + e.message, 'error'); }
 };
 
@@ -324,6 +325,7 @@ function showEditModal() {
   $('#edit-modal').dataset.truncated = '';
   $('#edit-content').dataset.originalSize = '0';
   loadAlarmTypeSelect();
+  loadCategoryFilter();
 }
 
 function hideEditModal() {

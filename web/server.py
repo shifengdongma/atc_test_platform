@@ -688,6 +688,28 @@ class SimulationRunner:
                 _existing = [f for f in scene_files if os.path.exists(f)]
                 if _missing:
                     _add_log(f"⚠ 以下文件在磁盘上不存在: {_missing}")
+                    # 自动从数据库查找并导出缺失文件到磁盘
+                    try:
+                        mgr = _get_json_mgr()
+                        _all_db = mgr.list_files(page_size=5000)
+                        _db_by_name = {f["name"]: f for f in (_all_db.get("files", []) or []) if f.get("name")}
+                        for _mn in _missing:
+                            _dbr = _db_by_name.get(_mn)
+                            if _dbr and _dbr.get("id"):
+                                _exp = mgr.export_to_mock(_dbr["id"])
+                                if _exp.get("success"):
+                                    _actual_path = _exp.get("path") or os.path.join(mock_dir, _mn)
+                                    if os.path.exists(_actual_path):
+                                        _existing.append(_actual_path)
+                                        _add_log(f"  ✅ 已导出: {_mn}")
+                                    else:
+                                        _add_log(f"  ⚠ 导出返回成功但文件不可访问: {_mn} ({_actual_path})")
+                                else:
+                                    _add_log(f"  ⚠ 导出失败: {_mn} — {_exp.get('message', '未知')}")
+                            else:
+                                _add_log(f"  ⚠ 数据库中未找到: {_mn}")
+                    except Exception as _e:
+                        _add_log(f"⚠ 自动导出异常: {_e}")
                 if not _existing and not scene_dir:
                     _add_log("❌ 所有选定文件均不存在于磁盘，请先在数据管理页面点击'全部导出到磁盘'")
                     self._running = False

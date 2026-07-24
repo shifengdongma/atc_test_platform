@@ -136,7 +136,7 @@ def gen_deviate_adv(
     from tools.create_data_scenes import run_deviate
 
     if output_dir is None:
-        output_dir = os.path.join(_SCRIPT_DIR, "mock")
+        output_dir = os.path.join(_PROJECT_ROOT, "data", "mock")
 
     ns = argparse.Namespace(
         route_name=route_name,
@@ -188,7 +188,7 @@ def gen_collision(
     from tools.create_data_scenes import run_collision
 
     if output_dir is None:
-        output_dir = os.path.join(_SCRIPT_DIR, "mock")
+        output_dir = os.path.join(_PROJECT_ROOT, "data", "mock")
 
     ns = argparse.Namespace(
         route_names=route_names,
@@ -238,7 +238,7 @@ def gen_status(
     from tools.create_data_scenes import run_status
 
     if output_dir is None:
-        output_dir = os.path.join(_SCRIPT_DIR, "mock")
+        output_dir = os.path.join(_PROJECT_ROOT, "data", "mock")
 
     # 防止 SystemExit 在无场景时退出
     if not any([scene3, scene5, scene3_5]):
@@ -351,7 +351,7 @@ def gen_single_route(
     from tools.create_data_scene import build_waypoints, generate_trajectory, apply_deviation
 
     if output_dir is None:
-        output_dir = os.path.join(_SCRIPT_DIR, "mock")
+        output_dir = os.path.join(_PROJECT_ROOT, "data", "mock")
 
     # 构造 args 用于 build_waypoints
     ns = argparse.Namespace(
@@ -435,7 +435,7 @@ def gen_single_deviate(
     from tools.create_data_scene import build_waypoints, generate_trajectory, apply_deviation
 
     if output_dir is None:
-        output_dir = os.path.join(_SCRIPT_DIR, "mock")
+        output_dir = os.path.join(_PROJECT_ROOT, "data", "mock")
 
     # 构造 args 用于 build_waypoints
     ns = argparse.Namespace(

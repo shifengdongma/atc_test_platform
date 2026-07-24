@@ -789,7 +789,7 @@ def setup_create_parser(subparsers):
     p.add_argument("--origin-lat", type=float, default=None, help="仿真中心纬度")
     p.add_argument("--origin-lon", type=float, default=None, help="仿真中心经度")
     p.add_argument("--sim-radius-m", type=float, default=None, help="仿真有效半径（米）")
-    p.add_argument("--output-dir", default=os.path.join(_ROOT, "mock"), help="输出目录")
+    p.add_argument("--output-dir", default=os.path.join(_ROOT, "data", "mock"), help="输出目录")
     return p
 
 
@@ -1064,7 +1064,7 @@ def setup_deviate_parser(subparsers):
     p.add_argument("--deviate-mode", type=str, default="horizontal", choices=["horizontal", "vertical", "both"])
     p.add_argument("--coord-system", default="wgs84", choices=["wgs84", "gcj02", "bd09"])
     p.add_argument("--coord-output", default=None)
-    p.add_argument("--output-dir", default=os.path.join(_ROOT, "mock"))
+    p.add_argument("--output-dir", default=os.path.join(_ROOT, "data", "mock"))
     p.add_argument("--filename", default=None)
     return p
 
@@ -1394,7 +1394,7 @@ def setup_collision_parser(subparsers):
     p.add_argument("--warning-time", type=int, default=20, help="告警开始时间(秒)")
     p.add_argument("--collision-time", type=float, default=300, help="目标碰撞时间(秒)")
     p.add_argument("--zone-output", action="store_true", default=True, help="输出区域标记")
-    p.add_argument("--output-dir", default=os.path.join(_ROOT, "mock"))
+    p.add_argument("--output-dir", default=os.path.join(_ROOT, "data", "mock"))
     p.add_argument("--interval", type=int, default=1000)
     return p
 
@@ -1579,7 +1579,7 @@ def setup_status_parser(subparsers):
     p.add_argument("--scene3", action="store_true", help="状态3: 紧急后恢复")
     p.add_argument("--scene5", action="store_true", help="状态5: 丢失")
     p.add_argument("--scene3-5", action="store_true", help="状态3转5: 紧急后丢失")
-    p.add_argument("--output-dir", default=os.path.join(_ROOT, "mock"))
+    p.add_argument("--output-dir", default=os.path.join(_ROOT, "data", "mock"))
     return p
 
 
@@ -1745,7 +1745,7 @@ def setup_check_id_parser(subparsers):
     p = subparsers.add_parser("check-id", help="ID碰撞检测（Java hashCode模拟）")
     p.add_argument("--files", nargs="+", default=None,
                    help="检测的文件路径列表，默认检测 mock/kafka_data_scene2.json ~ scene11.json")
-    p.add_argument("--mock-dir", default=os.path.join(_ROOT, "mock"), help="mock数据目录")
+    p.add_argument("--mock-dir", default=os.path.join(_ROOT, "data", "mock"), help="mock数据目录")
     return p
 
 
@@ -1904,7 +1904,7 @@ def run_analyze(args):
     if args.file:
         filepath = args.file
     else:
-        filepath = os.path.join(_ROOT, "mock", "跨顺义三河段航路偏航数据_0.1.json")
+        filepath = os.path.join(_ROOT, "data", "mock", "跨顺义三河段航路偏航数据_0.1.json")
     if not os.path.exists(filepath):
         print(f"[错误] 文件不存在: {filepath}")
         sys.exit(1)

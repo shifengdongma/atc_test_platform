@@ -360,7 +360,7 @@ class SceneEmitter:
         # 保存 trace 数据到文件
         if self.consume_trace and self.trace_records:
             try:
-                trace_path = os.path.join(_root, "mock", "redis_trace.json")
+                trace_path = os.path.join(_root, "data", "mock", "simulation_traces", "redis_trace.json")
                 os.makedirs(os.path.dirname(trace_path), exist_ok=True)
                 with open(trace_path, 'w', encoding='utf-8') as f:
                     json.dump(self.trace_records, f, ensure_ascii=False, indent=2)
@@ -372,7 +372,7 @@ class SceneEmitter:
             try:
                 trace_records = self._query_trace_from_redis()
                 if trace_records:
-                    trace_path = os.path.join(_root, "mock", "redis_trace.json")
+                    trace_path = os.path.join(_root, "data", "mock", "simulation_traces", "redis_trace.json")
                     os.makedirs(os.path.dirname(trace_path), exist_ok=True)
                     with open(trace_path, 'w', encoding='utf-8') as f:
                         json.dump(trace_records, f, ensure_ascii=False, indent=2)

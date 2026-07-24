@@ -200,3 +200,48 @@
 
 - 新建文件：0
 - 修改文件：7
+
+---
+
+## 2026-07-24 — trace 保存路径调整 + root 级 mock/ 引用统一迁移
+
+### 修改清单
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-24 | `tools/run_kafka_scene.py` | 修改 | ✅ | trace 保存路径指向 `data/mock/simulation_traces/` |
+| 2026-07-24 | `tools/run_kafka.py` | 修改 | ✅ | REDIS_TRACE_JSON_PATH 加入 `simulation_traces/` 子目录，目录自动创建 |
+| 2026-07-24 | `tools/create_data_scenes.py` | 修改 | ✅ | 6 处 root 级 `mock/` → `data/mock/` |
+| 2026-07-24 | `services/web_data_gen_bridge.py` | 修改 | ✅ | 5 处 `_SCRIPT_DIR`（未定义变量）→ `_PROJECT_ROOT` + `data/mock/` |
+
+### 核心修复
+
+1. **trace 保存路径调整**：场景文件注入停止后，trace 数据从 root 级 `mock/redis_trace.json` 改为保存到 `data/mock/simulation_traces/redis_trace.json`，与其他数据文件目录结构统一。`run_kafka_scene.py` 两处 trace 落盘路径均已更新，`run_kafka.py` 的 `REDIS_TRACE_JSON_PATH` 同步加入 `simulation_traces/` 子目录并通过 `os.makedirs(dirname(...))` 确保目录自动创建。
+
+2. **root 级 mock/ 引用统一迁移**：`create_data_scenes.py` 中 6 处 `os.path.join(_ROOT, "mock")` 统一改为 `os.path.join(_ROOT, "data", "mock")`，与 `common/config.py` 定义的 `MOCK_DIR` 和其他模块保持一致，消除 root 级和 `data/` 级两套 `mock/` 路径并存的问题。
+
+3. **web_data_gen_bridge.py 修复**：5 处 `os.path.join(_SCRIPT_DIR, "mock")` 中 `_SCRIPT_DIR` 变量未定义（会抛 `NameError`），改为使用已定义的 `_PROJECT_ROOT` 并补充 `"data"` 路径段，同时与项目统一路径规范对齐。
+
+### 汇总
+
+- 新建文件：0
+- 修改文件：4
+
+---
+
+## 2026-07-24 — 数据管理编辑弹窗无法打开修复
+
+### 修改清单
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-24 | `web/static/js/data.js` | 修改 | ✅ | 点击编辑按钮弹窗正常弹出 |
+
+### 核心修复
+
+1. **编辑弹窗 `display='flex'` 被误删**：commit `0d1dbc7` 在添加文件截断保护代码时，误将 `editFile()` 函数中的 `$('#edit-modal').style.display = 'flex';` 删除。`editFile()` API 调用成功、表单数据正确填充，但弹窗从未被设为可见。对比 `showEditModal()`（新建功能正常）确认差异后补回该行。前端无报错是因为 `catch` 只捕获 API 异常，缺少弹窗显示逻辑不属于异常。
+
+### 汇总
+
+- 新建文件：0
+- 修改文件：1

@@ -300,6 +300,7 @@ window.editFile = async function(id) {
       $('#edit-size-warning').style.display = 'none';
     }
 
+    $('#edit-modal').style.display = 'flex';
     $('#edit-modal').dataset.editId = id;
     // 标记文件内容是否被截断，保存时避免截断内容覆盖原文件
     $('#edit-modal').dataset.truncated = truncated ? '1' : '';

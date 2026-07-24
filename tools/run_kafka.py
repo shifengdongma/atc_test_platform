@@ -22,7 +22,7 @@ from env import redis_ip, redis_port, redis_password, kafka_url
 MOCK_DIR = os.path.join(_root, "data", "mock")
 REDIS_ROUTE_JSON_PATH = os.path.join(MOCK_DIR, "redis_route.json")
 KAFKA_DATA_JSON_PATH = os.path.join(MOCK_DIR, "kafka_data.json")
-REDIS_TRACE_JSON_PATH = os.path.join(MOCK_DIR, "redis_trace.json")
+REDIS_TRACE_JSON_PATH = os.path.join(MOCK_DIR, "simulation_traces", "redis_trace.json")
 
 kafka_uav_data_topic = 'uav_runtime_data'
 uav_runtime_trace_topic = 'uav_runtime_trace'
@@ -168,7 +168,7 @@ class DataSource:
 
     def save_logs_to_files(self) -> None:
         """结束时生成 redis_trace.json，并同步 kafka_data.json 中的 timestamp"""
-        os.makedirs(MOCK_DIR, exist_ok=True)
+        os.makedirs(os.path.dirname(REDIS_TRACE_JSON_PATH), exist_ok=True)
         try:
             with open(REDIS_TRACE_JSON_PATH, 'w', encoding='utf-8') as f:
                 json.dump(self.redis_trace_log, f, ensure_ascii=False, indent=2)

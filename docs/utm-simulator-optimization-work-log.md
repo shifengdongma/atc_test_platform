@@ -267,3 +267,25 @@
 
 - 新建文件：0
 - 修改文件：2
+
+---
+
+## 2026-07-24 — trace 文件保存加入时间戳避免覆盖
+
+### 修改清单
+
+| 日期 | 文件 | 操作 | 状态 | 验证方式 |
+|------|------|------|------|----------|
+| 2026-07-24 | `tools/run_kafka_scene.py` | 修改 | ✅ | 每次仿真结束生成带时间戳的 trace 文件 |
+| 2026-07-24 | `tools/run_kafka.py` | 修改 | ✅ | `save_logs_to_files()` 动态生成时间戳文件名 |
+
+### 核心修复
+
+1. **trace 文件名加时间戳**：`run_kafka_scene.py` 两处（Kafka 消费模式 + Redis 扫描模式）和 `run_kafka.py` 的 `save_logs_to_files()` 中，trace 文件从固定名称 `redis_trace.json` 改为 `redis_trace_{YYYYmmdd_HHMMSS}.json`，每次仿真结束生成独立文件，不再覆盖历史 trace 数据。
+
+2. **`run_kafka.py` 模块级常量改为方法内动态生成**：原 `REDIS_TRACE_JSON_PATH` 是模块级常量，若改为带时间戳会在 `import` 时固定，同一进程多次仿真共用同一文件名。改为在 `save_logs_to_files()` 内动态调用 `time.strftime()` 生成。
+
+### 汇总
+
+- 新建文件：0
+- 修改文件：2

@@ -167,12 +167,14 @@ class DataSource:
             print(f"保存 kafka_data.json 失败: {e}")
 
     def save_logs_to_files(self) -> None:
-        """结束时生成 redis_trace.json，并同步 kafka_data.json 中的 timestamp"""
-        os.makedirs(os.path.dirname(REDIS_TRACE_JSON_PATH), exist_ok=True)
+        """结束时生成 redis_trace_{timestamp}.json，并同步 kafka_data.json 中的 timestamp"""
+        _ts = time.strftime("%Y%m%d_%H%M%S")
+        _trace_path = os.path.join(MOCK_DIR, "simulation_traces", f"redis_trace_{_ts}.json")
+        os.makedirs(os.path.dirname(_trace_path), exist_ok=True)
         try:
-            with open(REDIS_TRACE_JSON_PATH, 'w', encoding='utf-8') as f:
+            with open(_trace_path, 'w', encoding='utf-8') as f:
                 json.dump(self.redis_trace_log, f, ensure_ascii=False, indent=2)
-            print(f"已保存 uav_runtime_trace 按 redisKey 查出的数据到: {REDIS_TRACE_JSON_PATH} (共 {len(self.redis_trace_log)} 条)")
+            print(f"已保存 uav_runtime_trace 按 redisKey 查出的数据到: {_trace_path} (共 {len(self.redis_trace_log)} 条)")
         except Exception as e:
             print(f"保存 redis_trace 数据到 JSON 失败: {e}")
         self._save_kafka_data()

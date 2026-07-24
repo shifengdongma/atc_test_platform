@@ -357,10 +357,11 @@ class SceneEmitter:
         self.kafka.close()
         self.stats['end_time'] = time.time()
 
-        # 保存 trace 数据到文件
+        # 保存 trace 数据到文件（文件名带时间戳，避免覆盖历史文件）
         if self.consume_trace and self.trace_records:
             try:
-                trace_path = os.path.join(_root, "data", "mock", "simulation_traces", "redis_trace.json")
+                _ts = time.strftime("%Y%m%d_%H%M%S")
+                trace_path = os.path.join(_root, "data", "mock", "simulation_traces", f"redis_trace_{_ts}.json")
                 os.makedirs(os.path.dirname(trace_path), exist_ok=True)
                 with open(trace_path, 'w', encoding='utf-8') as f:
                     json.dump(self.trace_records, f, ensure_ascii=False, indent=2)
@@ -372,7 +373,8 @@ class SceneEmitter:
             try:
                 trace_records = self._query_trace_from_redis()
                 if trace_records:
-                    trace_path = os.path.join(_root, "data", "mock", "simulation_traces", "redis_trace.json")
+                    _ts = time.strftime("%Y%m%d_%H%M%S")
+                    trace_path = os.path.join(_root, "data", "mock", "simulation_traces", f"redis_trace_{_ts}.json")
                     os.makedirs(os.path.dirname(trace_path), exist_ok=True)
                     with open(trace_path, 'w', encoding='utf-8') as f:
                         json.dump(trace_records, f, ensure_ascii=False, indent=2)

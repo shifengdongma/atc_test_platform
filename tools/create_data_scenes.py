@@ -23,7 +23,7 @@
   python create_data_scenes.py deviate --route-name "跨顺义三河段" --deviate-offset 600
   python create_data_scenes.py collision --route-names "航线A,航线B"
   python create_data_scenes.py status --scene3 --count 5
-  python create_data_scenes.py check-id --files ../data/mock/新疆空域2_平行飞行.json
+  python create_data_scenes.py check-id --files data/mock/新疆空域2_平行飞行.json
   python create_data_scenes.py batch
 """
 
@@ -63,7 +63,7 @@ finally:
         sys.modules["env"] = _cached_env_for_dm
 
 try:
-    from uav_identifiers_extended import UAV_IDENTIFIERS_EXTENDED
+    from core.uav_identifiers import UAV_IDENTIFIERS_EXTENDED
 except ImportError:
     UAV_IDENTIFIERS_EXTENDED = []
 
@@ -80,37 +80,37 @@ RE_EARTH = 6371000.0  # 地球半径（米）
 # 用于 batch 子命令一键生成多场景
 BATCH_CONFIGS = [
     {"subcommand": "parallel", "count": 100, "center_lng": 87.407734, "center_lat": 43.450822,
-     "output": "../data/mock/新疆空域1_平行飞行.json", "label": "新疆空域1-平行飞行", "altitude": 50,
+     "output": "data/mock/新疆空域1_平行飞行.json", "label": "新疆空域1-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 10, "altitude": 30}, {"count": 90, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 82.382178, "center_lat": 40.171273,
-     "output": "../data/mock/新疆空域2_平行飞行.json", "label": "新疆空域2-平行飞行", "altitude": 50,
+     "output": "data/mock/新疆空域2_平行飞行.json", "label": "新疆空域2-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 85.507436, "center_lat": 32.604875,
-     "output": "../data/mock/西藏空域1_平行飞行.json", "label": "西藏空域1-平行飞行", "altitude": 50,
+     "output": "data/mock/西藏空域1_平行飞行.json", "label": "西藏空域1-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 91.725056, "center_lat": 38.264847,
-     "output": "../data/mock/青海空域1_平行飞行.json", "label": "青海空域1-平行飞行", "altitude": 50,
+     "output": "data/mock/青海空域1_平行飞行.json", "label": "青海空域1-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 91.769785, "center_lat": 35.956547,
-     "output": "../data/mock/青海空域2_平行飞行.json", "label": "青海空域2-平行飞行", "altitude": 50,
+     "output": "data/mock/青海空域2_平行飞行.json", "label": "青海空域2-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 96.105003, "center_lat": 35.859452,
-     "output": "../data/mock/青海空域3_平行飞行.json", "label": "青海空域3-平行飞行", "altitude": 50,
+     "output": "data/mock/青海空域3_平行飞行.json", "label": "青海空域3-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 99.344645, "center_lat": 35.914791,
-     "output": "../data/mock/青海空域4_平行飞行.json", "label": "青海空域4-平行飞行", "altitude": 50,
+     "output": "data/mock/青海空域4_平行飞行.json", "label": "青海空域4-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 96.119904, "center_lat": 40.486873,
-     "output": "../data/mock/甘肃空域1_平行飞行.json", "label": "甘肃空域1-平行飞行", "altitude": 50,
+     "output": "data/mock/甘肃空域1_平行飞行.json", "label": "甘肃空域1-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 102.361720, "center_lat": 38.180031,
-     "output": "../data/mock/甘肃空域2_平行飞行.json", "label": "甘肃空域2-平行飞行", "altitude": 50,
+     "output": "data/mock/甘肃空域2_平行飞行.json", "label": "甘肃空域2-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 101.537149, "center_lat": 41.134612,
-     "output": "../data/mock/内蒙空域1_平行飞行.json", "label": "内蒙空域1-平行飞行", "altitude": 50,
+     "output": "data/mock/内蒙空域1_平行飞行.json", "label": "内蒙空域1-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
     {"subcommand": "parallel", "count": 300, "center_lng": 105.377261, "center_lat": 40.571124,
-     "output": "../data/mock/内蒙空域2_平行飞行.json", "label": "内蒙空域2-平行飞行", "altitude": 50,
+     "output": "data/mock/内蒙空域2_平行飞行.json", "label": "内蒙空域2-平行飞行", "altitude": 50,
      "enable_altitude_groups": True, "altitude_groups": [{"count": 30, "altitude": 30}, {"count": 270, "altitude": 50}]},
 ]
 
@@ -1226,12 +1226,14 @@ def run_deviate(args):
         filename = args.filename if args.filename.endswith(".json") else args.filename + ".json"
     else:
         safe_name = (route_name_db or args.route_name or f"route_{args.route_id}").replace(" ", "").replace("/", "_")
-        filename = f"{safe_name}航路偏航数据_0.1.json"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{safe_name}航路偏航数据_{ts}.json"
 
     output_path = os.path.join(args.output_dir, filename)
     save_json(telemetry_data, output_path)
     print(f"\n[完成] 输出: {output_path}")
     print_stats(telemetry_data)
+    return output_path
 
 
 # ==================== parallel 子命令 ====================
@@ -1251,7 +1253,7 @@ def setup_parallel_parser(subparsers):
     p.add_argument("--points", "-p", type=int, default=1200, help="每架无人机轨迹点数")
     p.add_argument("--interval", type=int, default=1000, help="采样间隔(毫秒)")
     p.add_argument("--start-time", type=int, default=None, help="起始时间戳(毫秒)")
-    p.add_argument("--output", "-o", default="../data/mock/kafka_data_parallel.json", help="输出文件路径")
+    p.add_argument("--output", "-o", default=None, help="输出文件路径（默认自动生成含时间戳的文件名）")
     p.add_argument("--uid-offset", type=int, default=0, help="UAV ID起始偏移")
     p.add_argument("--multi", action="store_true", help="分3区域生成3个JSON")
     return p
@@ -1314,6 +1316,9 @@ def run_parallel(args, uid_offset_override=None, s_by_mod_override=None, start_t
             print(f"  已生成 {i + 1} 架...")
 
     all_data.sort(key=lambda x: x["timestamp"])
+    if args.output is None:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        args.output = f"data/mock/kafka_data_parallel_{ts}.json"
     output_path = os.path.join(_ROOT, args.output)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     save_json(all_data, output_path)
@@ -1325,12 +1330,12 @@ def run_parallel(args, uid_offset_override=None, s_by_mod_override=None, start_t
 # ==================== scale 子命令 ====================
 def setup_scale_parser(subparsers):
     p = subparsers.add_parser("scale", help="基于模板批量扩展（蜂窝网格分布）")
-    p.add_argument("--source", default="../data/mock/kafka_data_yfk.json", help="源JSON文件路径")
+    p.add_argument("--source", default="data/mock/kafka_data_yfk.json", help="源JSON文件路径")
     p.add_argument("--count", type=int, default=100, help="目标无人机数量")
     p.add_argument("--center-lng", type=float, default=89.2306)
     p.add_argument("--center-lat", type=float, default=38.19424)
     p.add_argument("--spacing", type=float, default=300, help="相邻无人机间距(米)")
-    p.add_argument("--output", "-o", default="../data/mock/kafka_data_alarm_100.json")
+    p.add_argument("--output", "-o", default=None)
     return p
 
 
@@ -1375,6 +1380,9 @@ def run_scale(args):
             print(f"  已生成 {i+1} 架...")
 
     all_data.sort(key=lambda x: x['timestamp'])
+    if args.output is None:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        args.output = f"data/mock/kafka_data_alarm_{ts}.json"
     output_path = os.path.join(_ROOT, args.output)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     save_json(all_data, output_path)
@@ -1486,6 +1494,7 @@ def run_collision(args):
     uid_list = [u.strip() for u in args.uids.split(",") if u.strip()] if args.uids else []
     pool = get_uav_id_pool()
 
+    collision_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     success_count = 0
     for idx, route_data in enumerate(route_data_list):
         route_name = route_data["name"]
@@ -1549,7 +1558,7 @@ def run_collision(args):
 
         os.makedirs(args.output_dir, exist_ok=True)
         safe_route_name = route_name.replace(" ", "").replace("/", "_")
-        filename = f"{safe_route_name}_碰撞预警_{specified_uid}.json"
+        filename = f"{safe_route_name}_碰撞预警_{collision_ts}_{specified_uid}.json"
         output_path = os.path.join(args.output_dir, filename)
         save_json(telemetry_data, output_path)
         print(f"[完成] 输出: {output_path} ({len(telemetry_data)} 条)")
@@ -1669,13 +1678,14 @@ def _generate_status_scene_data(uid, reg_sign, start_lng, start_lat, altitude, s
 
 
 def run_status(args):
+    status_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     scenes = []
     if args.scene3:
-        scenes.append(("飞行器丢失状态3.json", 3, "状态3(紧急后恢复)"))
+        scenes.append((f"飞行器丢失状态3_{status_ts}.json", 3, "状态3(紧急后恢复)"))
     if args.scene5:
-        scenes.append(("飞行器丢失状态5.json", 5, "状态5(丢失)"))
+        scenes.append((f"飞行器丢失状态5_{status_ts}.json", 5, "状态5(丢失)"))
     if args.scene3_5:
-        scenes.append(("飞行器丢失状态3-5.json", '3_5', "状态3转5(紧急后丢失)"))
+        scenes.append((f"飞行器丢失状态3-5_{status_ts}.json", '3_5', "状态3转5(紧急后丢失)"))
 
     if not scenes:
         print("[警告] 没有启用的场景，请通过 --scene3 / --scene5 / --scene3-5 指定")
@@ -1837,7 +1847,7 @@ def run_check_id(args):
 # ==================== check-uid 子命令 ====================
 def setup_check_uid_parser(subparsers):
     p = subparsers.add_parser("check-uid", help="UID数据库存在性检查")
-    p.add_argument("--file", default="../data/mock/kafka_data_parallel.json", help="JSON文件路径")
+    p.add_argument("--file", default="data/mock/kafka_data_parallel.json", help="JSON文件路径")
     return p
 
 
@@ -2018,7 +2028,7 @@ def run_batch(args):
                         setattr(self, k, v)
 
             batch_args = FakeArgs(
-                count=cfg.get("count", 30), output=cfg.get("output", "../data/mock/kafka_data_parallel.json"),
+                count=cfg.get("count", 30), output=cfg.get("output", "data/mock/kafka_data_parallel.json"),
                 center_lng=cfg.get("center_lng", 85.070136), center_lat=cfg.get("center_lat", 40.818724),
                 altitude=cfg.get("altitude", 50), speed=cfg.get("speed", 15),
                 heading=cfg.get("heading", 90), spacing=cfg.get("spacing", 2000),

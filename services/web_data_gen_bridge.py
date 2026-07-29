@@ -82,7 +82,8 @@ def gen_parallel(
     from tools.create_data_scenes import run_parallel
 
     if output is None:
-        output = "../data/mock/kafka_data_parallel.json"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output = f"data/mock/kafka_data_parallel_{ts}.json"
 
     ns = argparse.Namespace(
         count=count,
@@ -157,12 +158,8 @@ def gen_deviate_adv(
     )
 
     result = _safe_run(run_deviate, ns)
-    if result["success"]:
-        if filename:
-            result["file"] = os.path.join(output_dir, filename if filename.endswith(".json") else filename + ".json")
-        elif route_name:
-            safe_name = route_name.replace(" ", "").replace("/", "_")
-            result["file"] = os.path.join(output_dir, f"{safe_name}航路偏航数据_0.1.json")
+    if result["success"] and result["result"]:
+        result["file"] = result["result"]
     return result
 
 
@@ -273,7 +270,7 @@ def gen_status(
 
 
 def gen_scale(
-    source: str = "../data/mock/kafka_data_yfk.json",
+    source: str = "data/mock/kafka_data_yfk.json",
     count: int = 100,
     center_lng: float = 89.2306,
     center_lat: float = 38.19424,
@@ -288,7 +285,8 @@ def gen_scale(
     from tools.create_data_scenes import run_scale
 
     if output is None:
-        output = "../data/mock/kafka_data_alarm_100.json"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output = f"data/mock/kafka_data_alarm_{ts}.json"
 
     ns = argparse.Namespace(
         source=source,

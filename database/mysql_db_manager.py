@@ -248,19 +248,20 @@ _MYSQL_TABLE_DDL = {
     """,
     "sim_json_files": """
         CREATE TABLE IF NOT EXISTS `sim_json_files` (
-            `id`           INT AUTO_INCREMENT PRIMARY KEY,
-            `name`         VARCHAR(256) NOT NULL,
-            `category`     VARCHAR(64) DEFAULT 'route',
-            `alarm_type`   VARCHAR(64) DEFAULT '' COMMENT '告警类型',
-            `file_path`    VARCHAR(1024) DEFAULT '' COMMENT '本地文件路径',
-            `simulator_id` VARCHAR(2048) DEFAULT '' COMMENT '模拟器ID',
-            `linked_route` VARCHAR(256) DEFAULT '' COMMENT '关联航线名称',
-            `size_bytes`   INT DEFAULT 0,
-            `source`       VARCHAR(32) DEFAULT 'manual',
-            `description`  TEXT,
-            `tags`         VARCHAR(512) DEFAULT '',
-            `created_at`   DATETIME DEFAULT CURRENT_TIMESTAMP,
-            `updated_at`   DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            `id`             INT AUTO_INCREMENT PRIMARY KEY,
+            `name`           VARCHAR(256) NOT NULL,
+            `category`       VARCHAR(64) DEFAULT 'route',
+            `alarm_type`     VARCHAR(64) DEFAULT '' COMMENT '告警类型',
+            `file_path`      VARCHAR(1024) DEFAULT '' COMMENT '本地文件路径',
+            `content_backup` MEDIUMTEXT COMMENT '文件内容MySQL备份（磁盘文件缺失时恢复用，最大16MB）',
+            `simulator_id`   VARCHAR(2048) DEFAULT '' COMMENT '模拟器ID',
+            `linked_route`   VARCHAR(256) DEFAULT '' COMMENT '关联航线名称',
+            `size_bytes`     INT DEFAULT 0,
+            `source`         VARCHAR(32) DEFAULT 'manual',
+            `description`    TEXT,
+            `tags`           VARCHAR(512) DEFAULT '',
+            `created_at`     DATETIME DEFAULT CURRENT_TIMESTAMP,
+            `updated_at`     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='JSON数据文件表'
     """,
     "sim_scenes": """
@@ -390,6 +391,9 @@ def _ensure_mysql_tables(client=None):
                 _try_reset_broken_connection()
 
     _ALTER_COLUMNS = {
+        "sim_json_files": [
+            ("content_backup", "MEDIUMTEXT COMMENT '文件内容MySQL备份（磁盘文件缺失时恢复用，最大16MB）'"),
+        ],
         "sim_scene_tasks": [
             ("updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
         ],
@@ -504,6 +508,9 @@ def migrate_schema():
         return {"success": False, "message": "MySQL 不可用"}
 
     _ALTER_COLUMNS = {
+        "sim_json_files": [
+            ("content_backup", "MEDIUMTEXT COMMENT '文件内容MySQL备份（磁盘文件缺失时恢复用，最大16MB）'"),
+        ],
         "sim_scene_tasks": [
             ("updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
         ],

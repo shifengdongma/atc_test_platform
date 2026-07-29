@@ -714,15 +714,18 @@ class SimulationRunner:
                     _add_log("❌ 所有选定文件均不存在于磁盘，请先在数据管理页面点击'全部导出到磁盘'")
                     self._running = False
                 else:
+                    # 若自动导出回退成功解析了文件路径，优先使用 _existing 中的正确路径
+                    _use_files = _existing if _existing else scene_files
                     # 打印文件大小信息用于诊断
-                    for _f in _existing:
-                        _size_mb = os.path.getsize(_f) / (1024 * 1024)
-                        _add_log(f"  📁 {os.path.basename(_f)} ({_size_mb:.1f}MB)")
-                    _add_log(f"启动场景文件注入模式: {len(_existing or scene_files)} 个文件, 间隔={scene_interval}ms, 时间戳={scene_timestamp_mode}")
+                    for _f in _use_files:
+                        if os.path.exists(_f):
+                            _size_mb = os.path.getsize(_f) / (1024 * 1024)
+                            _add_log(f"  📁 {os.path.basename(_f)} ({_size_mb:.1f}MB)")
+                    _add_log(f"启动场景文件注入模式: {len(_use_files)} 个文件, 间隔={scene_interval}ms, 时间戳={scene_timestamp_mode}")
                     from tools.run_kafka_scene import SceneEmitter
                     try:
                         emitter = SceneEmitter(
-                            files=scene_files,
+                            files=_use_files,
                             scene_dir=scene_dir,
                             kafka_url=self.config.get("kafka_url"),
                             topic=KAFKA_UAV_DATA_TOPIC,
@@ -1712,7 +1715,16 @@ def api_launch_replay():
     target_drones = data.get("target_drones", None)
 
     mock_dir = os.path.join(_root, "data", "mock")
-    data_path = os.path.join(mock_dir, data_file)
+
+    # 尝试从数据库解析实际文件路径（处理 name 与 file_path 不一致的情况）
+    mgr = _get_json_mgr()
+    _db_files = mgr.list_files(page_size=5000)
+    _db_by_name = {f["name"]: f for f in (_db_files.get("files", []) or []) if f.get("name")}
+    _resolved = _db_by_name.get(data_file)
+    if _resolved:
+        data_path = mgr._resolve_path(_resolved)
+    else:
+        data_path = os.path.join(mock_dir, data_file)
     route_path = os.path.join(mock_dir, route_file)
 
     if not os.path.exists(data_path):

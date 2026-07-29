@@ -129,7 +129,20 @@ def _resolve_path(record: Dict[str, Any]) -> str:
         if os.path.exists(candidate_by_name):
             return candidate_by_name
 
-    # 情况 5：都找不到，返回 MOCK_DIR 下的预期路径（调用方自行检查 os.path.exists）
+    # 情况 5：都找不到，尝试从 MySQL content_backup 恢复
+    backup = record.get("content_backup", "")
+    if backup:
+        restore_name = name or (os.path.basename(file_path) if file_path else "restored.json")
+        restore_path = os.path.join(MOCK_DIR, restore_name)
+        try:
+            with open(restore_path, "w", encoding="utf-8") as f:
+                f.write(backup)
+            print(f"[json_data_manager] [OK] 从 MySQL 备份恢复文件: {restore_name}")
+            return restore_path
+        except Exception as e:
+            print(f"[json_data_manager] [WARN] 从 MySQL 恢复文件失败: {e}")
+
+    # 情况 6：都找不到，返回 MOCK_DIR 下的预期路径（调用方自行检查 os.path.exists）
     return os.path.join(MOCK_DIR, basename or name)
 
 
@@ -440,6 +453,11 @@ def save_file(data: Dict[str, Any]) -> int:
                 f.write(content)
             data["file_path"] = name
             data["size_bytes"] = new_size
+            # MySQL 备份：文件内容同步写入数据库，跨部署恢复时使用（≤16MB）
+            if new_size <= 16 * 1024 * 1024:
+                data["content_backup"] = content
+            else:
+                data["content_backup"] = ""  # 超大文件不备份，避免撑爆数据库
 
         # 自动检测元数据（仅在未显式提供时）
         if "alarm_type" not in data or not data.get("alarm_type"):
@@ -462,6 +480,18 @@ def save_file(data: Dict[str, Any]) -> int:
     if file_id:
         existing = query_one(TABLE, int(file_id))
         if existing:
+            old_name = existing.get("name", "")
+            new_name = data.get("name", old_name)
+            # 改名时：若 content 为空（截断编辑），重命名物理文件保持一致性
+            if new_name and new_name != old_name and content is None:
+                old_path = _resolve_path(existing)
+                if old_path and os.path.exists(old_path):
+                    new_path = os.path.join(_get_storage_dir(), new_name)
+                    try:
+                        shutil.move(old_path, new_path)
+                        data["file_path"] = new_name
+                    except OSError as e:
+                        print(f"[json_data_manager] [WARN] 文件重命名失败: {old_path} -> {new_path}: {e}")
             update(TABLE, int(file_id), data)
             return int(file_id)
 
@@ -509,11 +539,36 @@ def delete_files_batch(file_ids: List[int]) -> Dict[str, Any]:
 
 
 def update_file(file_id: int, data: Dict[str, Any]) -> bool:
-    """更新文件字段（名称/描述/标签等），不修改磁盘文件。"""
-    # 过滤掉不应该通过此接口修改的字段
+    """更新文件字段（名称/描述/标签等）。
+
+    当 name 改变时，同步重命名物理文件并更新 file_path，
+    确保 DB 元数据与磁盘文件保持一致。
+    """
     safe_fields = {"name", "category", "alarm_type", "linked_route",
                    "description", "tags", "source", "simulator_id"}
     clean = {k: v for k, v in data.items() if k in safe_fields}
+
+    # 改名时：重命名物理文件并更新 file_path
+    if "name" in clean:
+        existing = query_one(TABLE, file_id)
+        if existing:
+            old_name = existing.get("name", "")
+            new_name = clean["name"]
+            if old_name and old_name != new_name:
+                old_path = _resolve_path(existing)
+                if old_path and os.path.exists(old_path):
+                    new_path = os.path.join(_get_storage_dir(), new_name)
+                    try:
+                        shutil.move(old_path, new_path)
+                        clean["file_path"] = new_name
+                    except OSError as e:
+                        print(f"[json_data_manager] [WARN] 文件重命名失败: {old_path} -> {new_path}: {e}")
+                        # 重命名失败时仍更新 file_path，跨部署场景由 content_backup 兜底
+                        clean["file_path"] = new_name
+                else:
+                    # 磁盘文件不存在，仍更新 file_path，由 content_backup 兜底恢复
+                    clean["file_path"] = new_name
+
     return update(TABLE, file_id, clean)
 
 
@@ -575,25 +630,39 @@ def import_from_mock() -> Dict[str, Any]:
 
 
 def export_to_mock(file_id: int) -> Dict[str, Any]:
-    """将数据库记录对应的文件复制/确认到 data/mock/ 目录。"""
+    """将数据库记录对应的文件复制/确认到 data/mock/ 目录。
+
+    优先从磁盘查找，磁盘不可用时从 MySQL content_backup 恢复。
+    当 record["name"] 与磁盘文件名不一致时，自动复制到正确名称。
+    """
     record = query_one(TABLE, file_id)
     if not record:
         return {"success": False, "message": f"文件 {file_id} 不存在"}
 
     fpath = _resolve_path(record)
     name = record.get("name", f"export_{file_id}.json")
+    mock_dir = _ensure_mock_dir()
+    target = os.path.join(mock_dir, name)
 
     if fpath and os.path.exists(fpath):
-        mock_dir = _ensure_mock_dir()
-        # 如果文件已在 mock/ 目录内，无需复制
-        if os.path.abspath(fpath).startswith(os.path.abspath(mock_dir)):
+        # 如果文件已在目标位置且名称匹配，无需复制
+        if os.path.normpath(fpath) == os.path.normpath(target):
             return {"success": True, "message": "文件已在 mock/ 目录", "path": fpath}
-        # 从外部路径复制到 mock/
-        dest = os.path.join(mock_dir, name)
-        shutil.copy2(fpath, dest)
-        return {"success": True, "message": f"已复制到 {dest}", "path": dest}
+        # 从源路径复制到目标（处理 mock_dir 内名称不匹配或外部源）
+        shutil.copy2(fpath, target)
+        return {"success": True, "message": f"已复制到 {target}", "path": target}
 
-    return {"success": False, "message": "文件内容在磁盘上不可用"}
+    # 磁盘文件不存在，尝试从 MySQL content_backup 恢复
+    backup = record.get("content_backup", "")
+    if backup:
+        try:
+            with open(target, "w", encoding="utf-8") as f:
+                f.write(backup)
+            return {"success": True, "message": f"已从数据库恢复: {target}", "path": target}
+        except Exception as e:
+            return {"success": False, "message": f"从数据库恢复失败: {e}"}
+
+    return {"success": False, "message": "文件内容在磁盘上不可用且数据库无备份"}
 
 
 def export_to_mock_batch(file_ids: List[int]) -> Dict[str, Any]:

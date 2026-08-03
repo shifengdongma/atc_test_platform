@@ -497,7 +497,7 @@ def _migrate_mysql_drop_env_config_columns(client) -> None:
 
 
 def migrate_schema():
-    """独立 DDL 迁移函数：补全所有缺失的列。
+    """独立 DDL 迁移函数：补全所有缺失的列，并修复已知的类型宽度问题。
 
     与 _ensure_mysql_tables() 分离，避免 ALTER TABLE 阻塞 init_tables()
     导致启动挂死。可通过命令行或管理脚本手动调用。
@@ -567,8 +567,48 @@ def migrate_schema():
         except Exception as e:
             print(f"[migrate_schema] 检查 {table_name} 失败: {e}")
 
-    result = {"success": True, "added": added, "skipped": skipped, "failed": failed}
-    print(f"[migrate_schema] 完成: +{added} 新增, {skipped} 已存在, {failed} 失败")
+    # ── 修复已知列类型宽度问题 ──────────────────────────────────────────
+    # 旧版迁移将 simulator_id 设为 VARCHAR(128)，多 UAV 场景下会截断报错
+    _MODIFY_COLUMNS = {
+        "sim_json_files": [
+            ("simulator_id",
+             "VARCHAR(2048) DEFAULT '' COMMENT '模拟器ID'",
+             "VARCHAR(128)"),
+        ],
+    }
+
+    modified = 0
+    for table_name, columns in _MODIFY_COLUMNS.items():
+        if table_name not in existing_tables:
+            continue
+        try:
+            cur = client.cursor()
+            cur.execute(f"SHOW COLUMNS FROM `{table_name}`")
+            for row in cur.fetchall():
+                col_name = row.get("Field", "")
+                col_type = row.get("Type", "").upper()
+                for target_col, new_def, old_type_pattern in columns:
+                    if col_name == target_col and old_type_pattern in col_type:
+                        try:
+                            cur2 = client.cursor()
+                            cur2.execute(
+                                f"ALTER TABLE `{table_name}` "
+                                f"MODIFY COLUMN `{target_col}` {new_def}"
+                            )
+                            client.commit()
+                            modified += 1
+                            print(f"[migrate_schema] ~ {table_name}.{target_col}: "
+                                  f"{col_type} → {new_def.split()[0]}")
+                        except Exception as e:
+                            print(f"[migrate_schema] ✗ MODIFY {table_name}.{target_col}: {e}")
+                        break  # 已匹配，跳过剩余列定义
+        except Exception as e:
+            print(f"[migrate_schema] 检查 {table_name} 列类型失败: {e}")
+
+    result = {"success": True, "added": added, "skipped": skipped,
+              "modified": modified, "failed": failed}
+    print(f"[migrate_schema] 完成: +{added} 新增, ~{modified} 修改, "
+          f"{skipped} 已存在, {failed} 失败")
     return result
 
 

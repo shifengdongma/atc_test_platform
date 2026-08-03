@@ -197,6 +197,10 @@ def _simple_format_detect(content_str: str) -> str:
     return "unknown"
 
 
+# _extract_simulator_id 最大输出长度（需小于数据库列限制 VARCHAR(2048)）
+_MAX_SIMULATOR_ID_LEN = 500
+
+
 def _extract_simulator_id(content: str) -> str:
     """从 JSON 内容提取无人机唯一标识列表 (uniqueProductIdentificationCode + realNameRegistrationSign)。
 
@@ -205,8 +209,8 @@ def _extract_simulator_id(content: str) -> str:
     - Redis航线: [{"key": "UAV_00001", "value": {...}}, ...]
     - 单条记录: {"uniqueProductIdentificationCode": "xxx", ...}
 
-    若含多个 UAV，提取前 10 个，格式: "uid1 (reg1), uid2 (reg2), ..."
-    超过 10 个时追加 " 等 N 架"。
+    若含多个 UAV，提取前 5 个，格式: "uid1 (reg1), uid2 (reg2), ..."
+    超过 5 个时追加 " 等 N 架"。最终输出不超过 _MAX_SIMULATOR_ID_LEN 字符。
     """
     if not content:
         return ""
@@ -220,6 +224,8 @@ def _extract_simulator_id(content: str) -> str:
                 seen.add(uid)
                 ids.append((uid, reg))
 
+        _MAX_IDS = 5  # 最多展示 5 个标识，避免超出数据库列长度
+
         if isinstance(data, list):
             for item in data:
                 if not isinstance(item, dict):
@@ -229,7 +235,7 @@ def _extract_simulator_id(content: str) -> str:
                 if uid:
                     reg = item.get("realNameRegistrationSign", uid)
                     _add(str(uid), str(reg) if reg else str(uid))
-                    if len(ids) >= 10:
+                    if len(ids) >= _MAX_IDS:
                         break
                     continue
                 # Redis route 格式: {"key": "xxx", "value": {...}}
@@ -239,24 +245,14 @@ def _extract_simulator_id(content: str) -> str:
                     inner_uid = val.get("uniqueProductIdentificationCode")
                     if inner_uid:
                         _add(str(inner_uid), str(key))
-                        if len(ids) >= 10:
+                        if len(ids) >= _MAX_IDS:
                             break
                         continue
                 # 兜底：key 本身就是 UID
                 if key:
                     _add(str(key), str(key))
-                    if len(ids) >= 10:
+                    if len(ids) >= _MAX_IDS:
                         break
-
-            # 统计总数（如果采样足够且可能超过10个）
-            if len(ids) >= 10:
-                total = sum(1 for item in data
-                           if isinstance(item, dict) and (
-                               item.get("uniqueProductIdentificationCode") or item.get("key")
-                           ))
-                if len(seen) >= 10 and total > 10:
-                    # 简单估算
-                    pass  # total 只在需要时计算
 
         elif isinstance(data, dict):
             # 单条记录
@@ -285,8 +281,15 @@ def _extract_simulator_id(content: str) -> str:
                                 item.get("uniqueProductIdentificationCode") or item.get("key")
                             ))
         if total_count > len(ids):
-            return ", ".join(parts) + f"  等 {total_count} 架"
-        return ", ".join(parts)
+            result = ", ".join(parts) + f"  等 {total_count} 架"
+        else:
+            result = ", ".join(parts)
+
+        # 硬截断保护：超出最大长度时截断并保留 "..." 标记
+        if len(result) > _MAX_SIMULATOR_ID_LEN:
+            result = result[:_MAX_SIMULATOR_ID_LEN - 3] + "..."
+
+        return result
 
     except (json.JSONDecodeError, TypeError, IndexError, KeyError):
         pass

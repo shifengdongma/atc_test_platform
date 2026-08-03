@@ -2073,22 +2073,16 @@ def api_db_list_files():
         category=category, alarm_type=alarm_type,
         keyword=keyword, page=page, page_size=page_size,
     )
-    # 为每个文件附加格式检测信息（从磁盘读取首 64KB）
+    # 从数据库读取格式信息（已在 save_file/import 时缓存到 format/format_label 列）
+    # 无需逐文件磁盘 I/O，列表加载从秒级降至毫秒级
     for f in result.get("files", []):
-        fpath = mgr._resolve_path(f)
-        sample = ""
-        if fpath and os.path.exists(fpath):
-            try:
-                with open(fpath, "r", encoding="utf-8") as fh:
-                    sample = fh.read(65536)
-            except Exception:
-                pass
-        fmt = _detect_file_format(sample) if sample else {"format": "unknown", "format_label": "未知格式", "compatible_modes": []}
-        f["format"] = fmt["format"]
-        f["format_label"] = fmt["format_label"]
-        f["compatible_modes"] = fmt["compatible_modes"]
+        fmt = f.get("format", "") or "unknown"
+        f["format"] = fmt
+        f["format_label"] = f.get("format_label", "") or "未知格式"
+        f["compatible_modes"] = mgr._fmt_to_compatible_modes(fmt)
         # 移除内部字段，不暴露给前端
         f.pop("file_path", None)
+        f.pop("content_backup", None)
     return jsonify(result)
 
 

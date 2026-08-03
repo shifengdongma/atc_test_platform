@@ -256,6 +256,8 @@ _MYSQL_TABLE_DDL = {
             `content_backup` MEDIUMTEXT COMMENT '文件内容MySQL备份（磁盘文件缺失时恢复用，最大16MB）',
             `simulator_id`   VARCHAR(2048) DEFAULT '' COMMENT '模拟器ID',
             `linked_route`   VARCHAR(256) DEFAULT '' COMMENT '关联航线名称',
+            `format`         VARCHAR(32) DEFAULT '' COMMENT '文件格式: telemetry/flight_plan/redis_route/unknown',
+            `format_label`   VARCHAR(64) DEFAULT '' COMMENT '格式中文显示名',
             `size_bytes`     INT DEFAULT 0,
             `source`         VARCHAR(32) DEFAULT 'manual',
             `description`    TEXT,
@@ -510,6 +512,8 @@ def migrate_schema():
     _ALTER_COLUMNS = {
         "sim_json_files": [
             ("content_backup", "MEDIUMTEXT COMMENT '文件内容MySQL备份（磁盘文件缺失时恢复用，最大16MB）'"),
+            ("format", "VARCHAR(32) DEFAULT '' COMMENT '文件格式: telemetry/flight_plan/redis_route/unknown'"),
+            ("format_label", "VARCHAR(64) DEFAULT '' COMMENT '格式中文显示名'"),
         ],
         "sim_scene_tasks": [
             ("updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
@@ -688,14 +692,15 @@ def query_one(table: str, record_id: int) -> Optional[Dict[str, Any]]:
 
 def query(table: str, where: str = "", params: tuple = (),
           order_by: str = "id DESC",
-          limit: int = 0, offset: int = 0) -> List[Dict[str, Any]]:
+          limit: int = 0, offset: int = 0,
+          columns: str = "*") -> List[Dict[str, Any]]:
     with _lock:
         client = _get_client()
         if not client:
             _rlp_unavailable.print(f"MySQL 不可用，query({table}) 返回空", tag="unavailable_query")
             return []
         try:
-            sql = f"SELECT * FROM `{table}`"
+            sql = f"SELECT {columns} FROM `{table}`"
             if where:
                 sql += f" WHERE {where.replace('?', '%s')}"
             safe_order = order_by.replace("id", "`id`") if "id" in order_by else order_by

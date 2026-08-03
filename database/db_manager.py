@@ -50,6 +50,8 @@ _TABLE_DDL = {
             file_path    TEXT DEFAULT '',
             simulator_id TEXT DEFAULT '',
             linked_route TEXT DEFAULT '',
+            format       TEXT DEFAULT '',
+            format_label TEXT DEFAULT '',
             size_bytes   INTEGER DEFAULT 0,
             source       TEXT DEFAULT 'manual',
             description  TEXT DEFAULT '',

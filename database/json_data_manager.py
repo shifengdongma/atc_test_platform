@@ -197,6 +197,79 @@ def _simple_format_detect(content_str: str) -> str:
     return "unknown"
 
 
+# ── 文件格式检测（缓存到数据库，避免列表查询时逐文件磁盘 I/O） ──
+
+# 格式 → 兼容仿真模式 映射表
+_FORMAT_MODE_MAP = {
+    "telemetry":    ["scene", "replay", "replay_once"],
+    "flight_plan":  ["plan", "replay"],
+    "redis_route":  ["plan", "replay"],
+    "unknown":      ["scene", "replay", "replay_once", "plan"],
+}
+
+# 格式检测采样大小（前几条记录足够判断格式类型）
+_FORMAT_SAMPLE_BYTES = 8192
+
+
+def _detect_file_format(content_str: str) -> Dict[str, Any]:
+    """分析 JSON 文件内容前几条记录，返回格式类型和兼容的仿真模式。
+
+    仅读取 content_str 的前几条记录（由调用方控制采样大小），
+    结果缓存到数据库 format/format_label 列。
+    """
+    result = {"format": "unknown", "format_label": "未知格式", "compatible_modes": []}
+    if not content_str or not content_str.strip():
+        return result
+
+    try:
+        data = json.loads(content_str)
+    except (json.JSONDecodeError, TypeError):
+        return result
+
+    # 检测1: redis_route 格式 [{"key": "...", "value": {...}}]
+    if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+        first = data[0]
+        if "key" in first and "value" in first:
+            result["format"] = "redis_route"
+            result["format_label"] = "Redis航线"
+            result["compatible_modes"] = _FORMAT_MODE_MAP["redis_route"]
+            return result
+
+        # 检测2: telemetry 格式 (有 longitude + latitude)
+        if "longitude" in first and "latitude" in first:
+            has_plan = "flightPlanList" in first
+            result["format"] = "telemetry"
+            result["format_label"] = "遥测轨迹" + (" + 飞行计划" if has_plan else "")
+            result["compatible_modes"] = list(_FORMAT_MODE_MAP["telemetry"])
+            if has_plan:
+                result["compatible_modes"].append("plan")
+            return result
+
+        # 检测3: flight_plan 格式 (有 flightPlanList 但无 longitude)
+        if "flightPlanList" in first:
+            result["format"] = "flight_plan"
+            result["format_label"] = "飞行计划"
+            result["compatible_modes"] = _FORMAT_MODE_MAP["flight_plan"]
+            return result
+
+    # 检测4: dict 格式
+    if isinstance(data, dict):
+        if "flightPlanList" in data:
+            result["format"] = "flight_plan"
+            result["format_label"] = "飞行计划(单条)"
+            result["compatible_modes"] = _FORMAT_MODE_MAP["flight_plan"]
+            return result
+
+    # 未知格式 — 允许用户尝试所有模式
+    result["compatible_modes"] = _FORMAT_MODE_MAP["unknown"]
+    return result
+
+
+def _fmt_to_compatible_modes(fmt: str) -> List[str]:
+    """从格式字符串推导兼容的仿真模式（无需读文件）。"""
+    return list(_FORMAT_MODE_MAP.get(fmt, _FORMAT_MODE_MAP["unknown"]))
+
+
 # _extract_simulator_id 最大输出长度（需小于数据库列限制 VARCHAR(2048)）
 _MAX_SIMULATOR_ID_LEN = 500
 
@@ -404,7 +477,13 @@ def list_files(
     total = query_count(TABLE, where=where, params=params_tuple)
 
     offset = (page - 1) * page_size
-    rows = query(TABLE, where=where, params=params_tuple, limit=page_size, offset=offset)
+    # 排除 content_backup（MEDIUMTEXT，可能数MB），大幅减少列表查询传输量
+    _list_columns = (
+        "id, name, category, alarm_type, file_path, simulator_id, linked_route, "
+        "format, format_label, size_bytes, source, description, tags, created_at, updated_at"
+    )
+    rows = query(TABLE, where=where, params=params_tuple,
+                 limit=page_size, offset=offset, columns=_list_columns)
 
     return {"files": rows, "total": total, "page": page, "page_size": page_size}
 
@@ -469,6 +548,11 @@ def save_file(data: Dict[str, Any]) -> int:
             data["simulator_id"] = _extract_simulator_id(content[:131072])
         if "linked_route" not in data or not data.get("linked_route"):
             data["linked_route"] = _detect_linked_route(name, content[:4096])
+        # 自动检测文件格式（缓存到 DB，避免列表查询时逐文件磁盘 I/O）
+        if "format" not in data or not data.get("format"):
+            fmt = _detect_file_format(content[:_FORMAT_SAMPLE_BYTES])
+            data["format"] = fmt["format"]
+            data["format_label"] = fmt["format_label"]
 
     # 确保 source 字段
     if "source" not in data:
@@ -612,6 +696,7 @@ def import_from_mock() -> Dict[str, Any]:
                 alarm_type = _detect_alarm_type(fname, sample)
                 simulator_id = _extract_simulator_id(sample)
                 linked_route = _detect_linked_route(fname, sample)
+                fmt = _detect_file_format(sample[:_FORMAT_SAMPLE_BYTES])
 
                 save_file({
                     "name": fname,
@@ -620,6 +705,8 @@ def import_from_mock() -> Dict[str, Any]:
                     "file_path": fname,  # 仅存文件名，跨平台兼容
                     "simulator_id": simulator_id,
                     "linked_route": linked_route,
+                    "format": fmt["format"],
+                    "format_label": fmt["format_label"],
                     "size_bytes": size,
                     "source": "import",
                     "description": f"从 mock/ 导入: {fname}",
@@ -673,6 +760,38 @@ def export_to_mock_batch(file_ids: List[int]) -> Dict[str, Any]:
     results = [export_to_mock(fid) for fid in file_ids]
     success = sum(1 for r in results if r.get("success"))
     return {"success": success, "total": len(file_ids), "results": results}
+
+
+def backfill_file_formats() -> Dict[str, Any]:
+    """回填存量文件的 format/format_label 字段（从磁盘采样检测）。
+
+    仅处理 format 字段为空的记录，已填充的跳过。
+    """
+    _lazy_init()
+    rows = query(TABLE, where="format = ? OR format IS NULL", params=("",))
+    updated = 0
+    skipped = 0
+    errors = 0
+    for row in rows:
+        if row.get("format", ""):
+            skipped += 1
+            continue
+        fpath = _resolve_path(row)
+        if not fpath or not os.path.exists(fpath):
+            skipped += 1
+            continue
+        try:
+            with open(fpath, "r", encoding="utf-8") as f:
+                sample = f.read(_FORMAT_SAMPLE_BYTES)
+            fmt = _detect_file_format(sample)
+            update(TABLE, row["id"], {
+                "format": fmt["format"],
+                "format_label": fmt["format_label"],
+            })
+            updated += 1
+        except Exception:
+            errors += 1
+    return {"updated": updated, "skipped": skipped, "errors": errors}
 
 
 def export_all_to_mock() -> Dict[str, Any]:

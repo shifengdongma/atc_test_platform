@@ -2149,6 +2149,7 @@ def api_db_validate_route(file_id):
 
 
 @app.route("/api/data/db/files", methods=["POST"])
+@_safe_json
 def api_db_save_file():
     """新增或更新文件（JSON 内容或元数据）。
 

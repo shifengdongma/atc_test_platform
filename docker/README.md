@@ -98,11 +98,11 @@ open http://localhost:5000
 | `UTM_MYSQL_PASSWORD` | — | 空 | MySQL 密码 |
 | `UTM_MYSQL_DB` | — | `utm_simulator` | MySQL 库名 |
 | **达梦** | | | |
-| `UTM_DM_HOST` | — | `10.165.32.212` | 达梦数据库地址 |
+| `UTM_DM_HOST` | — | `10.165.32.217` | 达梦数据库地址 |
 | `UTM_DM_PORT` | — | `5236` | 达梦端口 |
 | `UTM_DM_USER` | — | `SYSDBA` | 达梦用户名 |
 | `UTM_DM_PASSWORD` | — | 空 | 达梦密码 |
-| `UTM_DM_SCHEMA` | — | `ATC_DKWRJ` | 达梦模式名 |
+| `UTM_DM_SCHEMA` | — | `ATC_DKWRJ_TEST` | 达梦模式名 |
 | **ATC** | | | |
 | `UTM_ATC_BASE_URL` | — | `https://dkkgsit-test.testdolphin.com` | ATC 后端地址 |
 | **服务** | | | |

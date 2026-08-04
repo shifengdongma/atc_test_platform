@@ -27,10 +27,10 @@ try:
     from env import DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_SCHEMA
 except ImportError:
     # Docker 环境中 env.py 可能未挂载，从环境变量读取
-    DB_HOST = os.environ.get("UTM_DM_HOST", "10.165.32.32")
-    DB_PORT = int(os.environ.get("UTM_DM_PORT", "5237"))
+    DB_HOST = os.environ.get("UTM_DM_HOST", "10.165.32.217")
+    DB_PORT = int(os.environ.get("UTM_DM_PORT", "5236"))
     DB_USER = os.environ.get("UTM_DM_USER", "SYSDBA")
-    DB_PASSWORD = os.environ.get("UTM_DM_PASSWORD", "")
+    DB_PASSWORD = os.environ.get("UTM_DM_PASSWORD", "Kedacom123")
     DB_SCHEMA = os.environ.get("UTM_DM_SCHEMA", "ATC_DKWRJ_TEST")
 
 class DmDbClient:

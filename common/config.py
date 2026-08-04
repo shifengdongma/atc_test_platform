@@ -75,7 +75,7 @@ class DamengConfig:
     port: int = 5236
     user: str = "SYSDBA"
     password: str = ""
-    schema: str = "ATC_DKWRJ"
+    schema: str = "ATC_DKWRJ_TEST"
     vip: str = ""
 
     @property
@@ -420,7 +420,7 @@ def load_config(env_name: Optional[str] = None) -> AppConfig:
         port=int(env_py.get("dm_port", 5236)),
         user=env_py.get("dm_user", "SYSDBA"),
         password=env_py.get("dm_password", ""),
-        schema=env_py.get("dm_schema", "ATC_DKWRJ"),
+        schema=env_py.get("dm_schema", "ATC_DKWRJ_TEST"),
         vip=env_py.get("dm_vip", ""),
     )
 

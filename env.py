@@ -66,24 +66,24 @@ redis_port_b = "6379"
 redis_password_b = "suK1^nS4^jX5"
 
 # ── 达梦数据库 ────────────────────────────────────────────────────
-dm_vip = "10.165.32.218"
-dm_a_host = "10.165.32.212"
+dm_vip = "10.165.32.217"
+dm_a_host = "10.165.32.217"
 dm_a_port = 5236
 dm_a_user = "SYSDBA"
-dm_a_password = "Kedacom#123"
-dm_a_schema = "ATC_DKWRJ"
-dm_b_host = "10.165.32.205"
+dm_a_password = "Kedacom123"
+dm_a_schema = "ATC_DKWRJ_TEST"
+dm_b_host = "10.165.32.217"
 dm_b_port = 5236
 dm_b_user = "SYSDBA"
-dm_b_password = "Kedacom#123"
-dm_b_schema = "ATC_DKWRJ"
+dm_b_password = "Kedacom123"
+dm_b_schema = "ATC_DKWRJ_TEST"
 
-dm_alt_host = "10.165.32.32"
-dm_alt_port = 5237
+dm_alt_host = "10.165.32.217"
+dm_alt_port = 5236
 
 # ── 兼容旧 dmdbclient.py 的达梦别名 ─────────────────────────────────
-DB_HOST = ""
+DB_HOST = "10.165.32.217"
 DB_PORT = 5236
 DB_USER = "SYSDBA"
-DB_PASSWORD = ""
-DB_SCHEMA = ""
+DB_PASSWORD = "Kedacom123"
+DB_SCHEMA = "ATC_DKWRJ_TEST"

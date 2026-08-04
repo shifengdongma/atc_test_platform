@@ -1,0 +1,12 @@
+{
+  "redis_ip": "dolphin-test.kedacom.com",
+  "redis_port": "21003",
+  "redis_password": "s4^dJ5^xM6^e",
+  "kafka_url": "10.165.19.213:30011",
+  "kafka_url2": "",
+  "dm_host": "10.165.32.217",
+  "dm_port": 5236,
+  "dm_user": "SYSDBA",
+  "dm_password": "Kedacom123",
+  "dm_schema": "ATC_DKWRJ_TEST"
+}

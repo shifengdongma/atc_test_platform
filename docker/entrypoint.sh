@@ -91,9 +91,9 @@ fi
 # 达梦
 echo "  [达梦]"
 if [ -n "${UTM_DM_HOST}" ]; then
-    echo "    UTM_DM_HOST=${UTM_DM_HOST}, PORT=${UTM_DM_PORT:-5236}, SCHEMA=${UTM_DM_SCHEMA:-ATC_DKWRJ}"
+    echo "    UTM_DM_HOST=${UTM_DM_HOST}, PORT=${UTM_DM_PORT:-5236}, SCHEMA=${UTM_DM_SCHEMA:-ATC_DKWRJ_TEST}"
 else
-    echo "    UTM_DM_HOST 未设置，使用 env.py 默认值或 10.165.32.212"
+    echo "    UTM_DM_HOST 未设置，使用 env.py 默认值或 10.165.32.217"
 fi
 echo "    OpenSSL 1.1 库检测:"
 if ldconfig -p 2>/dev/null | grep -q libssl.so.1.1; then

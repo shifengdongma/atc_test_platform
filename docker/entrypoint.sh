@@ -107,6 +107,28 @@ else
     echo "      ✗ libcrypto.so.1.1 未安装！达梦加密模块将不可用 (-70089)"
 fi
 
+# 达梦 TCP 连通性测试
+DM_HOST="${UTM_DM_HOST:-10.165.32.217}"
+DM_PORT="${UTM_DM_PORT:-5236}"
+echo "    达梦 TCP 连通性测试 (${DM_HOST}:${DM_PORT}):"
+if timeout 5 bash -c "echo >/dev/tcp/${DM_HOST}/${DM_PORT}" 2>/dev/null; then
+    echo "      ✓ 达梦 TCP 可达 (${DM_HOST}:${DM_PORT})"
+else
+    echo "      ✗✗✗ 达梦 TCP 不可达 (${DM_HOST}:${DM_PORT})！"
+    echo "      所有达梦查询将报 -70019 (Network communication failure)"
+    echo "      请检查: 1) 容器是否能访问 ${DM_HOST}"
+    echo "             2) 达梦服务器防火墙是否允许容器 IP 访问端口 ${DM_PORT}"
+    echo "             3) 如果在 Docker 桥接网络，检查宿主机 iptables 规则"
+fi
+
+# 达梦 dmPython 导入验证
+DM_IMPORT_CHECK=$(python -c "import dmPython; print('dmPython', dmPython.__version__ if hasattr(dmPython, '__version__') else 'OK')" 2>&1) || true
+if echo "$DM_IMPORT_CHECK" | grep -qE '(OK|[0-9]+\.[0-9]+)'; then
+    echo "      ✓ dmPython 导入成功 (${DM_IMPORT_CHECK})"
+else
+    echo "      ✗ dmPython 导入失败: ${DM_IMPORT_CHECK}"
+fi
+
 # pymysql/MySQL 导入验证
 echo "  [pymysql/MySQL]"
 PYMYSQL_CHECK=$(python -c "import pymysql; print(pymysql.__version__)" 2>&1) || true

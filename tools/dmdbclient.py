@@ -8,6 +8,7 @@
 import dmPython
 import os
 import sys
+import threading
 
 # 将项目根目录加入 sys.path，确保能导入 env.py
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -53,9 +54,10 @@ class DmDbClient:
         self.schema = schema if schema is not None else DB_SCHEMA
         self.conn = None
         self.cursor = None
+        self._lock = threading.Lock()
 
-    def connect(self):
-        """建立数据库连接"""
+    def _connect(self):
+        """内部连接方法（不加锁，调用方负责持有 self._lock）。"""
         try:
             self.conn = dmPython.connect(
                 user=self.user,
@@ -75,6 +77,33 @@ class DmDbClient:
                           "请确保 Docker 镜像已安装 libssl1.1 兼容库")
             return False
 
+    def connect(self):
+        """建立数据库连接（线程安全）。"""
+        with self._lock:
+            return self._connect()
+
+    def _ensure_alive(self):
+        """确保连接存活（不加锁，调用方负责持有 self._lock）。
+
+        先尝试用现有连接执行轻量查询；失败则自动重连。
+        覆盖场景：TCP 空闲超时断开、服务器重启、防火墙断开。
+        """
+        if self.cursor is None:
+            return self._connect()
+        try:
+            self.cursor.execute("SELECT 1 FROM DUAL")
+            self.cursor.fetchall()
+            return True
+        except Exception:
+            debug_print(PREFIX, "连接已断开（空闲超时/网络波动），自动重连...")
+            try:
+                self.conn.close()
+            except Exception:
+                pass
+            self.conn = None
+            self.cursor = None
+            return self._connect()
+
     def query(self, table_name, columns=None, where=None, limit=None):
         """通用查询方法
 
@@ -88,42 +117,42 @@ class DmDbClient:
         Returns:
             list[dict]: 查询结果，每条记录为一个字典，key 为字段名
         """
-        if not self.cursor:
-            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
-            return None
+        with self._lock:
+            if not self._ensure_alive():
+                return None
 
-        # 处理字段
-        if columns is None:
-            col_str = "*"
-        elif isinstance(columns, (list, tuple)):
-            col_str = ", ".join(str(c) for c in columns)
-        else:
-            col_str = str(columns)
+            # 处理字段
+            if columns is None:
+                col_str = "*"
+            elif isinstance(columns, (list, tuple)):
+                col_str = ", ".join(str(c) for c in columns)
+            else:
+                col_str = str(columns)
 
-        # 构建 SQL
-        sql = f"SELECT {col_str} FROM {self.schema}.{table_name}"
-        if where:
-            sql += f" WHERE {where}"
-        if limit is not None and isinstance(limit, int):
-            sql += f" LIMIT {limit}"
+            # 构建 SQL
+            sql = f"SELECT {col_str} FROM {self.schema}.{table_name}"
+            if where:
+                sql += f" WHERE {where}"
+            if limit is not None and isinstance(limit, int):
+                sql += f" LIMIT {limit}"
 
-        try:
-            self.cursor.execute(sql)
-            desc = self.cursor.description
-            if desc is None:
-                return []
-            col_names = [d[0] for d in desc]
-            rows = self.cursor.fetchall()
+            try:
+                self.cursor.execute(sql)
+                desc = self.cursor.description
+                if desc is None:
+                    return []
+                col_names = [d[0] for d in desc]
+                rows = self.cursor.fetchall()
 
-            # 转换为字典列表
-            result = [dict(zip(col_names, row)) for row in rows]
+                # 转换为字典列表
+                result = [dict(zip(col_names, row)) for row in rows]
 
-            debug_print(PREFIX, f"查询表: {self.schema}.{table_name} → {len(result)} 条记录")
+                debug_print(PREFIX, f"查询表: {self.schema}.{table_name} → {len(result)} 条记录")
 
-            return result
-        except Exception as e:
-            error_print(PREFIX, f"查询失败: {e}")
-            return None
+                return result
+            except Exception as e:
+                error_print(PREFIX, f"查询失败: {e}")
+                return None
 
     def query_to_list(self, table_name, columns=None, where=None, limit=None):
         """查询并返回纯列表格式（不含字段名）
@@ -137,31 +166,31 @@ class DmDbClient:
         Returns:
             list[tuple]: 查询结果列表
         """
-        if not self.cursor:
-            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
-            return None
+        with self._lock:
+            if not self._ensure_alive():
+                return None
 
-        if columns is None:
-            col_str = "*"
-        elif isinstance(columns, (list, tuple)):
-            col_str = ", ".join(str(c) for c in columns)
-        else:
-            col_str = str(columns)
+            if columns is None:
+                col_str = "*"
+            elif isinstance(columns, (list, tuple)):
+                col_str = ", ".join(str(c) for c in columns)
+            else:
+                col_str = str(columns)
 
-        sql = f"SELECT {col_str} FROM {self.schema}.{table_name}"
-        if where:
-            sql += f" WHERE {where}"
-        if limit is not None and isinstance(limit, int):
-            sql += f" LIMIT {limit}"
+            sql = f"SELECT {col_str} FROM {self.schema}.{table_name}"
+            if where:
+                sql += f" WHERE {where}"
+            if limit is not None and isinstance(limit, int):
+                sql += f" LIMIT {limit}"
 
-        try:
-            self.cursor.execute(sql)
-            rows = self.cursor.fetchall()
-            debug_print(PREFIX, f"查询表: {self.schema}.{table_name} → {len(rows)} 条记录")
-            return rows
-        except Exception as e:
-            error_print(PREFIX, f"查询失败: {e}")
-            return None
+            try:
+                self.cursor.execute(sql)
+                rows = self.cursor.fetchall()
+                debug_print(PREFIX, f"查询表: {self.schema}.{table_name} → {len(rows)} 条记录")
+                return rows
+            except Exception as e:
+                error_print(PREFIX, f"查询失败: {e}")
+                return None
 
     def get_table_columns(self, table_name):
         """获取指定表的所有字段名
@@ -172,22 +201,22 @@ class DmDbClient:
         Returns:
             list[str]: 字段名列表
         """
-        if not self.cursor:
-            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
-            return None
+        with self._lock:
+            if not self._ensure_alive():
+                return None
 
-        try:
-            sql = (
-                f"SELECT COLUMN_NAME FROM USER_TAB_COLUMNS "
-                f"WHERE TABLE_NAME = '{table_name.upper()}'"
-            )
-            self.cursor.execute(sql)
-            rows = self.cursor.fetchall()
-            columns = [row[0] for row in rows]
-            return columns
-        except Exception as e:
-            error_print(PREFIX, f"获取表字段失败: {e}")
-            return None
+            try:
+                sql = (
+                    f"SELECT COLUMN_NAME FROM USER_TAB_COLUMNS "
+                    f"WHERE TABLE_NAME = '{table_name.upper()}'"
+                )
+                self.cursor.execute(sql)
+                rows = self.cursor.fetchall()
+                columns = [row[0] for row in rows]
+                return columns
+            except Exception as e:
+                error_print(PREFIX, f"获取表字段失败: {e}")
+                return None
 
     def print_table_schema(self, table_name):
         """打印表结构信息
@@ -195,28 +224,28 @@ class DmDbClient:
         Args:
             table_name (str): 表名
         """
-        if not self.cursor:
-            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
-            return
+        with self._lock:
+            if not self._ensure_alive():
+                return
 
-        try:
-            sql = (
-                f"SELECT COLUMN_NAME, DATA_TYPE, DATA_LENGTH, NULLABLE, COMMENTS "
-                f"FROM USER_TAB_COLUMNS WHERE TABLE_NAME = '{table_name.upper()}'"
-            )
-            self.cursor.execute(sql)
-            rows = self.cursor.fetchall()
+            try:
+                sql = (
+                    f"SELECT COLUMN_NAME, DATA_TYPE, DATA_LENGTH, NULLABLE, COMMENTS "
+                    f"FROM USER_TAB_COLUMNS WHERE TABLE_NAME = '{table_name.upper()}'"
+                )
+                self.cursor.execute(sql)
+                rows = self.cursor.fetchall()
 
-            info_print(PREFIX, f"表 {self.schema}.{table_name} 的结构")
-            print(f"{'字段名':<20} {'类型':<15} {'长度':<8} {'可空':<6} {'注释'}")
-            print("-" * 70)
-            for row in rows:
-                col_name, data_type, data_length, nullable, comments = row
-                comments = comments if comments else ""
-                print(f"{col_name:<20} {data_type:<15} {data_length:<8} {nullable:<6} {comments}")
-            print("-" * 70)
-        except Exception as e:
-            error_print(PREFIX, f"打印表结构失败: {e}")
+                info_print(PREFIX, f"表 {self.schema}.{table_name} 的结构")
+                print(f"{'字段名':<20} {'类型':<15} {'长度':<8} {'可空':<6} {'注释'}")
+                print("-" * 70)
+                for row in rows:
+                    col_name, data_type, data_length, nullable, comments = row
+                    comments = comments if comments else ""
+                    print(f"{col_name:<20} {data_type:<15} {data_length:<8} {nullable:<6} {comments}")
+                print("-" * 70)
+            except Exception as e:
+                error_print(PREFIX, f"打印表结构失败: {e}")
 
     def execute(self, sql):
         """执行自定义 SQL 语句
@@ -227,36 +256,37 @@ class DmDbClient:
         Returns:
             list[dict] / None: 查询结果字典列表，非查询语句返回 None
         """
-        if not self.cursor:
-            warn_print(PREFIX, "数据库未连接，请先调用 connect()")
-            return None
-
-        try:
-            self.cursor.execute(sql)
-            desc = self.cursor.description
-            if desc:
-                col_names = [d[0] for d in desc]
-                rows = self.cursor.fetchall()
-                result = [dict(zip(col_names, row)) for row in rows]
-                debug_print(PREFIX, f"执行 SQL 成功，返回 {len(result)} 条记录")
-                return result
-            else:
-                self.conn.commit()
-                debug_print(PREFIX, "执行 SQL 成功")
+        with self._lock:
+            if not self._ensure_alive():
                 return None
-        except Exception as e:
-            error_print(PREFIX, f"SQL 执行失败: {e}")
-            return None
+
+            try:
+                self.cursor.execute(sql)
+                desc = self.cursor.description
+                if desc:
+                    col_names = [d[0] for d in desc]
+                    rows = self.cursor.fetchall()
+                    result = [dict(zip(col_names, row)) for row in rows]
+                    debug_print(PREFIX, f"执行 SQL 成功，返回 {len(result)} 条记录")
+                    return result
+                else:
+                    self.conn.commit()
+                    debug_print(PREFIX, "执行 SQL 成功")
+                    return None
+            except Exception as e:
+                error_print(PREFIX, f"SQL 执行失败: {e}")
+                return None
 
     def close(self):
-        """关闭数据库连接"""
-        if self.cursor:
-            self.cursor.close()
-            self.cursor = None
-        if self.conn:
-            self.conn.close()
-            self.conn = None
-        debug_print(PREFIX, "数据库连接已关闭")
+        """关闭数据库连接（线程安全）"""
+        with self._lock:
+            if self.cursor:
+                self.cursor.close()
+                self.cursor = None
+            if self.conn:
+                self.conn.close()
+                self.conn = None
+            debug_print(PREFIX, "数据库连接已关闭")
 
     def __enter__(self):
         """支持 with 语句"""

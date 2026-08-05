@@ -935,7 +935,7 @@ def read_file_content_partial(file_id: int, max_chars: int = 102400) -> Dict[str
 _dm_client = None
 _dm_available = None  # None=未检测, True=可用, False=不可用
 _dm_last_fail_time = 0.0
-_DM_RETRY_COOLDOWN = 60.0  # 连接失败后冷却秒数，期间不再重试达梦
+_DM_RETRY_COOLDOWN = 10.0  # 连接失败后冷却秒数，期间不再重试达梦（自动重连已由 DmDbClient._ensure_alive 处理）
 
 # ── OpenSSL 1.1 库可用性检测（达梦 dmPython 依赖） ────────────────
 # 在模块加载时检测一次，避免每次 _get_dm_client() 都重复检测

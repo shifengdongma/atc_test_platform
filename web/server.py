@@ -117,7 +117,9 @@ def _get_default_config() -> Dict[str, Any]:
         "nfz_count": 3,
         "redis_ip": cfg.redis.host,
         "redis_port": str(cfg.redis.port_int),
+        "redis_password": cfg.redis.password,
         "kafka_url": cfg.kafka.bootstrap_servers,
+        "kafka_url2": cfg.kafka.bootstrap_servers_mirror or "",
         "api_mode": False,
         "api_base_url": "https://dkkgsit-test.testdolphin.com",
         "scene_files": [],
@@ -416,9 +418,9 @@ class SimulationRunner:
         # 覆盖为前端当前选择的连接参数（用户可能通过环境管理切换过）
         self._app_cfg.redis.host = config.get("redis_ip", self._app_cfg.redis.host)
         self._app_cfg.redis.port = int(config.get("redis_port", self._app_cfg.redis.port))
-        self._app_cfg.redis.password = getattr(_env, "redis_password", self._app_cfg.redis.password)
+        self._app_cfg.redis.password = config.get("redis_password", self._app_cfg.redis.password)
         self._app_cfg.kafka.bootstrap_servers = config.get("kafka_url", self._app_cfg.kafka.bootstrap_servers)
-        self._app_cfg.kafka.bootstrap_servers_mirror = getattr(_env, "kafka_url2", self._app_cfg.kafka.bootstrap_servers_mirror)
+        self._app_cfg.kafka.bootstrap_servers_mirror = config.get("kafka_url2", self._app_cfg.kafka.bootstrap_servers_mirror)
 
         # SimulationManager 实例（dynamic/replay 模式）
         self._sim_mgr: Optional[SimulationManager] = None
@@ -436,7 +438,7 @@ class SimulationRunner:
         try:
             test_redis = RedisClient(
                 config["redis_ip"], config["redis_port"],
-                getattr(_env, "redis_password", ""),
+                config.get("redis_password", ""),
             )
             with _lock:
                 _runtime_state["redis_connected"] = test_redis.client is not None
@@ -497,7 +499,7 @@ class SimulationRunner:
                             pass
                     client = RedisClient(
                         self.config["redis_ip"], self.config["redis_port"],
-                        getattr(_env, "redis_password", ""),
+                        self.config.get("redis_password", ""),
                     )
                     client.hset(REDIS_FLIGHT_PLAN_KEY, key, _json.dumps(val, ensure_ascii=False))
                     written += 1
@@ -935,7 +937,9 @@ class SimulationRunner:
                     else:
                         try:
                             from redis_client import RedisClient as _RC
-                            from env import redis_ip as _rip, redis_port as _rpt, redis_password as _rpw
+                            _rip = self.config.get("redis_ip", "127.0.0.1")
+                            _rpt = self.config.get("redis_port", "6379")
+                            _rpw = self.config.get("redis_password", "")
                             test_redis = _RC(_rip, _rpt, _rpw)
                             if test_redis.client and not test_redis.client.exists("BIZ_DATA:UAV_TELEMETRY"):
                                 _add_log("遥测桥接运行中但 Redis 遥测 key 为空，检查 dynamic 模式是否正在产生遥测数据")
@@ -1194,7 +1198,7 @@ def api_get_plans():
     client = RedisClient(
         _current_config["redis_ip"],
         _current_config["redis_port"],
-        getattr(_env, "redis_password", ""),
+        _current_config.get("redis_password", ""),
     )
 
     try:
@@ -1228,7 +1232,7 @@ def api_get_nfzs():
     client = RedisClient(
         _current_config["redis_ip"],
         _current_config["redis_port"],
-        getattr(_env, "redis_password", ""),
+        _current_config.get("redis_password", ""),
     )
 
     try:
@@ -1260,7 +1264,7 @@ def api_test_connection():
         client = RedisClient(
             _current_config["redis_ip"],
             _current_config["redis_port"],
-            getattr(_env, "redis_password", ""),
+            _current_config.get("redis_password", ""),
         )
         result["redis"] = client.client is not None
     except Exception:
@@ -1299,10 +1303,10 @@ def api_save_config():
         cfg_data = {
             "redis_ip": _current_config["redis_ip"],
             "redis_port": _current_config["redis_port"],
+            "redis_password": _current_config.get("redis_password", ""),
             "kafka_url": _current_config["kafka_url"],
+            "kafka_url2": _current_config.get("kafka_url2", ""),
         }
-        # 保留已有的 kafka_url2（从 _current_config 或 env 读取）
-        cfg_data["kafka_url2"] = _current_config.get("kafka_url2", getattr(_env, "kafka_url2", ""))
 
         with open(cfg_path, "w", encoding="utf-8") as f:
             json.dump(cfg_data, f, ensure_ascii=False, indent=2)
@@ -2029,7 +2033,9 @@ def api_env_activate(env_id):
         with _lock:
             _current_config["redis_ip"] = cfg.get("redis_ip", _current_config["redis_ip"])
             _current_config["redis_port"] = cfg.get("redis_port", _current_config["redis_port"])
+            _current_config["redis_password"] = cfg.get("redis_password", _current_config.get("redis_password", ""))
             _current_config["kafka_url"] = cfg.get("kafka_url", _current_config["kafka_url"])
+            _current_config["kafka_url2"] = cfg.get("kafka_url2", _current_config.get("kafka_url2", ""))
             # 同步达梦配置
             _current_config["dm_host"] = cfg.get("dm_host", "")
             _current_config["dm_port"] = cfg.get("dm_port", 5236)

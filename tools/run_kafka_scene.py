@@ -103,6 +103,9 @@ class SceneEmitter:
         consume_trace: bool = False,
         trace_group_id: Optional[str] = None,
         quiet: bool = False,
+        redis_host: Optional[str] = None,
+        redis_port: Optional[int] = None,
+        redis_password: Optional[str] = None,
     ):
         """
         Args:
@@ -117,6 +120,9 @@ class SceneEmitter:
             consume_trace: 是否消费 uav_runtime_trace topic，默认False
             trace_group_id: trace消费组ID，默认使用进程ID区分（多进程共享同一ID可避免重复消费）
             quiet: 是否静默模式（不打印发送日志），默认False
+            redis_host: Redis 地址，默认从 env 读取（Web UI 环境切换后传入 _current_config 值）
+            redis_port: Redis 端口，默认从 env 读取
+            redis_password: Redis 密码，默认从 env 读取
         """
         self.topic = topic
         self.interval_ms = interval_ms
@@ -148,15 +154,18 @@ class SceneEmitter:
         self.redis_client = None
         if _redis is not None:
             try:
+                _rh = redis_host or getattr(_env, 'redis_ip', '127.0.0.1')
+                _rp = redis_port if redis_port is not None else int(getattr(_env, 'redis_port', 6379))
+                _rpw = redis_password if redis_password is not None else getattr(_env, 'redis_password', '')
                 self.redis_client = _redis.Redis(
-                    host=_env.redis_ip,
-                    port=int(_env.redis_port),
-                    password=_env.redis_password,
+                    host=_rh,
+                    port=_rp,
+                    password=_rpw,
                     db=0,
                     decode_responses=True,
                 )
                 self.redis_client.ping()
-                print(f"[Redis] 连接成功 ({_env.redis_ip}:{_env.redis_port})")
+                print(f"[Redis] 连接成功 ({_rh}:{_rp})")
             except Exception as e:
                 print(f"[Redis] 连接失败: {e}")
 
@@ -170,7 +179,7 @@ class SceneEmitter:
                 self.trace_consumer = KafkaConsumerClient(
                     bootstrap_servers=_kafka_url,
                     group_id=self.trace_group_id,
-                    consume_from_latest_on_start=True,
+                    consume_from_latest_on_start=False,
                 )
                 self.trace_consumer.subscribe(['uav_runtime_trace'])
                 print(f"[Trace] uav_runtime_trace 消费者已初始化 (group={self.trace_group_id})")
@@ -316,23 +325,26 @@ class SceneEmitter:
         self.running = True
         self.stats['start_time'] = time.time()
 
-        # ① 先将航线写入 Redis（必须在发射线程之前，确保下游 UTM 先有飞行计划）
+        # ① 先启动 trace 消费线程（必须在发射线程之前，否则 auto_offset_reset='latest'
+        #    在 Windows 新 consumer group 上会跳过发射启动窗口内产生的全部 trace 消息）
+        if self.trace_consumer:
+            self.trace_thread = threading.Thread(target=self._consume_trace_loop)
+            self.trace_thread.daemon = True
+            self.trace_thread.start()
+            # 等待消费者完成分区分配，确保订阅就绪后再发射遥测
+            time.sleep(1.0)
+            print("[Trace] 开始消费 uav_runtime_trace")
+
+        # ② 将航线写入 Redis（确保下游 UTM 先有飞行计划再收到遥测，可正常关联）
         if self.redis_client:
             print("\n[Redis] 正在写入 UAV 航线数据...")
             self._write_redis_route_batch()
             print(f"[Redis] 航线写入完成: {len(self.uav_data_list)} 架")
 
-        # ② 再启动遥测发射线程（此时 Redis 中已有飞行计划，下游可正常关联）
+        # ③ 最后启动遥测发射线程（trace 消费者已就绪，Redis 中已有飞行计划）
         self._thread = threading.Thread(target=self._emit_loop)
         self._thread.daemon = True
         self._thread.start()
-
-        # ③ 最后启动 trace 消费线程
-        if self.trace_consumer:
-            self.trace_thread = threading.Thread(target=self._consume_trace_loop)
-            self.trace_thread.daemon = True
-            self.trace_thread.start()
-            print("[Trace] 开始消费 uav_runtime_trace")
 
         print(f"\n🚀 发射器启动")
         print(f"   UAV 数量: {len(self.uav_data_list)}")
@@ -546,36 +558,35 @@ class SceneEmitter:
         """消费 uav_runtime_trace topic，支持两种消息格式：
         1) 含 redisKey：回查 Redis 获取完整数据
         2) 无 redisKey：消息 value 本身就是 trace 数据
-        """
-        while self.running:
-            try:
-                messages = self.trace_consumer.poll(timeout_ms=500)
-                for msg in messages:
-                    if not isinstance(msg, dict):
-                        continue
 
+        使用独立线程处理 Redis 回查，避免阻塞 Kafka poll 导致消息积压丢失。
+        Windows 上远程 Redis 延迟较高（50-200ms/查询），单线程处理会严重拖慢消费速度。
+        """
+        import queue as _queue
+        _trace_queue = _queue.Queue(maxsize=500)
+
+        def _process_trace():
+            """后台线程：从队列取消息，回查 Redis 并保存结果。"""
+            while self.running or not _trace_queue.empty():
+                try:
+                    msg = _trace_queue.get(timeout=0.5)
+                except _queue.Empty:
+                    continue
+                try:
                     ts = msg.get('timestamp', 0)
                     redis_key = msg.get("redisKey") or msg.get("redis_key")
-                    self.trace_stats['received'] += 1
-
                     trace_data = None
                     data_count = 0
 
                     if redis_key and self.redis_client:
-                        # 格式1：回查 Redis
                         try:
                             trace_data = self._redis_get(redis_key)
                             if trace_data is None:
-                                # 诊断：打印 Redis key 信息
-                                key_exists = self.redis_client.exists(redis_key)
-                                key_type = self.redis_client.type(redis_key)
-                                print(f"[Trace] Redis回查为空: key={redis_key}, exists={key_exists}, type={key_type}")
+                                print(f"[Trace] Redis回查为空: key={redis_key}")
                         except Exception as e:
                             print(f"[Trace] Redis回查失败: {e}")
                         data_count = len(trace_data) if isinstance(trace_data, list) else (1 if trace_data else 0)
                     else:
-                        # 格式2：消息本身就是 trace 数据
-                        # 排除空值和纯时间戳包装
                         msg_copy = dict(msg)
                         msg_copy.pop('timestamp', None)
                         if msg_copy:
@@ -588,11 +599,33 @@ class SceneEmitter:
                             "redisKey": redis_key,
                             "data": trace_data,
                         })
-
                     debug_print("uav_runtime_trace", f"{int(ts)} 收到 {data_count} 条")
+                except Exception as e:
+                    print(f"[Trace] 处理异常: {e}")
+                finally:
+                    _trace_queue.task_done()
+
+        import threading as _thr
+        _worker = _thr.Thread(target=_process_trace, daemon=True)
+        _worker.start()
+
+        # 主循环：快速轮询 Kafka，仅入队不做阻塞 I/O
+        while self.running:
+            try:
+                messages = self.trace_consumer.poll(timeout_ms=100)
+                for msg in messages:
+                    if not isinstance(msg, dict):
+                        continue
+                    self.trace_stats['received'] += 1
+                    try:
+                        _trace_queue.put_nowait(msg)
+                    except _queue.Full:
+                        print("[Trace] ⚠ 内部队列已满，丢弃 1 条 trace")
             except Exception as e:
                 print(f"[Trace] 消费异常: {e}")
-            time.sleep(0.05)
+
+        # 等待后台线程处理完剩余消息
+        _worker.join(timeout=10)
 
     def _build_redis_route(self, uav):
         """根据 UAV 遥测数据生成航线字典，返回 None 表示无数据。

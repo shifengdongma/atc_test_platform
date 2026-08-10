@@ -23,7 +23,6 @@ if _root not in sys.path:
 from core.kafka_proc import KafkaConsumerClient, KafkaProducerClient
 from core.redis_client import RedisClient
 import env as _env
-from env import redis_ip, redis_port, redis_password, kafka_url
 
 REDIS_FLIGHT_PLAN_KEY = "BIZ_DATA:UAV_ROUTE"
 REDIS_TELEMETRY_KEY = "BIZ_DATA:UAV_TELEMETRY"  # dynamic 模式遥测桥接
@@ -192,13 +191,20 @@ def _telemetry_dict(uid: str, registered_code: str, samp: Dict[str, Any], now_ms
 class PlanRunner:
     """维护 planList，定时拉 Redis，每秒发送遥测，并消费 uav_runtime_trace。"""
 
-    def __init__(self, log_callback=None, trace_callback=None, telemetry_callback=None) -> None:
-        self.redis_client = RedisClient(redis_ip, redis_port, redis_password)
+    def __init__(self, log_callback=None, trace_callback=None, telemetry_callback=None,
+                 redis_host=None, redis_port=None, redis_password=None,
+                 kafka_bootstrap=None) -> None:
+        _rh = redis_host if redis_host is not None else getattr(_env, 'redis_ip', '127.0.0.1')
+        _rp = redis_port if redis_port is not None else int(getattr(_env, 'redis_port', 6379))
+        _rpw = redis_password if redis_password is not None else getattr(_env, 'redis_password', '')
+        _kafka = kafka_bootstrap or getattr(_env, 'kafka_url', '127.0.0.1:9092')
+
+        self.redis_client = RedisClient(_rh, str(_rp), _rpw)
         self.kafka_producer = KafkaProducerClient(
-            kafka_url, bootstrap_servers_mirror=getattr(_env, "kafka_url2", None)
+            _kafka, bootstrap_servers_mirror=getattr(_env, "kafka_url2", None)
         )
         self.kafka_consumer = KafkaConsumerClient(
-            bootstrap_servers=kafka_url,
+            bootstrap_servers=_kafka,
             group_id=f"utm_run_plan_trace_{os.getpid()}",
             consume_from_latest_on_start=True,
         )

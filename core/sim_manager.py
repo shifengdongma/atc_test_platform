@@ -530,7 +530,13 @@ class SimulationManager:
         except ImportError as e:
             raise SimulationError(f"无法导入 run_plan.PlanRunner: {e}")
 
-        self._plan_runner = PlanRunner(log_callback=self._add_log)
+        self._plan_runner = PlanRunner(
+            log_callback=self._add_log,
+            redis_host=self.config.redis.host,
+            redis_port=self.config.redis.port_int,
+            redis_password=self.config.redis.password,
+            kafka_bootstrap=self.config.kafka.bootstrap_servers,
+        )
         self._plan_runner.start_background()
         self._add_log("Redis 计划插值模式已初始化，后台线程已启动")
 

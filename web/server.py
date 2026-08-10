@@ -513,6 +513,10 @@ class SimulationRunner:
             log_callback=_add_log,
             trace_callback=lambda d: socketio.emit("trace_data", d),
             telemetry_callback=lambda d: socketio.emit("telemetry_data", d),
+            redis_host=self.config.get("redis_ip"),
+            redis_port=int(self.config.get("redis_port", 6379)),
+            redis_password=self.config.get("redis_password", ""),
+            kafka_bootstrap=self.config.get("kafka_url"),
         )
         # 读取用户选择的航线 UID 列表
         # None = 未做选择（全部航线），[] = 明确取消全选（不执行任何航线），[...] = 指定航线
@@ -735,6 +739,9 @@ class SimulationRunner:
                             timestamp_mode=scene_timestamp_mode,
                             loop=scene_loop,
                             consume_trace=True,
+                            redis_host=self.config.get("redis_ip"),
+                            redis_port=int(self.config.get("redis_port", 6379)),
+                            redis_password=self.config.get("redis_password", ""),
                         )
                         self._emitter = emitter
                         # 诊断：报告加载结果
@@ -823,7 +830,12 @@ class SimulationRunner:
 
     def _cleanup(self) -> None:
         """清理资源。"""
+        global _sim_runner
         _add_log("仿真运行结束，清理资源...")
+        # 重置全局运行状态，允许下次启动
+        with _lock:
+            _runtime_state["running"] = False
+        _sim_runner = None
         # 停止 TCP 网关日志轮询
         try:
             if _gateway_log_poller:
@@ -1126,6 +1138,8 @@ def api_start_sim():
     with _lock:
         if _runtime_state["running"]:
             return jsonify({"success": False, "message": "仿真已在运行中"}), 409
+        # 原子性声明 running 状态，防止并发请求同时通过检查后创建多个 SimulationRunner
+        _runtime_state["running"] = True
 
     data = request.get_json(silent=True) or {}
     # 合并请求参数到配置
@@ -1141,6 +1155,9 @@ def api_start_sim():
         _sim_runner.start()
         return jsonify({"success": True, "message": "仿真已启动", "config": config})
     except Exception as e:
+        # 构造失败时重置 running 状态
+        with _lock:
+            _runtime_state["running"] = False
         traceback.print_exc()
         return jsonify({"success": False, "message": f"启动失败: {e}"}), 500
 
@@ -1712,6 +1729,7 @@ def api_launch_replay():
     with _lock:
         if _runtime_state["running"]:
             return jsonify({"success": False, "message": "仿真已在运行中"}), 409
+        _runtime_state["running"] = True
 
     data = request.get_json(silent=True) or {}
     data_file = data.get("data_file", "kafka_data.json")
@@ -1732,6 +1750,8 @@ def api_launch_replay():
     route_path = os.path.join(mock_dir, route_file)
 
     if not os.path.exists(data_path):
+        with _lock:
+            _runtime_state["running"] = False
         return jsonify({"success": False, "message": f"数据文件不存在: {data_file}"}), 404
 
     # 使用 SimulationManager 启动 replay
@@ -1756,6 +1776,8 @@ def api_launch_replay():
             "message": f"已启动 replay 模式 ({data_file}, {drone_count} 架无人机)",
         })
     except Exception as e:
+        with _lock:
+            _runtime_state["running"] = False
         traceback.print_exc()
         return jsonify({"success": False, "message": f"启动失败: {e}"}), 500
 
@@ -2521,6 +2543,12 @@ def _get_orchestrator():
         def _execute_scene_file(tf, scene, task, rep_num, stop_event=None):
             """执行单个场景文件（支持通过 stop_event 取消）。"""
             try:
+                # 检查是否已有仿真在运行，避免编排器与手动触发并发
+                with _lock:
+                    if _runtime_state["running"]:
+                        _add_log(f"[场景编排] 仿真已在运行中，跳过本次编排执行")
+                        return
+
                 import json_data_manager as jdm
                 file_id = tf.get("file_id", 0)
                 record = jdm.get_file(int(file_id))
@@ -2552,6 +2580,8 @@ def _get_orchestrator():
                 task_name = task.get("name", "")
                 _add_log(f"[场景编排] 执行: {task_name} #{rep_num} → {record.get('name', '')}")
 
+                with _lock:
+                    _runtime_state["running"] = True
                 runner = SimulationRunner(params)
                 runner.start()
                 wait = params.get("duration_min", 5) * 60

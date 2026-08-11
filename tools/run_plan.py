@@ -174,7 +174,7 @@ def _telemetry_dict(uid: str, registered_code: str, samp: Dict[str, Any], now_ms
         "geodeticAltitude": samp["alt"],
         "verticalSpeed": samp["v_speed"],
         "relativeAltitude": 0.0,
-        "pressureAltitude": 0.0,
+        "ressureAltitude": 0.0,
         "operatingStatus": samp["operating_status"],
         "coordinateSystemType": 0,
         "horizontalAccuracy": 1,
@@ -193,15 +193,17 @@ class PlanRunner:
 
     def __init__(self, log_callback=None, trace_callback=None, telemetry_callback=None,
                  redis_host=None, redis_port=None, redis_password=None,
-                 kafka_bootstrap=None) -> None:
+                 kafka_bootstrap=None, kafka_bootstrap_servers=None,
+                 kafka_bootstrap_servers_mirror=None) -> None:
         _rh = redis_host if redis_host is not None else getattr(_env, 'redis_ip', '127.0.0.1')
         _rp = redis_port if redis_port is not None else int(getattr(_env, 'redis_port', 6379))
         _rpw = redis_password if redis_password is not None else getattr(_env, 'redis_password', '')
-        _kafka = kafka_bootstrap or getattr(_env, 'kafka_url', '127.0.0.1:9092')
+        _kafka = kafka_bootstrap_servers or kafka_bootstrap or getattr(_env, 'kafka_url', '127.0.0.1:9092')
+        _mirror = kafka_bootstrap_servers_mirror if kafka_bootstrap_servers_mirror is not None else getattr(_env, "kafka_url2", None)
 
         self.redis_client = RedisClient(_rh, str(_rp), _rpw)
         self.kafka_producer = KafkaProducerClient(
-            _kafka, bootstrap_servers_mirror=getattr(_env, "kafka_url2", None)
+            _kafka, bootstrap_servers_mirror=_mirror
         )
         self.kafka_consumer = KafkaConsumerClient(
             bootstrap_servers=_kafka,
@@ -217,6 +219,10 @@ class PlanRunner:
         self._telemetry_callback = telemetry_callback
         self._threads: List[threading.Thread] = []
         self._selected_uids: Optional[Set[str]] = None  # 航线白名单过滤
+        # 周期性 Redis 航线刷新（对齐 SceneEmitter 30s 间隔，由 _watch_redis_loop 后台执行）
+        self._route_objs: Dict[str, Dict[str, Any]] = {}  # uid → 原始航线 JSON 对象（供周期性刷新）
+        # 统计计数
+        self.stats: Dict[str, int] = {"sent": 0, "failed": 0}
 
     def _log(self, msg: str) -> None:
         """日志输出：优先回调到前端，否则打印到 stdout。"""
@@ -250,6 +256,8 @@ class PlanRunner:
                 duration = land - takeoff
                 plan["planTakeoffTime"] = now
                 plan["planLandTime"] = now + duration
+        # 确保 Redis 中的 UID 与 hash field 一致，便于下游 ATC 关联遥测
+        obj["uniqueProductIdentificationCode"] = uid
         try:
             self.redis_client.hset(
                 REDIS_FLIGHT_PLAN_KEY, uid,
@@ -288,9 +296,11 @@ class PlanRunner:
                 reg = obj.get("uniqueProductIdentificationCode") or uid
                 # 收集该 uid 下所有未加入且有效的 fp_id
                 new_fp_ids: List[int] = []
+                has_any_plan = False  # 是否存在至少一个 flightPlan（含已过期的）
                 for idx, plan in enumerate(obj.get("flightPlanList") or []):
                     if not isinstance(plan, dict):
                         continue
+                    has_any_plan = True
                     land = _to_float(plan.get("planLandTime"))
                     if land is None or land <= now:
                         continue
@@ -302,9 +312,13 @@ class PlanRunner:
                         continue
                     new_fp_ids.append(fp_id)
                 if not new_fp_ids:
+                    if has_any_plan:
+                        self._log(f"跳过 {uid}: 所有 flightPlan 的 planLandTime 已过期")
                     continue
                 # 平移起降时间写回 Redis，触发下游 UTM 激活追踪
                 self._shift_and_write_plan(uid, obj)
+                # 缓存原始航线对象，供周期性 Redis 刷新使用
+                self._route_objs[uid] = obj
                 # obj 内 flightPlanList 已被 _shift_and_write_plan 原地更新
                 fp_map = {p.get("flightPlanId"): p for p in obj.get("flightPlanList") or [] if isinstance(p, dict)}
                 for fp_id in new_fp_ids:
@@ -316,7 +330,7 @@ class PlanRunner:
                     self._plans[key] = RoutePlanSim(str(uid), str(reg), plan_use)
                     added += 1
         if added:
-            print(f"本轮从 Redis 新加入 {added} 条计划，当前共 {len(self._plans)} 条")
+            self._log(f"本轮从 Redis 新加入 {added} 条计划，当前共 {len(self._plans)} 条")
 
     def _remove_expired(self) -> None:
         now = time.time()
@@ -324,7 +338,11 @@ class PlanRunner:
             to_del = [k for k, p in self._plans.items() if now > p.land]
             for k in to_del:
                 del self._plans[k]
-                print(f"计划已结束并移除: {k}")
+                self._log(f"计划已结束并移除: {k}")
+                # 若该 UID 下无其他活跃计划，停止对其 Redis 航线的周期性刷新
+                base_uid = k.split(":")[0]
+                if not any(p_key.startswith(base_uid + ":") for p_key in self._plans):
+                    self._route_objs.pop(base_uid, None)
 
     def tick_send(self) -> None:
         """移除已到期计划后，为剩余计划各采样一条遥测并批量发送；
@@ -333,6 +351,7 @@ class PlanRunner:
         self._remove_expired()
         now = time.time()
         now_ms = int(now * 1000)
+
         with self._lock:
             plans = list(self._plans.values())
         batch: List[Dict[str, Any]] = [
@@ -355,7 +374,14 @@ class PlanRunner:
             pass
 
         if batch:
-            self.kafka_producer.send_bulk(batch, KAFKA_UAV_DATA_TOPIC)
+            result = self.kafka_producer.send_bulk(batch, KAFKA_UAV_DATA_TOPIC)
+            if isinstance(result, dict):
+                self.stats["sent"] += result.get("sent", 0)
+                self.stats["failed"] += result.get("failed", 0)
+                if not result.get("primary_flush_ok") and result.get("mirror_flush_ok"):
+                    self._log("主集群 flush 超时, 高可用集群已同步")
+            else:
+                self.stats["sent"] += len(batch)
             # 桥接遥测数据到前端运行日志 Layer 1
             if self._telemetry_callback:
                 try:
@@ -363,9 +389,23 @@ class PlanRunner:
                 except Exception:
                     pass
 
+    def _refresh_redis_routes(self) -> None:
+        """周期性刷新全部缓存的 Redis 航线时间戳，供后台 watch 线程调用。"""
+        refreshed = 0
+        with self._lock:
+            for uid, obj in list(self._route_objs.items()):
+                try:
+                    self._shift_and_write_plan(uid, obj)
+                    refreshed += 1
+                except Exception as e:
+                    self._log(f"周期性刷新航线失败 uid={uid}: {e}")
+        if refreshed:
+            self._log(f"已周期性刷新 {refreshed} 条 Redis 航线")
+
     def _watch_redis_loop(self) -> None:
         """监听 BIZ_DATA:UAV_ROUTE keyspace 变动，有写入立即合并计划；
-        同时每分钟兜底轮询一次，防止服务端未开启通知时事件丢失。"""
+        同时每分钟兜底轮询一次，防止服务端未开启通知时事件丢失；
+        每 30 秒周期性刷新航线时间戳（对齐 SceneEmitter），在后台执行不阻塞 tick。"""
         pubsub = None
         channel = f"__keyspace@{self.redis_client.db}__:{REDIS_FLIGHT_PLAN_KEY}"
         try:
@@ -382,6 +422,7 @@ class PlanRunner:
             pubsub = None
 
         last_poll = time.time()
+        _tick = 0  # 循环计数器，用于周期性航线刷新
         try:
             while self.running:
                 if pubsub:
@@ -404,6 +445,10 @@ class PlanRunner:
                     except Exception as e:
                         print(f"兜底轮询失败: {e}")
                     last_poll = time.time()
+                # ── 周期性刷新 Redis 航线（每 ~30 秒，对齐 SceneEmitter）────
+                _tick += 1
+                if _tick % 30 == 0:
+                    self._refresh_redis_routes()
         finally:
             if pubsub:
                 try:

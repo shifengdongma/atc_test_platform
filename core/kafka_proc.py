@@ -84,11 +84,16 @@ class KafkaProducerClient:
         return self.connected and self.producer is not None
 
     def send_bulk(self, objs, topic):
+        """批量发送消息到 Kafka，返回统计字典。
+
+        Returns:
+            dict: {"sent": int, "failed": int, "primary_flush_ok": bool, "mirror_flush_ok": bool}
+        """
         if not objs:
-            return
+            return {"sent": 0, "failed": 0, "primary_flush_ok": True, "mirror_flush_ok": True}
         if not self.producer:
             print(f"❌ Kafka生产者未初始化，无法发送 {len(objs)} 条消息到 {topic}")
-            return
+            return {"sent": 0, "failed": len(objs), "primary_flush_ok": False, "mirror_flush_ok": False}
         if self.bootstrap_servers_mirror and not self.producer_secondary:
             print(f"[Kafka-Mirror] ⚠️ 高可用集群生产者未初始化，本次仅发送主集群")
         _flush_to = self.flush_timeout_sec if self.flush_timeout_sec is not None else _KAFKA_FLUSH_TIMEOUT_SEC
@@ -98,18 +103,23 @@ class KafkaProducerClient:
             self.producer.send(topic, item, key_fn(item))
             if self.producer_secondary:
                 self.producer_secondary.send(topic, item, key_fn(item))
+        primary_ok = True
         try:
             self.producer.flush(timeout=_flush_to)
         except KafkaTimeoutError as e:
             print(f"[Kafka-Primary] ❌ 主集群 flush 超时 ({_flush_to}s): {e}")
+            primary_ok = False
+        mirror_ok = True
         if self.producer_secondary:
             try:
                 self.producer_secondary.flush(timeout=_flush_to)
             except KafkaTimeoutError as e:
                 print(f"[Kafka-Mirror] ❌ 副本集群 flush 超时 ({_flush_to}s): {e}")
+                mirror_ok = False
         end = time.time()
         suffix = "（同步高可用集群）" if self.producer_secondary else "（仅主集群）"
         debug_print(topic, f"发送 {len(objs)} 条{suffix}")
+        return {"sent": len(objs), "failed": 0, "primary_flush_ok": primary_ok, "mirror_flush_ok": mirror_ok}
 
     
     def send_message(self, topic: str, message: Dict[str, Any]) -> bool:

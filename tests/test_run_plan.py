@@ -136,13 +136,12 @@ def _runner_with_loaded_plan(logs, sample_redis_route):
     return runner
 
 
-def test_tick_send_refreshes_routes_after_30s(mock_env, sample_redis_route):
-    """超过 30s 未刷新时，tick_send 将航线起降时间平移到当前时刻并重写 Redis。"""
+def test_refresh_redis_routes_writes_to_redis(mock_env, sample_redis_route):
+    """_refresh_redis_routes 将航线起降时间平移到当前时刻并重写 Redis（后台线程调用）。"""
     logs = []
     runner = _runner_with_loaded_plan(logs, sample_redis_route)
-    runner._last_route_refresh = time.time() - 31
 
-    runner.tick_send()
+    runner._refresh_redis_routes()
 
     runner.redis_client.hset.assert_called_once()
     args = runner.redis_client.hset.call_args.args
@@ -154,22 +153,23 @@ def test_tick_send_refreshes_routes_after_30s(mock_env, sample_redis_route):
     assert any("已周期性刷新 1 条 Redis 航线" in l for l in logs)
 
 
-def test_tick_send_skips_refresh_within_30s(mock_env, sample_redis_route):
-    """30s 间隔内不重复刷新 Redis 航线。"""
+def test_tick_send_does_not_block_on_redis_refresh(mock_env, sample_redis_route):
+    """tick_send 不再执行 Redis 航线刷新（已移至后台 watch 线程），保持每秒准时。"""
     logs = []
     runner = _runner_with_loaded_plan(logs, sample_redis_route)
-    runner._last_route_refresh = time.time() - 5
 
     runner.tick_send()
 
+    # tick_send 不应触发 Redis hset（刷新已移至 _watch_redis_loop）
     runner.redis_client.hset.assert_not_called()
+    # 但应该正常发送遥测（send_bulk 被调用）
+    runner.kafka_producer.send_bulk.assert_called_once()
 
 
 def test_expired_plan_removed_and_route_cache_cleaned(mock_env, sample_redis_route):
     """计划结束后从 _plans 移除，并停止对其 Redis 航线的周期性刷新。"""
     logs = []
     runner = _runner_with_loaded_plan(logs, sample_redis_route)
-    runner._last_route_refresh = time.time()  # 本次 tick 不触发刷新
     with runner._lock:
         runner._plans["UAV_00001:1"].land = time.time() - 1
 

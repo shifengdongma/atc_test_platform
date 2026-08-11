@@ -179,7 +179,7 @@ class SceneEmitter:
                 self.trace_consumer = KafkaConsumerClient(
                     bootstrap_servers=_kafka_url,
                     group_id=self.trace_group_id,
-                    consume_from_latest_on_start=False,
+                    consume_from_latest_on_start=True,
                 )
                 self.trace_consumer.subscribe(['uav_runtime_trace'])
                 print(f"[Trace] uav_runtime_trace 消费者已初始化 (group={self.trace_group_id})")

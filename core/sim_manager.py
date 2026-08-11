@@ -844,7 +844,7 @@ class SimulationManager:
                 "geodeticAltitude": t.location.alt,
                 "verticalSpeed": t.verticalSpeed,
                 "relativeAltitude": t.relativeAltitude,
-                "pressureAltitude": t.ressureAltitude,
+                "ressureAltitude": t.ressureAltitude,
                 "operatingStatus": t.operatingStatus,
                 "timestamp": now_ms,
                 "sourceType": getattr(t, "sourceType", 1),

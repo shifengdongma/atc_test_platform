@@ -66,7 +66,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _WEB_PAGES_DIR = os.path.join(_PROJECT_ROOT, "web", "pages")
 REDIS_FLIGHT_PLAN_KEY = "BIZ_DATA:UAV_ROUTE"
 REDIS_AIRSPACE_KEY = "BIZ_DATA:AIRSPACE"
-KAFKA_UAV_DATA_TOPIC = "uav_runtime_data"
+KAFKA_UAV_DATA_TOPIC = "uav_runtime_data_1"
 KAFKA_TRACE_TOPIC = "uav_runtime_trace"
 DEFAULT_TARGET_DRONES = 1
 

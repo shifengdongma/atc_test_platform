@@ -11,7 +11,7 @@ run_kafka_scene.py - 场景化 Kafka 数据发射器（核心发射器）
 
 用法示例：
     # 命令行：发射指定 JSON
-    python run_kafka_scene.py --file scenes/scene1/uav_001.json --topic uav_runtime_data
+    python run_kafka_scene.py --file scenes/scene1/uav_001.json --topic uav_runtime_data_1
 
     # 命令行：发射整个场景目录
     python run_kafka_scene.py --scene scenes/scene1
@@ -95,7 +95,7 @@ class SceneEmitter:
         files: Optional[List[str]] = None,
         scene_dir: Optional[str] = None,
         kafka_url: Optional[str] = None,
-        topic: str = 'uav_runtime_data',
+        topic: str = 'uav_runtime_data_1',
         interval_ms: int = 1000,
         timestamp_mode: str = 'replace',
         loop: bool = False,
@@ -457,9 +457,9 @@ class SceneEmitter:
                 if not self.quiet:
                     if self.debug_print_uav_ids:
                         uids = [r.get('uniqueProductIdentificationCode') for r in records]
-                        debug_print("uav_runtime_data", f"{ts} 发送 {len(records)} 条 | {progress} | UAVs: {uids}")
+                        debug_print("uav_runtime_data_1", f"{ts} 发送 {len(records)} 条 | {progress} | UAVs: {uids}")
                     else:
-                        debug_print("uav_runtime_data", f"{ts} 发送 {len(records)} 条 | {progress}")
+                        debug_print("uav_runtime_data_1", f"{ts} 发送 {len(records)} 条 | {progress}")
             except Exception as e:
                 print(f"❌ 发送失败: {e}")
 
@@ -773,7 +773,7 @@ def main():
     parser.add_argument('-f', '--file', action='append', help='指定 JSON 文件路径（可多次使用）')
     parser.add_argument('-s', '--scene', help='指定场景目录（加载目录下所有 JSON 文件）')
     parser.add_argument('--url', help='Kafka URL（默认从 env 读取）')
-    parser.add_argument('--topic', default='uav_runtime_data', help='Kafka topic')
+    parser.add_argument('--topic', default='uav_runtime_data_1', help='Kafka topic')
     parser.add_argument('--interval', type=int, default=1000, help='发射间隔（毫秒）')
     parser.add_argument('--timestamp-mode', default='replace', choices=['replace', 'align', 'preserve'],
                         help='时间戳处理模式')

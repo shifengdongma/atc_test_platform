@@ -204,7 +204,7 @@ def _check_redis_data_entry(key: str = "BIZ_DATA:UAV_ROUTE") -> Dict[str, Any]:
         return {"connected": False, "error": str(e)}
 
 
-def _check_kafka_topic_entry(topic: str = "uav_runtime_data", timeout: int = 10) -> Dict[str, Any]:
+def _check_kafka_topic_entry(topic: str = "uav_runtime_data_1", timeout: int = 10) -> Dict[str, Any]:
     """检查 Kafka Topic 消息流。"""
     try:
         from kafka_proc import KafkaConsumerClient

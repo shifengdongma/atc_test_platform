@@ -65,7 +65,7 @@ except Exception as e:
     import traceback
     traceback.print_exc()
 
-# 3. 发送一条测试消息到 uav_runtime_data，触发 UTM 产生 trace
+# 3. 发送一条测试消息到 uav_runtime_data_1，触发 UTM 产生 trace
 print("\n3. 发送测试遥测，触发 UTM 产生 trace...")
 try:
     p2 = KafkaProducerClient(KAFKA_URL)
@@ -76,7 +76,7 @@ try:
         "trackAngle": 90, "operatingStatus": 2,
         "timestamp": int(time.time() * 1000),
     }
-    p2.send_message(TOPIC.replace("trace", "data"), test_msg)
+    p2.send_message("uav_runtime_data_1", test_msg)
     p2.close()
     print("   测试遥测已发送，等待 UTM 产生 trace (5秒)...")
     time.sleep(5)

@@ -45,7 +45,7 @@ logger = get_logger(__name__)
 # ── 常量 ────────────────────────────────────────────────────────────
 REDIS_FLIGHT_PLAN_KEY = "BIZ_DATA:UAV_ROUTE"
 REDIS_AIRSPACE_KEY = "BIZ_DATA:AIRSPACE"
-KAFKA_UAV_DATA_TOPIC = "uav_runtime_data"
+KAFKA_UAV_DATA_TOPIC = "uav_runtime_data_1"
 KAFKA_TRACE_TOPIC = "uav_runtime_trace"
 
 # ── 遥测字段默认值（与现有 main.py / run_plan.py 一致） ─────────────

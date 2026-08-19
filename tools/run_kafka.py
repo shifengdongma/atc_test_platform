@@ -24,7 +24,7 @@ REDIS_ROUTE_JSON_PATH = os.path.join(MOCK_DIR, "redis_route.json")
 KAFKA_DATA_JSON_PATH = os.path.join(MOCK_DIR, "kafka_data.json")
 REDIS_TRACE_JSON_PATH = os.path.join(MOCK_DIR, "simulation_traces", "redis_trace.json")
 
-kafka_uav_data_topic = 'uav_runtime_data'
+kafka_uav_data_topic = 'uav_runtime_data_1'
 uav_runtime_trace_topic = 'uav_runtime_trace'
 redis_flight_plan_key = "BIZ_DATA:UAV_ROUTE"
 

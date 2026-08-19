@@ -26,7 +26,7 @@ import env as _env
 
 REDIS_FLIGHT_PLAN_KEY = "BIZ_DATA:UAV_ROUTE"
 REDIS_TELEMETRY_KEY = "BIZ_DATA:UAV_TELEMETRY"  # dynamic 模式遥测桥接
-KAFKA_UAV_DATA_TOPIC = "uav_runtime_data"
+KAFKA_UAV_DATA_TOPIC = "uav_runtime_data_1"
 KAFKA_TRACE_TOPIC = "uav_runtime_trace"
 FETCH_INTERVAL_SEC = 60.0
 TICK_INTERVAL_SEC = 1.0

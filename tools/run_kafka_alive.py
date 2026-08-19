@@ -22,7 +22,7 @@ from env import redis_ip, redis_port, redis_password, kafka_url
 MOCK_DIR = os.path.join(_root, "data", "mock")
 REDIS_ROUTE_JSON_PATH = os.path.join(MOCK_DIR, "redis_route.json")
 KAFKA_DATA_JSON_PATH = os.path.join(MOCK_DIR, "kafka_data.json")
-kafka_uav_data_topic = 'uav_runtime_data'
+kafka_uav_data_topic = 'uav_runtime_data_1'
 uav_runtime_trace_topic = 'uav_runtime_trace'
 redis_flight_plan_key = "BIZ_DATA:UAV_ROUTE"
 

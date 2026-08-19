@@ -139,7 +139,7 @@ class LogStreamer:
 
     # ── Kafka 遥测计数 ──────────────────────────────────────────────
 
-    def report_redis_telemetry(self, count: int, topic: str = "uav_runtime_data") -> None:
+    def report_redis_telemetry(self, count: int, topic: str = "uav_runtime_data_1") -> None:
         """报告 Redis 消息发送计数（由 SimulationManager 回调）。"""
         if count > 0:
             self.push("redis_telemetry", f"发送 {count} 条遥测到 {topic}")
